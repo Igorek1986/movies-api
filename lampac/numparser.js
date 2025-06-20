@@ -1,6 +1,6 @@
 (function () {
     var SOURCE_NAME = 'NUMParser';
-    var BASE_URL = 'http://localhost:38888/';
+    var BASE_URL = 'https://numparser.igorek1986.ru/';
 
     var CATEGORIES = {
         k4: 'lampac_movies_4k',
