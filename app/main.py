@@ -4,12 +4,14 @@ import gzip
 import os
 from fastapi import Response
 from math import ceil
+from pathlib import Path
 
 app = FastAPI()
 
 
 def load_data(category: str):
-    path = f"releases/{category}.json"
+    home_path = Path.home()
+    path = home_path / f"releases/{category}.json"
     with gzip.open(path, "rt") as f:
         return json.load(f)
 
