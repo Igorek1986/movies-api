@@ -1,0 +1,23 @@
+[Unit]
+Description=Movies API Service
+After=network.target redis-server.service
+
+[Service]
+User=your_username  # Замените на ваше имя пользователя
+Group=your_username # Обычно совпадает с User
+WorkingDirectory=/home/your_username/movies-api
+
+# Путь к Poetry и Python (если Poetry установлен глобально)
+Environment="PATH=/home/your_username/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Если используете виртуальное окружение Poetry:
+ExecStart=/usr/bin/poetry run uvicorn app.main:app --host 0.0.0.0 --port 38888
+
+# Если используете venv напрямую (без Poetry):
+# ExecStart=/home/your_username/movies-api/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 38888
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
