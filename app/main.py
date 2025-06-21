@@ -1,12 +1,24 @@
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 import json
 import gzip
 import os
-from fastapi import Response
 from math import ceil
 from pathlib import Path
 
 app = FastAPI()
+
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def load_data(category: str):
@@ -21,12 +33,7 @@ async def get_movie(
     category: str,
     page: int = 1,
     per_page: int = 20,
-    response: Response = None,
 ):
-    # Устанавливаем CORS заголовки
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
 
     all_data = load_data(category)
     total_results = len(all_data)
