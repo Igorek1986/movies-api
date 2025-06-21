@@ -6,10 +6,13 @@ authors = [
     {name = "Igor Ponomarev",email = "9129910001@mail.ru"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<=3.13"
 dependencies = [
     "fastapi (>=0.115.13,<0.116.0)",
-    "uvicorn (>=0.34.3,<0.35.0)"
+    "uvicorn (>=0.34.3,<0.35.0)",
+    "watchdog (>=6.0.0,<7.0.0)",
+    "redis (>=6.2.0,<7.0.0)",
+    "fastapi-cache (>=0.1.0,<0.2.0)",
 ]
 
 
