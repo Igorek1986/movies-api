@@ -20,6 +20,12 @@ poetry completions zsh > $ZSH_CUSTOM/plugins/poetry/_poetry
 ```bash
 sudo apt update
 sudo apt install -y redis-server nginx git
+
+sudo sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf
+sudo sed -i 's/^# maxmemory .*/maxmemory 256mb/' /etc/redis/redis.conf
+sudo sed -i 's/^# maxmemory-policy .*/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
+
+sudo systemctl restart redis
 ```
 2. Склонируйте репозиторий:
 ```bash
