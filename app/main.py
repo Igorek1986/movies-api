@@ -14,10 +14,10 @@ from logging import DEBUG, INFO
 import aiofiles
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -396,32 +396,21 @@ async def get_cache_path():
     }
 
 
-# Добавляем эндпоинты для управления кэшем
 @app.post("/cache/clear")
-async def clear_cache(
-    password: str = Header(..., description="Пароль для очистки кэша"),
-    correct_password: str = Depends(get_clear_cache_password),
-):
-    """
-    Очищает кэш TMDB. Требует пароль.
+async def clear_cache(x_password: str = Header(..., alias="X-Password")):
+    """Очистка кэша с проверкой пароля"""
+    correct_password = os.getenv("CACHE_CLEAR_PASSWORD")
 
-    Пароль должен быть передан в заголовке:
-    X-Password: ваш_пароль
-    """
-    if password != correct_password:
-        logger.warning("Попытка очистки кэша с неверным паролем")
-        raise HTTPException(status_code=403, detail="Неверный пароль для очистки кэша")
+    if not correct_password or x_password != correct_password:
+        return PlainTextResponse(
+            "Неверный пароль для очистки кэша\n", status_code=status.HTTP_403_FORBIDDEN
+        )
 
     global tmdb_cache
     tmdb_cache = {}
     await save_cache_to_file(tmdb_cache)
-    logger.info("Кэш успешно очищен")
 
-    return {
-        "status": "success",
-        "message": "Кэш TMDB очищен",
-        "cleared_entries": len(tmdb_cache),
-    }
+    return PlainTextResponse("Кэш успешно очищен\n", status_code=200)
 
 
 @app.get("/cache/info")
