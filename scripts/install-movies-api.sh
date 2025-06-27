@@ -123,7 +123,7 @@ function setup_project {
     # Clone repository if not already present
     if [ ! -d ".git" ]; then
         echo -e "${YELLOW}Cloning repository...${NC}"
-        git clone https://github.com/your-repository/movies-api.git . || error_exit "Failed to clone repository"
+        git clone https://github.com/Igorek1986/movies-api.git . || error_exit "Failed to clone repository"
     fi
 
     poetry install --no-root || error_exit "Failed to install dependencies"
