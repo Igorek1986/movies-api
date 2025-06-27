@@ -6,7 +6,7 @@
     var CACHE_TIME = 1000 * 60 * 60 * 3; //3h
     var cache = {};
 
-    var BASE_URL = 'https://numparser.igorek1986.ru/';
+    var BASE_URL = 'https://numparser.igorek1986.ru';
 
         // Настройки видимости групп годов
     var currentYear = new Date().getFullYear();
