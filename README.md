@@ -18,9 +18,8 @@ poetry completions zsh > $ZSH_CUSTOM/plugins/poetry/_poetry
 
 ####  Установка
 ```bash
-curl https://raw.githubusercontent.com/Igorek1986/movies-api/refs/heads/main/scripts/install-movies-api.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/install-movies-api.sh)
 ```
-
 
 1. Поместите JSON-файлы в ~/releases/
 ```bash
@@ -28,7 +27,7 @@ cd ~/releases/
 ```
 #### Удаление
 ```bash
-curl https://raw.githubusercontent.com/Igorek1986/movies-api/refs/heads/main/scripts/uninstall-movies-api.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/uninstall-movies-api.sh)
 ```
 
 ```bash
