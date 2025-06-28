@@ -42,21 +42,26 @@ function get_shell_config {
 }
 
 function check_pyenv_installed {
-    # 1. Проверяем наличие pyenv в PATH и работоспособность
-    if command -v pyenv >/dev/null 2>&1 && pyenv version >/dev/null 2>&1; then
+    # Проверяем наличие pyenv в PATH и работоспособность
+    if command -v pyenv >/dev/null 2>&1; then
         echo -e "${GREEN}pyenv is properly installed and functional${NC}"
         echo -e "  Version: $(pyenv --version 2>/dev/null || echo 'unknown')"
         return 0
     fi
 
-    # 2. Если pyenv не в PATH, но есть каталог ~/.pyenv
+    # Если pyenv не в PATH, но есть каталог ~/.pyenv
     if [ -d "$USER_HOME/.pyenv" ]; then
-        # 3. Проверяем есть ли установленные Python-версии
+        # Проверяем есть ли установленные Python-версии
         if [ -d "$USER_HOME/.pyenv/versions" ] && [ -n "$(ls -A "$USER_HOME/.pyenv/versions")" ]; then
             echo -e "${YELLOW}Found existing pyenv installation with Python versions${NC}"
-            return 1
+            # Добавляем pyenv в PATH временно
+            export PYENV_ROOT="$USER_HOME/.pyenv"
+            export PATH="$PYENV_ROOT/bin:$PATH"
+            eval "$(pyenv init --path)"
+            eval "$(pyenv init -)"
+            return 0
         else
-            # 4. Если Python-версий нет - чистим старую установку
+            # Если Python-версий нет - чистим старую установку
             echo -e "${YELLOW}Removing broken pyenv installation...${NC}"
             rm -rf "$USER_HOME/.pyenv"
             return 1
@@ -72,6 +77,8 @@ function check_poetry_installed {
         return 0
     elif [ -f "$USER_HOME/.local/bin/poetry" ]; then
         echo -e "${GREEN}Poetry is installed in ~/.local/bin${NC}"
+        # Добавляем Poetry в PATH временно
+        export PATH="$USER_HOME/.local/bin:$PATH"
         return 0
     else
         return 1
@@ -87,7 +94,7 @@ function install_pyenv {
     curl -sSL https://pyenv.run | bash || error_exit "Failed to install pyenv"
 
     local SHELL_CONFIG=$(get_shell_config)
-    
+
     # Add pyenv to shell configuration
     if ! grep -q "pyenv init" "$SHELL_CONFIG"; then
         cat <<EOF >> "$SHELL_CONFIG"
@@ -100,7 +107,7 @@ eval "\$(pyenv virtualenv-init -)"
 EOF
     fi
 
-    # Source the configuration
+    # Source the configuration immediately
     export PYENV_ROOT="$USER_HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
     eval "$(pyenv init --path)"
@@ -121,14 +128,15 @@ function install_poetry {
 
     echo -e "${YELLOW}Installing Poetry...${NC}"
     curl -sSL https://install.python-poetry.org | python3 - || error_exit "Failed to install Poetry"
-    
+
+    # Add Poetry to PATH immediately
+    export PATH="$USER_HOME/.local/bin:$PATH"
+
     # Add Poetry to PATH in the appropriate shell config
     local SHELL_CONFIG=$(get_shell_config)
     if ! grep -q ".local/bin" "$SHELL_CONFIG"; then
         echo "export PATH=\"$USER_HOME/.local/bin:\$PATH\"" >> "$SHELL_CONFIG"
     fi
-    
-    export PATH="$USER_HOME/.local/bin:$PATH"
 }
 
 function setup_project {
@@ -164,10 +172,10 @@ function setup_env_file {
 
     # Всегда генерируем новый пароль для безопасности
     configure_cache_password
-    
+
     # Всегда проверяем настройки релизов
     configure_releases_dir
-    
+
     # Всегда предлагаем настройку токена
     setup_tmdb_token
 }
@@ -178,12 +186,12 @@ function ensure_env_parameters {
         echo -e "${YELLOW}Adding missing CACHE_CLEAR_PASSWORD...${NC}"
         echo "CACHE_CLEAR_PASSWORD=''" >> .env
     fi
-    
+
     if ! grep -q "^RELEASES_DIR=" .env; then
         echo -e "${YELLOW}Adding missing RELEASES_DIR...${NC}"
         echo "RELEASES_DIR='releases/'" >> .env
     fi
-    
+
     if ! grep -q "^TMDB_TOKEN=" .env; then
         echo -e "${YELLOW}Adding missing TMDB_TOKEN...${NC}"
         echo "TMDB_TOKEN='Bearer TOKEN'" >> .env
@@ -192,7 +200,7 @@ function ensure_env_parameters {
 
 function create_env_file_from_template {
     echo -e "${YELLOW}Creating .env configuration file...${NC}"
-    
+
     if [ -f ".env.template" ]; then
         cp .env.template .env
     else
@@ -204,7 +212,7 @@ function create_env_file_from_template {
 function configure_cache_password {
     # Проверяем текущий пароль
     local current_pass=$(grep -oP "^CACHE_CLEAR_PASSWORD='?\K[^']*" .env 2>/dev/null)
-    
+
     # Если пароль дефолтный (PASSWORD) или отсутствует - генерируем новый автоматически
     if [[ "$current_pass" == "PASSWORD" || -z "$current_pass" ]]; then
         local new_pass=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 12)
@@ -227,14 +235,14 @@ function configure_releases_dir {
 function setup_tmdb_token {
     echo -e "\n${GREEN}=== TMDB Token Configuration ==="
     echo -e "==============================${NC}"
-    
+
     local current_token=$(grep -oP "TMDB_TOKEN='\K[^']*" .env 2>/dev/null || echo "Bearer TOKEN")
-    
+
     # Проверка валидности токена
     if [[ "$current_token" == "Bearer TOKEN" || ! "$current_token" =~ ^Bearer\ [^[:space:]]+$ ]]; then
         echo -e "${YELLOW}Current token: ${current_token}${NC}"
         echo -e "${RED}Warning: Invalid or default token detected${NC}"
-        
+
         if confirm "Update token now? (y/N) " "n"; then
             prompt_tmdb_token
         else
@@ -280,51 +288,9 @@ function prompt_tmdb_token {
     done
 }
 
-
-function validate_tmdb_token {
-    local token="$1"
-    local valid=true
-    
-    # Проверяем что токен начинается с Bearer и пробела
-    if [[ ! "$token" =~ ^Bearer[[:space:]] ]]; then
-        echo -e "${RED}Error: Token must start with 'Bearer ' (with space)${NC}"
-        valid=false
-    fi
-    
-    # Проверяем что после Bearer есть хотя бы один символ
-    if [[ "$token" == "Bearer " || "$token" == "Bearer" ]]; then
-        echo -e "${RED}Error: Token value is missing after 'Bearer'${NC}"
-        valid=false
-    fi
-    
-    # Проверяем что нет дополнительных пробелов в самом токене
-    if [[ "$token" =~ ^Bearer[[:space:]].*[[:space:]] ]]; then
-        echo -e "${RED}Error: Token must not contain spaces after the initial 'Bearer '${NC}"
-        valid=false
-    fi
-    
-    if ! $valid; then
-        echo -e "${YELLOW}Example valid token format: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...${NC}"
-        echo -e "${YELLOW}Note: The token part should not contain any spaces${NC}"
-    fi
-    
-    $valid
-}
-
-function save_tmdb_token {
-    local token="$1"
-    sed -i "s|TMDB_TOKEN='Bearer TOKEN'|TMDB_TOKEN='${token}'|" .env
-    echo -e "${GREEN}TMDB Token saved successfully!${NC}"
-}
-
-function show_tmdb_token_instructions {
-    echo -e "${YELLOW}You can add TMDB Token later in:${NC}"
-    echo -e "$PROJECT_DIR/.env"
-    echo -e "${YELLOW}Modify the line:${NC}"
-    echo -e "TMDB_TOKEN='Bearer TOKEN'"
-}
-
 function install_dependencies {
+    # Убедимся, что Poetry доступен
+    export PATH="$USER_HOME/.local/bin:$PATH"
     poetry install --no-root || error_exit "Failed to install dependencies"
 }
 
