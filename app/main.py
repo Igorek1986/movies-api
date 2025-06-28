@@ -22,6 +22,16 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 # Загрузка переменных окружения
 load_dotenv()
 TMDB_TOKEN = os.getenv("TMDB_TOKEN")
+# RELEASES_DIR = Path.home() / os.getenv("RELEASES_DIR", "NUMParser/public")
+# HOME_PATH = Path.home()
+# Получаем путь из переменной окружения
+releases_dir_env = os.getenv("RELEASES_DIR", "NUMParser/public")
+
+# Проверяем, абсолютный ли путь
+if os.path.isabs(releases_dir_env):
+    RELEASES_DIR = Path(releases_dir_env)
+else:
+    RELEASES_DIR = Path.home() / releases_dir_env
 
 # Получаем путь к директории, где находится текущий скрипт
 BASE_DIR = Path(__file__).parent.parent
@@ -51,6 +61,11 @@ async def lifespan(app: FastAPI):
     # Логируем первые 5 ключей для проверки
     sample_keys = list(tmdb_cache.keys())[:5]
     logger.debug(f"Пример ключей в кэше: {sample_keys}")
+
+    # Добавьте проверку путей
+    logger.info(f"Рабочая директория: {BASE_DIR}")
+    logger.info(f"Директория с релизами: {RELEASES_DIR}")
+    logger.info(f"Файл кэша: {CACHE_FILE}")
 
     yield  # Приложение работает
 
@@ -179,10 +194,10 @@ def get_quality_text(video_quality: int) -> str:
 
 def load_data(category: str):
     """Загружает данные из файла в releases/"""
-    home_path = Path.home()
+    # home_path = Path.home()
     # path = home_path / f"releases/{category}.json"
     releases_dir = os.getenv("RELEASES_DIR", "code/NUMParser/public")
-    path = home_path / releases_dir / f"{category}.json"
+    path = RELEASES_DIR / f"{category}.json"
 
     try:
         with gzip.open(path, "rt") as f:
