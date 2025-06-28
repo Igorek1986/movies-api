@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Version: 1.1.0
+# Last Updated: 2024-06-20
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
