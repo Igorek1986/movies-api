@@ -30,6 +30,8 @@ cd ~/releases/
 bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/uninstall-movies-api.sh)
 ```
 
+
+#### Изменение папки в env. Перейти в нужную папку и выполнить команду. Псоле перезагрузить приложение. 
 ```bash
 RELEASES_DIR=$(pwd | sed "s|$HOME/||") && \
 if [ -f ~/movies-api/.env ]; then \
