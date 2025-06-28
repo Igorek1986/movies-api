@@ -44,6 +44,8 @@ function reload_shell {
     echo -e "${YELLOW}\nChanges to PATH and environment variables require a shell reload.${NC}"
     if confirm "Would you like to reload the shell now? (Y/n) " "y"; then
         echo -e "${GREEN}Reloading shell...${NC}"
+        # Переходим в домашний каталог перед перезагрузкой
+        cd ~ || cd /tmp
         exec $SHELL -l
     else
         echo -e "${YELLOW}Please manually reload your shell or run:${NC}"
