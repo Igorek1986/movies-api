@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Version: 1.1.0
-# Last Updated: 2024-06-20
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,6 +19,8 @@ fi
 
 PROJECT_DIR="$USER_HOME/movies-api"
 DEFAULT_PORT=8888
+PYTHON_MIN_VERSION=3.10
+USE_PYENV=false
 
 function error_exit {
     echo -e "${RED}Error: $1${NC}" >&2
@@ -41,6 +40,26 @@ function get_shell_config {
         else
             echo "$USER_HOME/.bashrc"
         fi
+    fi
+}
+
+function check_system_python {
+    echo -e "${YELLOW}Checking system Python...${NC}"
+
+    if command -v python3 &>/dev/null; then
+        local python_version=$(python3 -c "import sys; print('{}.{}'.format(sys.version_info.major, sys.version_info.minor))")
+        local version_ok=$(python3 -c "import sys; print(1 if sys.version_info >= (3, 10) else 0)")
+
+        if [ "$version_ok" -eq 1 ]; then
+            echo -e "${GREEN}Found Python ${python_version} (meets minimum requirement ${PYTHON_MIN_VERSION}+)${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}Found Python ${python_version} (below minimum requirement ${PYTHON_MIN_VERSION}+)${NC}"
+            return 1
+        fi
+    else
+        echo -e "${YELLOW}Python 3 not found in system${NC}"
+        return 1
     fi
 }
 
@@ -118,10 +137,25 @@ EOF
     eval "$(pyenv virtualenv-init -)"
 }
 
-function install_python {
-    echo -e "${YELLOW}Installing Python 3.13.5...${NC}"
+function install_python_with_pyenv {
+    echo -e "${YELLOW}Installing Python 3.13.5 using pyenv...${NC}"
     pyenv install 3.13.5 --skip-existing || error_exit "Failed to install Python 3.13.5"
     pyenv global 3.13.5
+}
+
+function install_python_system {
+    echo -e "${YELLOW}Using system Python...${NC}"
+
+    if ! check_system_python; then
+        echo -e "${RED}System Python doesn't meet requirements${NC}"
+        if confirm "Install Python using pyenv instead? (Y/n) " "y"; then
+            USE_PYENV=true
+            install_pyenv
+            install_python_with_pyenv
+        else
+            error_exit "Python ${PYTHON_MIN_VERSION}+ is required"
+        fi
+    fi
 }
 
 function install_poetry {
@@ -130,7 +164,15 @@ function install_poetry {
     fi
 
     echo -e "${YELLOW}Installing Poetry...${NC}"
-    curl -sSL https://install.python-poetry.org | python3 - || error_exit "Failed to install Poetry"
+
+    if $USE_PYENV; then
+        # Используем Python из pyenv
+        export PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
+        curl -sSL https://install.python-poetry.org | python3 - || error_exit "Failed to install Poetry"
+    else
+        # Используем системный Python
+        curl -sSL https://install.python-poetry.org | python3 - || error_exit "Failed to install Poetry"
+    fi
 
     # Add Poetry to PATH immediately
     export PATH="$USER_HOME/.local/bin:$PATH"
@@ -307,6 +349,15 @@ function setup_systemd {
 
     # Create service file
     SERVICE_FILE="/etc/systemd/system/movies-api.service"
+
+    # Определяем путь к Python в зависимости от способа установки
+    local python_path
+    if $USE_PYENV; then
+        python_path="$USER_HOME/.pyenv/shims/python"
+    else
+        python_path=$(which python3)
+    fi
+
     sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Movies API Service
@@ -335,7 +386,7 @@ EOF
 # Main installation process
 echo -e "${GREEN}Starting Movies API installation...${NC}"
 
-# Install dependencies
+# Install system dependencies
 if $IS_ROOT; then
     apt-get update && apt-get install -y git curl make build-essential libssl-dev zlib1g-dev \
     libbz2-dev libreadline-dev libsqlite3-dev wget llvm libncurses5-dev libncursesw5-dev \
@@ -346,8 +397,23 @@ else
     xz-utils tk-dev libffi-dev liblzma-dev python3-openssl || error_exit "Failed to install system dependencies"
 fi
 
-install_pyenv
-install_python
+# Check Python and decide whether to use pyenv
+if check_system_python; then
+    echo -e "${GREEN}System Python meets requirements${NC}"
+    if confirm "Would you like to use pyenv for Python management anyway? (y/N) " "n"; then
+        USE_PYENV=true
+        install_pyenv
+        install_python_with_pyenv
+    else
+        install_python_system
+    fi
+else
+    echo -e "${YELLOW}System Python doesn't meet requirements or not found${NC}"
+    USE_PYENV=true
+    install_pyenv
+    install_python_with_pyenv
+fi
+
 install_poetry
 setup_project
 setup_systemd
