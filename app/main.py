@@ -194,9 +194,6 @@ def get_quality_text(video_quality: int) -> str:
 
 def load_data(category: str):
     """Загружает данные из файла в releases/"""
-    # home_path = Path.home()
-    # path = home_path / f"releases/{category}.json"
-    releases_dir = os.getenv("RELEASES_DIR", "code/NUMParser/public")
     path = RELEASES_DIR / f"{category}.json"
 
     try:
@@ -441,84 +438,3 @@ async def cache_info():
         "cache_size_mb": round(cache_size_mb, 2),
         "sample_keys": list(tmdb_cache.keys())[:5],
     }
-
-
-# @app.post("/cache/refresh")
-# async def refresh_cache(category: str = "all"):
-#     """
-#     Запускает принудительное обновление кеша TMDB
-#     Параметры:
-#     - category: категория для обновления ('all', 'movies', 'tv')
-#     """
-#     try:
-#         logger.debug(
-#             f"Запущено принудительное обновление кеша для категории: {category}"
-#         )
-#
-#         home_path = Path.home()
-#         releases_path = home_path / "releases"
-#
-#         # Определяем какие файлы будем обрабатывать
-#         files_to_process = []
-#         if category == "all":
-#             # Получаем все json файлы в директории releases
-#             files_to_process = list(releases_path.glob("*.json"))
-#         else:
-#             # Ищем конкретный файл
-#             file_path = releases_path / f"{category}.json"
-#             if file_path.exists():
-#                 files_to_process = [file_path]
-#
-#         if not files_to_process:
-#             return {"status": "error", "message": "Не найдены файлы для обработки"}
-#
-#         requests_list = []
-#         processed_files = 0
-#
-#         for file_path in files_to_process:
-#             # Пропускаем lampac файлы
-#             if file_path.name.startswith("lampac_"):
-#                 continue
-#
-#             try:
-#                 # Загружаем данные из файла
-#                 with gzip.open(file_path, "rt") as f:
-#                     data = json.load(f)
-#
-#                 items = data.get("items", []) if isinstance(data, dict) else data
-#
-#                 for item in items:
-#                     if isinstance(item, dict) and "media_type" in item and "id" in item:
-#                         requests_list.append((item["media_type"], item["id"]))
-#
-#                 processed_files += 1
-#                 logger.debug(
-#                     f"Обработан файл: {file_path.name}, найдено {len(items)} элементов"
-#                 )
-#
-#             except Exception as e:
-#                 logger.error(f"Ошибка при обработке файла {file_path.name}: {str(e)}")
-#                 continue
-#
-#         if not requests_list:
-#             return {"status": "success", "message": "Нет данных для обновления"}
-#
-#         logger.debug(f"Всего найдено {len(requests_list)} элементов для обновления")
-#
-#         # Выполняем пакетные запросы
-#         await fetch_tmdb_batch(requests_list)
-#
-#         return {
-#             "status": "success",
-#             "message": f"Кеш обновлен. Обработано {processed_files} файлов, добавлено {len(requests_list)} записей",
-#         }
-#
-#     except Exception as e:
-#         logger.error(f"Ошибка при обновлении кеша: {str(e)}", exc_info=True)
-#         return JSONResponse(
-#             status_code=500,
-#             content={
-#                 "status": "error",
-#                 "message": f"Ошибка при обновлении кеша: {str(e)}",
-#             },
-#         )
