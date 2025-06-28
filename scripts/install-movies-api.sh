@@ -21,10 +21,21 @@ PROJECT_DIR="$USER_HOME/movies-api"
 DEFAULT_PORT=8888
 PYTHON_MIN_VERSION=3.10
 USE_PYENV=false
+NEED_RELOAD=false
 
 function error_exit {
     echo -e "${RED}Error: $1${NC}" >&2
     exit 1
+}
+
+function confirm {
+    local prompt="$1"
+    local default="${2:-n}"
+    read -p "$prompt" response
+    case "${response:-$default}" in
+        [Yy]*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 function get_shell_config {
@@ -40,6 +51,24 @@ function get_shell_config {
         else
             echo "$USER_HOME/.bashrc"
         fi
+    fi
+}
+
+function check_path {
+    if [[ ":$PATH:" != *":$USER_HOME/.local/bin:"* ]] ||
+       [[ "$USE_PYENV" == "true" && ":$PATH:" != *":$USER_HOME/.pyenv/bin:"* ]]; then
+        NEED_RELOAD=true
+    fi
+}
+
+function reload_shell {
+    echo -e "${YELLOW}\nChanges to PATH and environment variables require a shell reload.${NC}"
+    if confirm "Would you like to reload the shell now? (Y/n) " "y"; then
+        echo -e "${GREEN}Reloading shell...${NC}"
+        exec $SHELL -l
+    else
+        echo -e "${YELLOW}Please manually reload your shell or run:${NC}"
+        echo -e "  source $(get_shell_config)"
     fi
 }
 
@@ -64,26 +93,21 @@ function check_system_python {
 }
 
 function check_pyenv_installed {
-    # Проверяем наличие pyenv в PATH и работоспособность
     if command -v pyenv >/dev/null 2>&1; then
         echo -e "${GREEN}pyenv is properly installed and functional${NC}"
         echo -e "  Version: $(pyenv --version 2>/dev/null || echo 'unknown')"
         return 0
     fi
 
-    # Если pyenv не в PATH, но есть каталог ~/.pyenv
     if [ -d "$USER_HOME/.pyenv" ]; then
-        # Проверяем есть ли установленные Python-версии
         if [ -d "$USER_HOME/.pyenv/versions" ] && [ -n "$(ls -A "$USER_HOME/.pyenv/versions")" ]; then
             echo -e "${YELLOW}Found existing pyenv installation with Python versions${NC}"
-            # Добавляем pyenv в PATH временно
             export PYENV_ROOT="$USER_HOME/.pyenv"
             export PATH="$PYENV_ROOT/bin:$PATH"
             eval "$(pyenv init --path)"
             eval "$(pyenv init -)"
             return 0
         else
-            # Если Python-версий нет - чистим старую установку
             echo -e "${YELLOW}Removing broken pyenv installation...${NC}"
             rm -rf "$USER_HOME/.pyenv"
             return 1
@@ -99,7 +123,6 @@ function check_poetry_installed {
         return 0
     elif [ -f "$USER_HOME/.local/bin/poetry" ]; then
         echo -e "${GREEN}Poetry is installed in ~/.local/bin${NC}"
-        # Добавляем Poetry в PATH временно
         export PATH="$USER_HOME/.local/bin:$PATH"
         return 0
     else
@@ -117,7 +140,6 @@ function install_pyenv {
 
     local SHELL_CONFIG=$(get_shell_config)
 
-    # Add pyenv to shell configuration
     if ! grep -q "pyenv init" "$SHELL_CONFIG"; then
         cat <<EOF >> "$SHELL_CONFIG"
 # Pyenv configuration
@@ -129,12 +151,11 @@ eval "\$(pyenv virtualenv-init -)"
 EOF
     fi
 
-    # Source the configuration immediately
     export PYENV_ROOT="$USER_HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
     eval "$(pyenv init --path)"
     eval "$(pyenv init -)"
-    eval "$(pyenv virtualenv-init -)"
+    NEED_RELOAD=true
 }
 
 function install_python_with_pyenv {
@@ -166,30 +187,18 @@ function install_poetry {
     echo -e "${YELLOW}Installing Poetry...${NC}"
 
     if $USE_PYENV; then
-        # Используем Python из pyenv
         export PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
         curl -sSL https://install.python-poetry.org | python3 - || error_exit "Failed to install Poetry"
     else
-        # Используем системный Python
         curl -sSL https://install.python-poetry.org | python3 - || error_exit "Failed to install Poetry"
     fi
 
-    # Add Poetry to PATH immediately
     export PATH="$USER_HOME/.local/bin:$PATH"
-
-    # Add Poetry to PATH in the appropriate shell config
     local SHELL_CONFIG=$(get_shell_config)
     if ! grep -q ".local/bin" "$SHELL_CONFIG"; then
         echo "export PATH=\"$USER_HOME/.local/bin:\$PATH\"" >> "$SHELL_CONFIG"
+        NEED_RELOAD=true
     fi
-}
-
-function setup_project {
-    echo -e "${YELLOW}Setting up project...${NC}"
-    create_project_dir
-    clone_repository
-    setup_env_file
-    install_dependencies
 }
 
 function create_project_dir {
@@ -204,29 +213,7 @@ function clone_repository {
     fi
 }
 
-function setup_env_file {
-    # Создаем или используем существующий .env файл
-    if [ ! -f ".env" ]; then
-        echo -e "${YELLOW}Creating new .env file from template...${NC}"
-        create_env_file_from_template
-    else
-        echo -e "${GREEN}Using existing .env file${NC}"
-        # Для существующего файла проверяем обязательные параметры
-        ensure_env_parameters
-    fi
-
-    # Всегда генерируем новый пароль для безопасности
-    configure_cache_password
-
-    # Всегда проверяем настройки релизов
-    configure_releases_dir
-
-    # Всегда предлагаем настройку токена
-    setup_tmdb_token
-}
-
 function ensure_env_parameters {
-    # Добавляем отсутствующие обязательные параметры
     if ! grep -q "^CACHE_CLEAR_PASSWORD=" .env; then
         echo -e "${YELLOW}Adding missing CACHE_CLEAR_PASSWORD...${NC}"
         echo "CACHE_CLEAR_PASSWORD=''" >> .env
@@ -255,10 +242,8 @@ function create_env_file_from_template {
 }
 
 function configure_cache_password {
-    # Проверяем текущий пароль
     local current_pass=$(grep -oP "^CACHE_CLEAR_PASSWORD='?\K[^']*" .env 2>/dev/null)
 
-    # Если пароль дефолтный (PASSWORD) или отсутствует - генерируем новый автоматически
     if [[ "$current_pass" == "PASSWORD" || -z "$current_pass" ]]; then
         local new_pass=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 12)
         if grep -q "^CACHE_CLEAR_PASSWORD=" .env; then
@@ -275,41 +260,6 @@ function configure_cache_password {
 function configure_releases_dir {
     local REL_PATH="releases/"
     sed -i "s|RELEASES_DIR=.*|RELEASES_DIR=${REL_PATH}|" .env
-}
-
-function setup_tmdb_token {
-    echo -e "\n${GREEN}=== TMDB Token Configuration ==="
-    echo -e "==============================${NC}"
-
-    local current_token=$(grep -oP "TMDB_TOKEN='\K[^']*" .env 2>/dev/null || echo "Bearer TOKEN")
-
-    # Проверка валидности токена
-    if [[ "$current_token" == "Bearer TOKEN" || ! "$current_token" =~ ^Bearer\ [^[:space:]]+$ ]]; then
-        echo -e "${YELLOW}Current token: ${current_token}${NC}"
-        echo -e "${RED}Warning: Invalid or default token detected${NC}"
-
-        if confirm "Update token now? (y/N) " "n"; then
-            prompt_tmdb_token
-        else
-            echo -e "${YELLOW}You must update the token later in:${NC}"
-            echo -e "${PROJECT_DIR}/.env"
-        fi
-    else
-        echo -e "${GREEN}Valid token already configured${NC}"
-        if confirm "Update existing token? (y/N) " "n"; then
-            prompt_tmdb_token
-        fi
-    fi
-}
-
-function confirm {
-    local prompt="$1"
-    local default="${2:-n}"
-    read -p "$prompt" response
-    case "${response:-$default}" in
-        [Yy]*) return 0 ;;
-        *) return 1 ;;
-    esac
 }
 
 function prompt_tmdb_token {
@@ -333,24 +283,57 @@ function prompt_tmdb_token {
     done
 }
 
+function setup_tmdb_token {
+    echo -e "\n${GREEN}=== TMDB Token Configuration ==="
+    echo -e "==============================${NC}"
+
+    local current_token=$(grep -oP "TMDB_TOKEN='\K[^']*" .env 2>/dev/null || echo "Bearer TOKEN")
+
+    if [[ "$current_token" == "Bearer TOKEN" || ! "$current_token" =~ ^Bearer\ [^[:space:]]+$ ]]; then
+        echo -e "${YELLOW}Current token: ${current_token}${NC}"
+        echo -e "${RED}Warning: Invalid or default token detected${NC}"
+
+        if confirm "Update token now? (y/N) " "n"; then
+            prompt_tmdb_token
+        else
+            echo -e "${YELLOW}You must update the token later in:${NC}"
+            echo -e "${PROJECT_DIR}/.env"
+        fi
+    else
+        echo -e "${GREEN}Valid token already configured${NC}"
+        if confirm "Update existing token? (y/N) " "n"; then
+            prompt_tmdb_token
+        fi
+    fi
+}
+
+function setup_env_file {
+    if [ ! -f ".env" ]; then
+        echo -e "${YELLOW}Creating new .env file from template...${NC}"
+        create_env_file_from_template
+    else
+        echo -e "${GREEN}Using existing .env file${NC}"
+        ensure_env_parameters
+    fi
+
+    configure_cache_password
+    configure_releases_dir
+    setup_tmdb_token
+}
+
 function install_dependencies {
-    # Убедимся, что Poetry доступен
     export PATH="$USER_HOME/.local/bin:$PATH"
     poetry install --no-root || error_exit "Failed to install dependencies"
 }
 
 function setup_systemd {
-    # Ask for port number
     echo -e "\n${GREEN}=== Service Port Configuration ===${NC}"
     read -p "Enter port number [${DEFAULT_PORT}]: " SERVICE_PORT
     SERVICE_PORT=${SERVICE_PORT:-$DEFAULT_PORT}
 
     echo -e "${YELLOW}Configuring systemd service on port ${SERVICE_PORT}...${NC}"
 
-    # Create service file
     SERVICE_FILE="/etc/systemd/system/movies-api.service"
-
-    # Определяем путь к Python в зависимости от способа установки
     local python_path
     if $USE_PYENV; then
         python_path="$USER_HOME/.pyenv/shims/python"
@@ -381,6 +364,14 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable movies-api
     sudo systemctl start movies-api
+}
+
+function setup_project {
+    echo -e "${YELLOW}Setting up project...${NC}"
+    create_project_dir
+    clone_repository
+    setup_env_file
+    install_dependencies
 }
 
 # Main installation process
@@ -418,6 +409,9 @@ install_poetry
 setup_project
 setup_systemd
 
+# Check if shell reload is needed
+check_path
+
 # Final instructions
 echo -e "\n${GREEN}=== Installation Completed Successfully! ===${NC}"
 echo -e "Service is running as ${YELLOW}movies-api${NC}"
@@ -431,3 +425,8 @@ echo -e "Project directory: ${YELLOW}${PROJECT_DIR}${NC}"
 echo -e "Environment file: ${YELLOW}${PROJECT_DIR}/.env${NC}"
 echo -e "Releases directory: ${YELLOW}${USER_HOME}/releases/${NC}"
 echo -e "\n${YELLOW}Don't forget to add your JSON files to the releases directory!${NC}"
+
+# Offer to reload shell if needed
+if $NEED_RELOAD; then
+    reload_shell
+fi
