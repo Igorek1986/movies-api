@@ -16,39 +16,36 @@ poetry completions zsh > $ZSH_CUSTOM/plugins/poetry/_poetry
 
 ### Вариант 2: Без Docker (через systemd)
 
-1. Установите зависимости:
+####  Установка
 ```bash
-sudo apt update
-sudo apt install -y redis-server nginx git
+curl https://raw.githubusercontent.com/Igorek1986/movies-api/refs/heads/main/scripts/install-movies-api.sh | bash
+```
 
-sudo sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf
-sudo sed -i 's/^# maxmemory .*/maxmemory 256mb/' /etc/redis/redis.conf
-sudo sed -i 's/^# maxmemory-policy .*/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
 
-sudo systemctl restart redis
-```
-2. Склонируйте репозиторий:
+1. Поместите JSON-файлы в ~/releases/
 ```bash
-git clone https://github.com/Igorek1986/movies-api.git
-cd movies-api
+cd ~/releases/
 ```
-3. Установка зависимостей
+#### Удаление
 ```bash
-cd ~/movies-api
-eval $(poetry env activate)
-poetry install --no-root
+curl https://raw.githubusercontent.com/Igorek1986/movies-api/refs/heads/main/scripts/uninstall-movies-api.sh | bash
 ```
-4. Поместите JSON-файлы в /~/releases/
-5. Настройка systemd службы (Замените пользователя и путь)
+
 ```bash
-sudo cp scripts/movies-api.service /etc/systemd/system/
-sudo vim /etc/systemd/system/movies-api.service
-sudo systemctl daemon-reload
-sudo systemctl start movies-api
-sudo systemctl status movies-api
-sudo systemctl enable movies-api
+RELEASES_DIR=$(pwd | sed "s|$HOME/||") && \
+if [ -f ~/movies-api/.env ]; then \
+    if grep -q "^RELEASES_DIR=" ~/movies-api/.env; then \
+        sed -i "s|^RELEASES_DIR=.*|RELEASES_DIR=$RELEASES_DIR|" ~/movies-api/.env; \
+    else \
+        echo "RELEASES_DIR=$RELEASES_DIR" >> ~/movies-api/.env; \
+    fi; \
+else \
+    echo "RELEASES_DIR=$RELEASES_DIR" > ~/movies-api/.env; \
+fi
 ```
-5. Настройка Nginx
+
+##### Опцианально
+2. Настройка Nginx
 ```bash
 sudo cp nginx/numparser.conf /etc/nginx/sites-available/
 sudo ln -sf /etc/nginx/sites-available/numparser.conf /etc/nginx/sites-enabled/
@@ -62,7 +59,7 @@ sudo nginx -t && sudo systemctl restart nginx
 
 
 ```
-curl http://localhost:8000/movies_id_2025?page=1&per_page=20&language=ru
+curl http://localhost:8888/movies_id_2025?page=1&per_page=20&language=ru
 ```
 Параметры:
 
@@ -85,7 +82,7 @@ curl http://localhost:8000/movies_id_2025?page=1&per_page=20&language=ru
 
 
 ```
-curl http://localhost:8000/
+curl http://localhost:8888/
 ```  
 Ответ:
 
@@ -98,7 +95,7 @@ curl http://localhost:8000/
 
 
 ```
-curl -X POST http://localhost:8000/cache/clear -H "X-Password: ваш_пароль"
+curl -X POST http://localhost:8888/cache/clear -H "X-Password: ваш_пароль"
 ```
 
 Ответ при успехе:
@@ -120,7 +117,7 @@ curl -X POST http://localhost:8000/cache/clear -H "X-Password: ваш_парол
 
 text
 ```
-curl -X GET http://localhost:8000/cache/info
+curl -X GET http://localhost:8888/cache/info
 ```
 Пример ответа:
 
@@ -136,7 +133,7 @@ curl -X GET http://localhost:8000/cache/info
 
 
 ```
-GET curl -X GET http://localhost:8000/cache/path
+GET curl -X GET http://localhost:8888/cache/path
 ```
 Ответ:
 
