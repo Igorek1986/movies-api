@@ -1,22 +1,4 @@
-Установка Poetry
-```Shell
-curl -sSL https://install.python-poetry.org | python3 -
-
-# добавить в zshrc 
-# export PATH="/root/.local/bin:$PATH"
-# plugins(
-#	poetry
-#	...
-#	)
-
-source ~/.zshrc
-mkdir $ZSH_CUSTOM/plugins/poetry
-poetry completions zsh > $ZSH_CUSTOM/plugins/poetry/_poetry
-```
-
-### Вариант 2: Без Docker (через systemd)
-
-####  Установка
+####  Установка (Дополнительно устанавливается pyenv и poetry)
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/install-movies-api.sh)
 ```
@@ -30,8 +12,19 @@ cd ~/releases/
 bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/uninstall-movies-api.sh)
 ```
 
+#### Переменные создаются автоматически. 
+Токен предлагает ввести при выполнении скрипта.  
+Пароль создается случайный.  
+По умолчанию путь к папке ~/release
+```bash
+TMDB_TOKEN='Bearer TOKEN'
+RELEASES_DIR=release/
+DEBUG=False
+CACHE_CLEAR_PASSWORD=PASSWORD
 
-#### Изменение папки в env. Перейти в нужную папку и выполнить команду. Псоле перезагрузить приложение. 
+```
+
+#### Изменение папки в env. Перейти в нужную папку и выполнить команду. Поле перезагрузить приложение. 
 ```bash
 RELEASES_DIR=$(pwd | sed "s|$HOME/||") && \
 if [ -f ~/movies-api/.env ]; then \
@@ -46,7 +39,13 @@ fi
 ```
 
 ##### Опцианально
-2. Настройка Nginx
+
+Установка NUMParser (movies-api устанавливается по умолчанию)
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/NUMParser/refs/heads/main/install-numparser.sh)
+```
+
+Настройка Nginx
 ```bash
 sudo cp nginx/numparser.conf /etc/nginx/sites-available/
 sudo ln -sf /etc/nginx/sites-available/numparser.conf /etc/nginx/sites-enabled/
@@ -74,7 +73,7 @@ curl http://localhost:8888/movies_id_2025?page=1&per_page=20&language=ru
 ```json
 {
   "page": 1,
-  "results": [...],
+  "results": ["..."],
   "total_pages": 10,
   "total_results": 200
 }
