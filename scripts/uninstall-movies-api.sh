@@ -17,6 +17,7 @@ fi
 
 PROJECT_DIR="$USER_HOME/movies-api"
 SERVICE_NAME="movies-api.service"
+NEED_RELOAD=false
 
 function error_exit {
     echo -e "${RED}Error: $1${NC}" >&2
@@ -39,10 +40,21 @@ function confirm {
     esac
 }
 
+function reload_shell {
+    echo -e "${YELLOW}\nChanges to PATH and environment variables require a shell reload.${NC}"
+    if confirm "Would you like to reload the shell now? (Y/n) " "y"; then
+        echo -e "${GREEN}Reloading shell...${NC}"
+        exec $SHELL -l
+    else
+        echo -e "${YELLOW}Please manually reload your shell or run:${NC}"
+        echo -e "  source ~/.bashrc (or your shell config file)"
+    fi
+}
+
 function safe_remove {
     local target="$1"
     local description="$2"
-    
+
     if [ -e "$target" ] || [ -L "$target" ]; then
         warning "Removing $description..."
         if rm -rf "$target"; then
@@ -84,7 +96,7 @@ function remove_service {
     if systemctl list-unit-files | grep -q "$SERVICE_NAME"; then
         warning "Stopping service..."
         run_systemctl stop "$SERVICE_NAME" 2>/dev/null || warning "Service was not running"
-        
+
         warning "Disabling service..."
         run_systemctl disable "$SERVICE_NAME" 2>/dev/null || warning "Service was not enabled"
     fi
@@ -92,7 +104,7 @@ function remove_service {
     # Remove service file
     local SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
     safe_remove "$SERVICE_FILE" "service file"
-    
+
     # Reload systemd if service file existed
     [ -f "$SERVICE_FILE" ] && run_systemctl daemon-reload
 }
@@ -115,9 +127,15 @@ function clean_shell_configs {
             cp "$rcfile" "${rcfile}.bak" 2>/dev/null
 
             if [ "$CLEAN_PYENV" -eq 1 ]; then
+                if grep -q "pyenv" "$rcfile"; then
+                    NEED_RELOAD=true
+                fi
                 sed -i '/# Pyenv configuration/d;/PYENV_ROOT/d;/pyenv init/d;/pyenv virtualenv-init/d;/\/\.pyenv/d' "$rcfile"
             fi
             if [ "$CLEAN_POETRY" -eq 1 ]; then
+                if grep -q "poetry" "$rcfile"; then
+                    NEED_RELOAD=true
+                fi
                 sed -i '/poetry/d' "$rcfile"
             fi
             sed -i '/movies-api/d' "$rcfile"
@@ -203,7 +221,12 @@ clean_shell_configs
 # Final report
 show_summary
 
-warning "\nNote: Some changes may require:"
-warning "1. Opening a new terminal session"
-warning "2. System reboot (for complete service removal)"
+if $NEED_RELOAD; then
+    reload_shell
+else
+    warning "\nNote: Some changes may require:"
+    warning "1. Opening a new terminal session"
+    warning "2. System reboot (for complete service removal)"
+fi
+
 info "\n✔ Uninstallation process completed!"
