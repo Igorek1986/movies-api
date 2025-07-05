@@ -110,14 +110,14 @@
     function getEpisodesFromTimeTable(id, timeTable) {
         if (!Array.isArray(timeTable)) return [];
 
-        var serial = timeTable.find(function(item) {
+        var serial = timeTable.find(function (item) {
             return item.id === id && Array.isArray(item.episodes);
         });
 
-        return serial ? serial.episodes.filter(function(episode) {
+        return serial ? serial.episodes.filter(function (episode) {
             return episode.season_number > 0 &&
-                   episode.air_date &&
-                   new Date(episode.air_date) < new Date();
+                episode.air_date &&
+                new Date(episode.air_date) < new Date();
         }) : [];
     }
 
@@ -125,10 +125,10 @@
         var merged = arr1.concat(arr2);
         var unique = [];
 
-        merged.forEach(function(episode) {
-            if (!unique.some(function(e) {
+        merged.forEach(function (episode) {
+            if (!unique.some(function (e) {
                 return e.season_number === episode.season_number &&
-                       e.episode_number === episode.episode_number;
+                    e.episode_number === episode.episode_number;
             })) {
                 unique.push(episode);
             }
@@ -140,7 +140,7 @@
     function allEpisodesWatched(title, episodes) {
         if (!episodes || !episodes.length) return false;
 
-        return episodes.every(function(episode) {
+        return episodes.every(function (episode) {
             var hash = Lampa.Utils.hash([
                 episode.season_number,
                 episode.season_number > 10 ? ':' : '',
@@ -152,7 +152,8 @@
             return view.percent > MIN_PROGRESS;
         });
     }
-        // Настройки видимости групп годов
+
+    // Настройки видимости групп годов
     var currentYear = new Date().getFullYear();
 
     function isYearVisible(year) {
@@ -370,8 +371,10 @@
 
         self.list = function (params, onComplete, onError) {
             params = params || {};
-            onComplete = onComplete || function () { };
-            onError = onError || function () { };
+            onComplete = onComplete || function () {
+            };
+            onError = onError || function () {
+            };
 
             var category = params.url || CATEGORIES.movies_new;
             var page = params.page || 1;
@@ -418,7 +421,7 @@
                         }
                     });
                 });
-            };
+            }
             if (CATEGORY_VISIBILITY.k4_new.visible) partsData.push(function (callback) {
                 makeRequest(CATEGORIES.k4_new, CATEGORY_VISIBILITY.k4_new.title, callback);
             });
@@ -456,8 +459,8 @@
             // Добавляем категории по годам в обратном порядке (от новых к старым)
             for (var year = 2025; year >= 1980; year--) {
                 if (isYearVisible(year)) {
-                    (function(y) {
-                        partsData.push(function(callback) {
+                    (function (y) {
+                        partsData.push(function (callback) {
                             makeRequest(CATEGORIES['movies_id_' + y], 'Фильмы ' + y + ' года', callback);
                         });
                     })(year);
@@ -483,7 +486,7 @@
                     };
                     callback(result);
                 }, function (error) {
-                    callback({ error: error });
+                    callback({error: error});
                 });
             }
 
@@ -504,7 +507,7 @@
             var data = event.data;
             if (!data || !Array.isArray(data.results)) return;
             var desiredCount = 20;
-            var allResults = filterWatchedContent(data.results).filter(function(item) {
+            var allResults = filterWatchedContent(data.results).filter(function (item) {
                 return item && item.id && (item.title || item.name || item.original_title || item.original_name);
             });
             var page = data.page || 1;
@@ -513,11 +516,11 @@
             var url = data.url;
             while (allResults.length < desiredCount && page < totalPages) {
                 page++;
-                var params = { url: url, page: page, source: source };
-                await new Promise(function(resolve) {
-                    Lampa.Api.sources[source].list(params, function(response) {
+                var params = {url: url, page: page, source: source};
+                await new Promise(function (resolve) {
+                    Lampa.Api.sources[source].list(params, function (response) {
                         if (response && Array.isArray(response.results)) {
-                            var filtered = filterWatchedContent(response.results).filter(function(item) {
+                            var filtered = filterWatchedContent(response.results).filter(function (item) {
                                 return item && item.id && (item.title || item.name || item.original_title || item.original_name);
                             });
                             allResults = allResults.concat(filtered);
@@ -581,7 +584,8 @@
         };
 
         self.image = function () {
-            self.img_poster.onload = function () { };
+            self.img_poster.onload = function () {
+            };
             self.img_poster.onerror = function () {
                 self.img_poster.src = './img/img_broken.svg';
             };
@@ -642,10 +646,14 @@
         };
 
         self.destroy = function () {
-            self.img_poster.onerror = function () { };
-            self.img_poster.onload = function () { };
-            self.img_episode.onerror = function () { };
-            self.img_episode.onload = function () { };
+            self.img_poster.onerror = function () {
+            };
+            self.img_poster.onload = function () {
+            };
+            self.img_episode.onerror = function () {
+            };
+            self.img_episode.onload = function () {
+            };
             self.img_poster.src = '';
             self.img_episode.src = '';
             remove(self.card);
@@ -662,7 +670,6 @@
     function startPlugin() {
         if (window.numparser_plugin) return;
         window.numparser_plugin = true;
-
 
         newName = Lampa.Storage.get('numparser_settings', SOURCE_NAME);
         if (Lampa.Storage.field('start_page') === SOURCE_NAME) {
@@ -697,7 +704,7 @@
                 name: 'Скрыть просмотренные',
                 description: 'Скрывать просмотренные фильмы и сериалы'
             },
-            onChange: function(value) {
+            onChange: function (value) {
                 Lampa.Storage.set('numparser_hide_watched', value === true || value === "true");
                 var active = Lampa.Activity.active();
                 if (active && active.activity_line && active.activity_line.listener && typeof active.activity_line.listener.send === 'function') {
@@ -737,7 +744,7 @@
                 name: 'Порог просмотра',
                 description: 'Минимальный процент просмотра для скрытия контента'
             },
-            onChange: function(value) {
+            onChange: function (value) {
                 newProgress = parseInt(value);
                 Lampa.Storage.set('numparser_min_progress', newProgress);
                 MIN_PROGRESS = newProgress;
@@ -766,7 +773,7 @@
             }
         });
 
-        Object.keys(CATEGORY_VISIBILITY).forEach(function(option) {
+        Object.keys(CATEGORY_VISIBILITY).forEach(function (option) {
             var settingName = 'numparser_settings' + option + '_visible';
 
             var visible = Lampa.Storage.get(settingName, "true").toString() === "true";
@@ -775,15 +782,15 @@
             Lampa.SettingsApi.addParam({
                 component: "numparser_settings",
                 param: {
-                  name: settingName,
-                  type: "trigger",
-                  default: visible
+                    name: settingName,
+                    type: "trigger",
+                    default: visible
                 },
                 field: {
-                  name: CATEGORY_VISIBILITY[option].title,
-                  description: Lampa.Lang.translate('lnum_select_visibility')
+                    name: CATEGORY_VISIBILITY[option].title,
+                    description: Lampa.Lang.translate('lnum_select_visibility')
                 },
-                onChange: function(value) {
+                onChange: function (value) {
                     CATEGORY_VISIBILITY[option].visible = value === "true";
                 }
             });
