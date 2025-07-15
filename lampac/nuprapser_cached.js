@@ -1,4 +1,6 @@
 (function () {
+    'use strict';
+
     var DEFAULT_SOURCE_NAME = 'NUMParser';
     var SOURCE_NAME = Lampa.Storage.get('numparser_source_name', DEFAULT_SOURCE_NAME);
     var newName = SOURCE_NAME;
@@ -312,11 +314,14 @@
                         backdrop_path: item.backdrop_path || item.backdrop || '',
                         background_image: item.background_image,
                         source: Lampa.Storage.get('numparser_source_name') || SOURCE_NAME,
+                        type: (item.first_air_date || item.number_of_seasons) ? 'tv' : 'movie',
+                        // Добавляем поля для фильтрации
                         original_title: item.original_title || item.original_name || '',
                         title: item.title || item.name || '',
                         original_language: item.original_language || 'en',
                         first_air_date: item.first_air_date,
-                        number_of_seasons: item.number_of_seasons
+                        number_of_seasons: item.number_of_seasons,
+                        status: item.status || '',
                     };
 
                     if (!!item.release_quality) dataItem.release_quality = item.release_quality;
