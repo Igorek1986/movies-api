@@ -3,6 +3,7 @@ import gzip
 import json
 import logging
 import os
+import httpx
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -14,17 +15,15 @@ from logging import DEBUG, INFO
 import aiofiles
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, status
+from fastapi import FastAPI, Header, status, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 # Загрузка переменных окружения
 load_dotenv()
+MYSHOWS_AUTH_URL = os.getenv("MYSHOWS_AUTH_URL")
 TMDB_TOKEN = os.getenv("TMDB_TOKEN")
-# RELEASES_DIR = Path.home() / os.getenv("RELEASES_DIR", "NUMParser/public")
-# HOME_PATH = Path.home()
-# Получаем путь из переменной окружения
 releases_dir_env = os.getenv("RELEASES_DIR", "NUMParser/public")
 
 # Проверяем, абсолютный ли путь
@@ -438,3 +437,57 @@ async def cache_info():
         "cache_size_mb": round(cache_size_mb, 2),
         "sample_keys": list(tmdb_cache.keys())[:5],
     }
+
+
+@app.post("/myshows/auth")
+async def proxy_auth(request: Request):
+    try:
+        data = await request.json()
+        login = data.get("login")
+        password = data.get("password")
+
+        if not login or not password:
+            raise HTTPException(
+                status_code=400, detail="Login and password are required"
+            )
+
+        logger.info(f"Received auth request for login: {login}")
+
+        # Выполняем запрос к MyShows API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                MYSHOWS_AUTH_URL,
+                json={"login": login, "password": password},
+                headers={"Content-Type": "application/json"},
+                timeout=10.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"MyShows auth failed: {response.status_code} - {response.text}"
+                )
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail="MyShows authentication failed",
+                )
+
+            auth_data = response.json()
+            token = auth_data.get("token")
+            refresh_token = auth_data.get("refreshToken")
+
+            if not token:
+                logger.error("No token received from MyShows")
+                raise HTTPException(
+                    status_code=500, detail="No token received from MyShows"
+                )
+
+            logger.info(f"Successfully authenticated user: {login}")
+
+            return {"token": token, "refreshToken": refresh_token}
+
+    except httpx.RequestError as e:
+        logger.error(f"Request to MyShows failed: {str(e)}")
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
