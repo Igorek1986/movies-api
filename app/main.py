@@ -561,27 +561,28 @@ async def proxy_hls(
     path: str,
     request: Request,
     q: str = None,
-    token: str = None
+    token: str = None  # Добавляем параметр токена, если используется
 ):
     """
-    Прокси для HLS-потоков с поддержкой HTTPS
-    Пример: /proxy/hls/hls-proxy.igorek1986.ru/channel/273d9d9e/index.m3u8?q=param
+    Прокси для HLS-потоков с автоматическим преобразованием HTTP → HTTPS
+    Пример: /proxy/hls/hls-proxy.igorek1986.ru/play/id123.m3u8?q=param
     """
-    # Собираем исходный URL (принудительно HTTPS)
-    original_url = f"https://{path}" if not path.startswith('http') else path
-    original_url = original_url.replace('http://', 'https://')
-    
+    # Собираем исходный URL
+    original_url = f"https://{path}"  # Принудительно используем HTTPS
     if q:
         original_url += f"?{q}"
     
-    print(f"Proxying HLS: {original_url}")
+    # Логирование для отладки
+    print(f"Proxying HLS stream from: {original_url}")
 
     try:
         headers = {
             "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0"),
+            "Accept": "*/*",
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # Загружаем поток
             response = await client.get(
                 original_url,
                 headers=headers,
@@ -591,7 +592,7 @@ async def proxy_hls(
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"HLS proxy error (status: {response.status_code})"
+                    detail=f"Ошибка загрузки потока (статус: {response.status_code})"
                 )
 
             # Определяем Content-Type
@@ -604,11 +605,11 @@ async def proxy_hls(
                 media_type=content_type,
                 headers={
                     "Cache-Control": "no-cache",
-                    "Access-Control-Allow-Origin": "*"
+                    "Access-Control-Allow-Origin": "*"  # Важно для CORS
                 }
             )
 
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="HLS proxy timeout")
+        raise HTTPException(status_code=504, detail="Таймаут при загрузке потока")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"HLS proxy error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка проксирования: {str(e)}")
