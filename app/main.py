@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, status, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # Загрузка переменных окружения
 load_dotenv()
