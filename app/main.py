@@ -491,3 +491,66 @@ async def proxy_auth(request: Request):
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def resolve_redirects(url: str, client: httpx.AsyncClient):
+    """Рекурсивно разрешаем редиректы, пока не получим конечный URL"""
+    max_redirects = 5
+    current_url = url
+    for _ in range(max_redirects):
+        try:
+            response = await client.head(current_url, follow_redirects=False)
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get('location')
+                if location:
+                    current_url = location
+                    continue
+            break
+        except Exception:
+            break
+    return current_url
+
+
+@app.get("/proxy/m3u")
+async def proxy_m3u(url: str, request: Request):
+    """
+    Прокси для загрузки M3U плейлистов с обработкой коротких ссылок
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="URL parameter is required")
+    
+    try:
+        headers = {
+            "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0"),
+            "Accept": "*/*",
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Сначала разрешаем редиректы
+            final_url = await resolve_redirects(url, client)
+            logger.info(f"Original URL: {url}, Final URL: {final_url}")
+            
+            # Затем загружаем контент
+            response = await client.get(final_url, headers=headers, follow_redirects=True)
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, 
+                                  detail=f"Failed to fetch playlist (status: {response.status_code})")
+            
+            content = response.text
+            if not content.lstrip().upper().startswith("#EXTM3U"):
+                logger.error(f"Invalid M3U content from URL: {final_url}")
+                raise HTTPException(status_code=400, 
+                                  detail="The provided URL does not point to a valid M3U playlist")
+            
+            return PlainTextResponse(content=content, media_type="audio/x-mpegurl")
+    
+    except httpx.TimeoutException:
+        logger.error(f"Timeout while fetching playlist from {url}")
+        raise HTTPException(status_code=504, detail="Request timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error fetching playlist: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch playlist: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
