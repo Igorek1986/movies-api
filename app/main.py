@@ -554,3 +554,62 @@ async def proxy_m3u(url: str, request: Request):
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/proxy/hls/{path:path}")
+async def proxy_hls(
+    path: str,
+    request: Request,
+    q: str = None,
+    token: str = None  # Добавляем параметр токена, если используется
+):
+    """
+    Прокси для HLS-потоков с автоматическим преобразованием HTTP → HTTPS
+    Пример: /proxy/hls/hls-proxy.igorek1986.ru/play/id123.m3u8?q=param
+    """
+    # Собираем исходный URL
+    original_url = f"https://{path}"  # Принудительно используем HTTPS
+    if q:
+        original_url += f"?{q}"
+    
+    # Логирование для отладки
+    print(f"Proxying HLS stream from: {original_url}")
+
+    try:
+        headers = {
+            "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0"),
+            "Accept": "*/*",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Загружаем поток
+            response = await client.get(
+                original_url,
+                headers=headers,
+                follow_redirects=True
+            )
+
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Ошибка загрузки потока (статус: {response.status_code})"
+                )
+
+            # Определяем Content-Type
+            content_type = "application/x-mpegURL"
+            if path.endswith(".ts"):
+                content_type = "video/MP2T"
+
+            return StreamingResponse(
+                response.iter_bytes(),
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Access-Control-Allow-Origin": "*"  # Важно для CORS
+                }
+            )
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Таймаут при загрузке потока")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка проксирования: {str(e)}")
