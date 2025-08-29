@@ -20,9 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from app import myshows
+
 # Загрузка переменных окружения
 load_dotenv()
-MYSHOWS_AUTH_URL = os.getenv("MYSHOWS_AUTH_URL")
 TMDB_TOKEN = os.getenv("TMDB_TOKEN")
 releases_dir_env = os.getenv("RELEASES_DIR", "NUMParser/public")
 
@@ -82,6 +83,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(myshows.router)
 
 
 logger.debug("Настройки окружения загружены успешно")
@@ -439,60 +441,6 @@ async def cache_info():
     }
 
 
-@app.post("/myshows/auth")
-async def proxy_auth(request: Request):
-    try:
-        data = await request.json()
-        login = data.get("login")
-        password = data.get("password")
-
-        if not login or not password:
-            raise HTTPException(
-                status_code=400, detail="Login and password are required"
-            )
-
-        logger.info(f"Received auth request for login: {login}")
-
-        # Выполняем запрос к MyShows API
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                MYSHOWS_AUTH_URL,
-                json={"login": login, "password": password},
-                headers={"Content-Type": "application/json"},
-                timeout=10.0,
-            )
-
-            if response.status_code != 200:
-                logger.error(
-                    f"MyShows auth failed: {response.status_code} - {response.text}"
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail="MyShows authentication failed",
-                )
-
-            auth_data = response.json()
-            token = auth_data.get("token")
-            refresh_token = auth_data.get("refreshToken")
-
-            if not token:
-                logger.error("No token received from MyShows")
-                raise HTTPException(
-                    status_code=500, detail="No token received from MyShows"
-                )
-
-            logger.info(f"Successfully authenticated user: {login}")
-
-            return {"token": token, "refreshToken": refresh_token}
-
-    except httpx.RequestError as e:
-        logger.error(f"Request to MyShows failed: {str(e)}")
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
 async def resolve_redirects(url: str, client: httpx.AsyncClient):
     """Рекурсивно разрешаем редиректы, пока не получим конечный URL"""
     max_redirects = 5
@@ -501,7 +449,7 @@ async def resolve_redirects(url: str, client: httpx.AsyncClient):
         try:
             response = await client.head(current_url, follow_redirects=False)
             if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get('location')
+                location = response.headers.get("location")
                 if location:
                     current_url = location
                     continue
@@ -518,39 +466,54 @@ async def proxy_m3u(url: str, request: Request):
     """
     if not url:
         raise HTTPException(status_code=400, detail="URL parameter is required")
-    
+
     try:
         headers = {
             "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0"),
             "Accept": "*/*",
         }
-        
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Сначала разрешаем редиректы
             final_url = await resolve_redirects(url, client)
             logger.info(f"Original URL: {url}, Final URL: {final_url}")
-            
+
             # Затем загружаем контент
-            response = await client.get(final_url, headers=headers, follow_redirects=True)
-            
+            response = await client.get(
+                final_url, headers=headers, follow_redirects=True
+            )
+
             if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, 
-                                  detail=f"Failed to fetch playlist (status: {response.status_code})")
-            
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to fetch playlist (status: {response.status_code})",
+                )
+
             content = response.text
             if not content.lstrip().upper().startswith("#EXTM3U"):
                 logger.error(f"Invalid M3U content from URL: {final_url}")
-                raise HTTPException(status_code=400, 
-                                  detail="The provided URL does not point to a valid M3U playlist")
-            
+                raise HTTPException(
+                    status_code=400,
+                    detail="The provided URL does not point to a valid M3U playlist",
+                )
+
             return PlainTextResponse(content=content, media_type="audio/x-mpegurl")
-    
+
     except httpx.TimeoutException:
         logger.error(f"Timeout while fetching playlist from {url}")
         raise HTTPException(status_code=504, detail="Request timeout")
     except httpx.RequestError as e:
         logger.error(f"Error fetching playlist: {str(e)}")
-        raise HTTPException(status_code=502, detail=f"Failed to fetch playlist: {str(e)}")
+        raise HTTPException(
+            status_code=502, detail=f"Failed to fetch playlist: {str(e)}"
+        )
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Запуск сервера (для тестирования)
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
