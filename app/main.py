@@ -26,6 +26,8 @@ from app import myshows
 load_dotenv()
 TMDB_TOKEN = os.getenv("TMDB_TOKEN")
 releases_dir_env = os.getenv("RELEASES_DIR", "NUMParser/public")
+BANNED_PATTERNS = json.loads(os.getenv("BANNED_PATTERNS", "[]"))
+
 
 # Проверяем, абсолютный ли путь
 if os.path.isabs(releases_dir_env):
@@ -35,8 +37,11 @@ else:
 
 # Получаем путь к директории, где находится текущий скрипт
 BASE_DIR = Path(__file__).parent.parent
+BLOCKED_JSON_PATH = BASE_DIR / "blocked.json"
 CACHE_FILE = BASE_DIR / "tmdb_cache.json"
 tmdb_cache: Dict[Tuple[str, int], Any] = None
+with open(BLOCKED_JSON_PATH, "r", encoding="utf-8") as f:
+    BLOCKED_RESPONSE = json.load(f)
 
 # Настройка логирования
 DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
@@ -84,6 +89,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(myshows.router)
+
+
+@app.middleware("http")
+async def block_banned_origins(request: Request, call_next):
+    origin = request.headers.get("origin")
+
+    if is_banned_origin(origin):
+        logger.warning(f"Blocked request from origin: {origin}")
+
+        return JSONResponse(
+            status_code=200,
+            content=BLOCKED_RESPONSE,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
+    return await call_next(request)
+
+
+def is_banned_origin(origin: str | None) -> bool:
+    if not origin or origin == "null":
+        return False
+
+    origin = origin.lower()
+    return any(pattern.lower() in origin for pattern in BANNED_PATTERNS)
 
 
 logger.debug("Настройки окружения загружены успешно")
