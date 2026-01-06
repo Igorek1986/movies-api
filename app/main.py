@@ -105,6 +105,8 @@ async def block_banned_origins(request: Request, call_next):
                 "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
                 "Pragma": "no-cache",
                 "Expires": "0",
+                "Access-Control-Allow-Origin": origin or "*",
+                "Access-Control-Allow-Credentials": "true",
             },
         )
 
