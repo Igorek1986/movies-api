@@ -1,0 +1,33 @@
+{
+    "page": 1,
+    "language": "ru",
+    "results": [
+        {
+            "id": "blocked_001",
+            "title": "🚫 Uncensored Lampa is not supported",
+            "original_title": "This version is blocked",
+            "description": "This unofficial version is blocked. Please use official Lampa. (lampa.mx)",
+            "poster": "https://numparser.igorek1986.ru/blocked.jpg",
+            "poster_path": "https://numparser.igorek1986.ru/blocked.jpg",
+            "backdrop_path": "https://numparser.igorek1986.ru/blocked.jpg",
+            "year": "2026",
+            "release_date": "2026-01-01",
+            "kinopoisk": "0",
+            "kp": "0",
+            "imdb": "0",
+            "rating": 0,
+            "vote_average": 0,
+            "vote_count": 0,
+            "type": "blocked",
+            "media_type": "blocked",
+            "genre_ids": [999],
+            "adult": false,
+            "blocked": true,
+            "source": "BLOCKED"
+        }
+    ],
+    "total_pages": 1,
+    "total_results": 1,
+    "blocked": true,
+    "message": "This API does not support uncensored Lampa versions"
+}
