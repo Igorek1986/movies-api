@@ -21,6 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app import myshows
+from app import stats
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -72,6 +73,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Директория с релизами: {RELEASES_DIR}")
     logger.info(f"Файл кэша: {CACHE_FILE}")
 
+    stats.init_stats()
+
     yield  # Приложение работает
 
     # Очистка при завершении (опционально)
@@ -89,6 +92,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(myshows.router)
+app.include_router(stats.router)
 
 
 @app.middleware("http")
@@ -342,10 +346,17 @@ def get_clear_cache_password():
 
 @app.get("/{category}")
 async def get_category(
-    category: str, page: int = 1, per_page: int = 20, language: str = "ru"
+    category: str,
+    request: Request,
+    page: int = 1,
+    per_page: int = 20,
+    language: str = "ru",
 ):
     try:
         logger.debug(f"Запрос: {category}, страница {page}")
+
+        stats.track_api_user(request)
+        stats.track_category_request(request, category)
 
         # Загрузка данных
         data = load_data(category)
