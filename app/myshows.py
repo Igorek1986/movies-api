@@ -11,6 +11,7 @@ from typing import Dict, Any
 from datetime import datetime
 from dotenv import load_dotenv
 
+from app import stats
 
 load_dotenv()
 MYSHOWS_AUTH_URL = os.getenv("MYSHOWS_AUTH_URL")
@@ -30,6 +31,9 @@ async def proxy_auth(request: Request):
         data = await request.json()
         login = data.get("login")
         password = data.get("password")
+
+        if login:
+            stats.track_myshows_user(login)
 
         if not login or not password:
             raise HTTPException(
