@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import threading
+import requests
 from pathlib import Path
 from datetime import date, datetime
 from fastapi import APIRouter, Header, HTTPException, Request, Form
@@ -48,11 +49,11 @@ def init_stats():
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS myshows_users (
-                                                         login TEXT NOT NULL,
-                                                         date TEXT NOT NULL,
-                                                         requests INTEGER DEFAULT 1,
-                                                         UNIQUE(login, date)
-                );
+                login TEXT NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 1,
+                UNIQUE(login, date)
+            );
             """
         )
         db.execute(
@@ -66,11 +67,11 @@ def init_stats():
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS api_users (
-                                                     ip TEXT NOT NULL,
-                                                     date TEXT NOT NULL,
-                                                     requests INTEGER DEFAULT 1,
-                                                     UNIQUE(ip, date)
-                );
+                ip TEXT NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 1,
+                UNIQUE(ip, date)
+            );
             """
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_api_date ON api_users(date);")
@@ -80,12 +81,12 @@ def init_stats():
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS category_requests (
-                                                             category TEXT NOT NULL,
-                                                             ip TEXT NOT NULL,
-                                                             date TEXT NOT NULL,
-                                                             requests INTEGER DEFAULT 1,
-                                                             UNIQUE(category, ip, date)
-                );
+                category TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 1,
+                UNIQUE(category, ip, date)
+            );
             """
         )
         db.execute(
@@ -130,16 +131,100 @@ def track_api_user(request: Request):
 
     today = date.today().isoformat()
 
+    # Получаем геолокацию синхронно
+    location = get_location_from_ipwho_sync(ip)
+
     with _db_lock, sqlite3.connect(DB_PATH) as db:
         db.execute(
             """
-            INSERT INTO api_users (ip, date, requests)
-            VALUES (?, ?, 1)
-                ON CONFLICT(ip, date)
+            INSERT INTO api_users (ip, date, requests, country, city, region, flag_emoji)
+            VALUES (?, ?, 1, ?, ?, ?, ?)
+            ON CONFLICT(ip, date)
             DO UPDATE SET requests = requests + 1
             """,
-            (ip, today),
+            (
+                ip,
+                today,
+                location["country"],
+                location["city"],
+                location["region"],
+                location["flag_emoji"],
+            ),
         )
+
+
+def get_location_from_ipwho_sync(ip: str) -> dict:
+    """Получает информацию о местоположении с ipwho.is (синхронная версия)"""
+    try:
+        # Пропускаем локальные и приватные IP
+        if ip in ["127.0.0.1", "localhost", "::1", "unknown"] or ip.startswith(
+            (
+                "10.",
+                "192.168.",
+                "172.16.",
+                "172.17.",
+                "172.18.",
+                "172.19.",
+                "172.20.",
+                "172.21.",
+                "172.22.",
+                "172.23.",
+                "172.24.",
+                "172.25.",
+                "172.26.",
+                "172.27.",
+                "172.28.",
+                "172.29.",
+                "172.30.",
+                "172.31.",
+            )
+        ):
+            return {
+                "country": "Local",
+                "city": "Local",
+                "region": "Local",
+                "flag_emoji": "🏠",
+            }
+
+        # Запрос к ipwho.is
+        response = requests.get(
+            f"https://ipwho.is/{ip}?lang=ru",
+            headers={"User-Agent": "Your-API/1.0"},
+            timeout=5,
+        )
+
+        if response.status_code != 200:
+            return {
+                "country": "Unknown",
+                "city": "Unknown",
+                "region": "Unknown",
+                "flag_emoji": "🌍",
+            }
+
+        data = response.json()
+
+        if not data.get("success"):
+            return {
+                "country": "Unknown",
+                "city": "Unknown",
+                "region": "Unknown",
+                "flag_emoji": "🌍",
+            }
+
+        return {
+            "country": data.get("country", "Unknown"),
+            "city": data.get("city", "Unknown"),
+            "region": data.get("region", "Unknown"),
+            "flag_emoji": data.get("flag", {}).get("emoji", "🌍"),
+        }
+
+    except Exception:
+        return {
+            "country": "Unknown",
+            "city": "Unknown",
+            "region": "Unknown",
+            "flag_emoji": "🌍",
+        }
 
 
 def track_category_request(request: Request, category: str):
@@ -217,7 +302,7 @@ def get_stats_data():
 
         cur.execute(
             """
-            SELECT ip, requests
+            SELECT ip, requests, country, city, region, flag_emoji
             FROM api_users
             WHERE date = DATE('now')
             ORDER BY requests DESC
@@ -231,7 +316,7 @@ def get_stats_data():
 
         cur.execute(
             """
-            SELECT ip, SUM(requests) as total
+            SELECT ip, SUM(requests) as total, country, city, region, flag_emoji
             FROM api_users
             GROUP BY ip
             ORDER BY total DESC
