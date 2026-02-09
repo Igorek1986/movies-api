@@ -355,9 +355,6 @@ async def get_category(
     try:
         logger.debug(f"Запрос: {category}, страница {page}")
 
-        stats.track_api_user(request)
-        stats.track_category_request(request, category)
-
         # Загрузка данных
         data = load_data(category)
 
@@ -366,6 +363,10 @@ async def get_category(
             items = data["results"] if "results" in data else data
             total = len(items)
             start = (page - 1) * per_page
+
+            stats.track_api_user(request)
+            stats.track_category_request(request, category)
+
             return {
                 "page": page,
                 "results": items[start : start + per_page],
@@ -426,6 +427,9 @@ async def get_category(
                         results.append(enhanced)
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Ошибка обработки item: {item}, ошибка: {str(e)}")
+
+        stats.track_api_user(request)
+        stats.track_category_request(request, category)
 
         return {
             "page": page,
