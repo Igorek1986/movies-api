@@ -333,16 +333,6 @@
             margin-top: 5px;
         }
 
-        .update-success {
-            color: #00c853;
-            font-weight: 600;
-        }
-
-        .update-error {
-            color: #f44336;
-            font-weight: 600;
-        }
-
         @media (max-width: 768px) {
             .stats-summary {
                 grid-template-columns: 1fr;
@@ -361,6 +351,50 @@
                 width: 100%;
                 justify-content: space-between;
             }
+        }
+        .table-container {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          margin-bottom: 15px;
+          border-radius: 8px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        /* Для очень узких экранов (менее 600px) — преобразуем в карточки */
+        @media (max-width: 600px) {
+          .table-container {
+            overflow-x: visible;
+          }
+
+          #apiUsersTodayTable,
+          #apiUsersTotalTable {
+            display: none;
+          }
+
+          .user-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            margin-bottom: 12px;
+            padding: 12px;
+          }
+
+          .user-card-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+          }
+
+          .user-card-label {
+            font-weight: 600;
+            color: #666;
+            min-width: 100px;
+          }
+
+          .user-card-value {
+            flex: 1;
+            text-align: right;
+          }
         }
     </style>
 </head>
@@ -493,18 +527,25 @@
               <button class="tab-btn" onclick="switchTab('apiusers', 'total')">Всё время</button>
           </div>
           <div id="apiusers-today" class="tab-content active">
+            <div class="table-container">
               <table id="apiUsersTodayTable">
                   <thead>
                       <tr>
                           <th>IP адрес</th>
+                          <th>Местоположение</th>
                           <th>Запросов</th>
                           <th>Доля</th>
                       </tr>
                   </thead>
                   <tbody>
-                      {% for ip, requests in stats.api_users.today.detail %}
+                      {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
                       <tr>
                           <td><code><strong>{{ ip }}</strong></code></td>
+                          <td>
+                              <span title="{{ country }}, {{ region }}">
+                                  {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                              </span>
+                          </td>
                           <td>
                               <span class="badge badge-blue">{{ requests }}</span>
                           </td>
@@ -518,19 +559,26 @@
                       {% endfor %}
                   </tbody>
               </table>
+              </div>
           </div>
           <div id="apiusers-total" class="tab-content">
               <table id="apiUsersTotalTable">
                   <thead>
                       <tr>
                           <th>IP адрес</th>
+                          <th>Местоположение</th>
                           <th>Запросов всего</th>
                       </tr>
                   </thead>
                   <tbody>
-                      {% for ip, requests in stats.api_users.total.detail %}
+                      {% for ip, requests, country, city, region, flag_emoji in stats.api_users.total.detail %}
                       <tr>
                           <td><code><strong>{{ ip }}</strong></code></td>
+                          <td>
+                              <span title="{{ country }}, {{ region }}">
+                                  {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                              </span>
+                          </td>
                           <td>
                               <span class="badge badge-orange">{{ requests }}</span>
                           </td>
@@ -538,6 +586,40 @@
                       {% endfor %}
                   </tbody>
               </table>
+          </div>
+
+          <div id="apiUsersMobileCards" class="mobile-cards" style="display: none;">
+            {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
+            <div class="user-card">
+              <div class="user-card-row">
+                <span class="user-card-label">IP адрес:</span>
+                <span class="user-card-value"><code>{{ ip }}</code></span>
+              </div>
+              <div class="user-card-row">
+                <span class="user-card-label">Местоположение:</span>
+                <span class="user-card-value">
+                  <span title="{{ country }}, {{ region }}">
+                    {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                  </span>
+                </span>
+              </div>
+              <div class="user-card-row">
+                <span class="user-card-label">Запросов:</span>
+                <span class="user-card-value">
+                  <span class="badge badge-blue">{{ requests }}</span>
+                </span>
+              </div>
+              <div class="user-card-row">
+                <span class="user-card-label">Доля:</span>
+                <span class="user-card-value">
+                  {% set total = stats.api_users.today.detail|map(attribute='1')|sum %}
+                  {% if total > 0 %}
+                    {{ ((requests / total) * 100)|round(1) }}%
+                  {% endif %}
+                </span>
+              </div>
+            </div>
+            {% endfor %}
           </div>
       </div>
 
@@ -768,17 +850,21 @@
                 myshowsTotalTbody.appendChild(row);
             });
 
-            // Обновляем таблицу обычных пользователей сегодня (НОВОЕ)
+            // Обновляем таблицу обычных пользователей сегодня
             const apiUsersTodayTbody = document.querySelector('#apiUsersTodayTable tbody');
-            if (apiUsersTodayTbody) {
+            if (apiUsersTodayTbody && stats.api_users?.today?.detail) {
                 apiUsersTodayTbody.innerHTML = '';
-                const totalApiTodayRequests = stats.api_users.today.detail.reduce((sum, item) => sum + item[1], 0);
+                const detail = stats.api_users.today.detail;
+                const totalApiTodayRequests = detail.reduce((sum, item) => sum + (item[1] || 0), 0);
 
-                stats.api_users.today.detail.forEach(([ip, requests]) => {
+                detail.forEach(([ip, requests, country, city, region, flagEmoji]) => {
+                    if (!ip || !requests) return;
                     const row = document.createElement('tr');
                     const percent = totalApiTodayRequests > 0 ? ((requests / totalApiTodayRequests) * 100).toFixed(1) : 0;
+                    const location = `${flagEmoji || '🌍'} ${country || 'Unknown'}, ${city || 'Unknown'}${region && region !== city && region !== 'Unknown' ? ', ' + region : ''}`;
                     row.innerHTML = `
                         <td><code><strong>${escapeHtml(ip)}</strong></code></td>
+                        <td><span title="${escapeHtml(country || '')}, ${escapeHtml(region || '')}">${escapeHtml(location)}</span></td>
                         <td><span class="badge badge-blue">${requests}</span></td>
                         <td>${percent}%</td>
                     `;
@@ -786,15 +872,19 @@
                 });
             }
 
-            // Обновляем таблицу обычных пользователей всего (НОВОЕ)
+            // Обновляем таблицу обычных пользователей всего
             const apiUsersTotalTbody = document.querySelector('#apiUsersTotalTable tbody');
-            if (apiUsersTotalTbody) {
+            if (apiUsersTotalTbody && stats.api_users?.total?.detail) {
                 apiUsersTotalTbody.innerHTML = '';
+                const detail = stats.api_users.total.detail;
 
-                stats.api_users.total.detail.forEach(([ip, requests]) => {
+                detail.forEach(([ip, requests, country, city, region, flagEmoji]) => {
+                    if (!ip || !requests) return;
                     const row = document.createElement('tr');
+                    const location = `${flagEmoji || '🌍'} ${country || 'Unknown'}, ${city || 'Unknown'}${region && region !== city && region !== 'Unknown' ? ', ' + region : ''}`;
                     row.innerHTML = `
                         <td><code><strong>${escapeHtml(ip)}</strong></code></td>
+                        <td><span title="${escapeHtml(country || '')}, ${escapeHtml(region || '')}">${escapeHtml(location)}</span></td>
                         <td><span class="badge badge-orange">${requests}</span></td>
                     `;
                     apiUsersTotalTbody.appendChild(row);
@@ -885,6 +975,23 @@
             div.textContent = text;
             return div.innerHTML;
         }
+        function adjustTableForMobile() {
+          const isMobile = window.innerWidth < 600;
+          const tableContainer = document.querySelector('.table-container');
+          const mobileCards = document.getElementById('apiUsersMobileCards');
+
+          if (isMobile) {
+            tableContainer.style.display = 'none';
+            mobileCards.style.display = 'block';
+          } else {
+            tableContainer.style.display = 'block';
+            mobileCards.style.display = 'none';
+          }
+        }
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', adjustTableForMobile);
+        window.addEventListener('resize', adjustTableForMobile);
     </script>
 </body>
 </html>
