@@ -327,20 +327,32 @@ def get_stats_data():
         # ========== Категории статистика ЗА СЕГОДНЯ ==========
         cur.execute(
             """
-            SELECT category, COUNT(DISTINCT ip)
+            SELECT category, COUNT(DISTINCT ip) as unique_ips, SUM(requests) as total_req
             FROM category_requests
             WHERE date = DATE('now')
             GROUP BY category
+            ORDER BY total_req DESC
             """
         )
-        categories_today_count = dict(cur.fetchall())
+        categories_today_list = cur.fetchall()
+        categories_today_count = {
+            row[0]: row[1] for row in categories_today_list
+        }  # уникальные IP
+        categories_today_total_req = {
+            row[0]: row[2] for row in categories_today_list
+        }  # общие запросы
 
         cur.execute(
             """
             SELECT category, ip, requests
             FROM category_requests
             WHERE date = DATE('now')
-            ORDER BY category, requests DESC
+            ORDER BY
+                (SELECT SUM(requests) FROM category_requests cr2
+                WHERE cr2.category = category_requests.category
+                AND date = DATE('now')) DESC,
+                category,
+                requests DESC
             """
         )
         categories_today_detail = {}
@@ -352,30 +364,37 @@ def get_stats_data():
 
         # Считаем общее количество запросов за сегодня по категориям
         cur.execute(
-            """
-            SELECT SUM(requests)
-            FROM category_requests
-            WHERE date = DATE('now')
-            """
+            "SELECT SUM(requests) FROM category_requests WHERE date = DATE('now')"
         )
         categories_today_requests_total = cur.fetchone()[0] or 0
 
         # ========== Категории статистика ВСЕГО ==========
         cur.execute(
             """
-            SELECT category, COUNT(DISTINCT ip)
+            SELECT category, COUNT(DISTINCT ip) as unique_ips, SUM(requests) as total_req
             FROM category_requests
             GROUP BY category
+            ORDER BY total_req DESC
             """
         )
-        categories_total_count = dict(cur.fetchall())
+        categories_total_list = cur.fetchall()
+        categories_total_count = {
+            row[0]: row[1] for row in categories_total_list
+        }  # уникальные IP
+        categories_total_total_req = {
+            row[0]: row[2] for row in categories_total_list
+        }  # общие запросы
 
         cur.execute(
             """
             SELECT category, ip, SUM(requests) as total
             FROM category_requests
             GROUP BY category, ip
-            ORDER BY category, total DESC
+            ORDER BY
+                (SELECT SUM(requests) FROM category_requests cr2
+                 WHERE cr2.category = category_requests.category) DESC,
+                category,
+                total DESC
             """
         )
         categories_total_detail = {}
@@ -386,12 +405,7 @@ def get_stats_data():
             categories_total_detail[category].append({"ip": ip, "requests": requests})
 
         # Считаем общее количество запросов всего по категориям
-        cur.execute(
-            """
-            SELECT SUM(requests)
-            FROM category_requests
-            """
-        )
+        cur.execute("SELECT SUM(requests) FROM category_requests")
         categories_total_requests_total = cur.fetchone()[0] or 0
 
         # ========== Общая статистика ==========
@@ -429,12 +443,14 @@ def get_stats_data():
             "today": {
                 "count": len(categories_today_count),
                 "unique_ips": categories_today_count,
+                "total_requests_per_category": categories_today_total_req,  # НОВОЕ
                 "detail": categories_today_detail,
                 "total_requests": categories_today_requests_total,
             },
             "total": {
                 "count": len(categories_total_count),
                 "unique_ips": categories_total_count,
+                "total_requests_per_category": categories_total_total_req,  # НОВОЕ
                 "detail": categories_total_detail,
                 "total_requests": categories_total_requests_total,
             },

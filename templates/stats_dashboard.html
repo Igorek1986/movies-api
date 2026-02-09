@@ -496,24 +496,33 @@
                 </table>
             </div>
             <div id="myshows-total" class="tab-content">
+              <div class="table-container">
                 <table id="myshowsTotalTable">
                     <thead>
                         <tr>
                             <th>Логин</th>
                             <th>Запросов всего</th>
+                            <th>Доля</th>
                         </tr>
                     </thead>
                     <tbody>
+                        {% set total = stats.myshows.total.detail|map(attribute='1')|sum %}
                         {% for login, requests in stats.myshows.total.detail %}
                         <tr>
                             <td><strong>{{ login }}</strong></td>
                             <td>
                                 <span class="badge badge-green">{{ requests }}</span>
                             </td>
+                            <td>
+                                {% if total > 0 %}
+                                    {{ ((requests / total) * 100)|round(1) }}%
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+              </div>
             </div>
         </div>
 
@@ -568,6 +577,7 @@
                           <th>IP адрес</th>
                           <th>Местоположение</th>
                           <th>Запросов всего</th>
+                          <th>Доля</th>
                       </tr>
                   </thead>
                   <tbody>
@@ -581,6 +591,12 @@
                           </td>
                           <td>
                               <span class="badge badge-orange">{{ requests }}</span>
+                          </td>
+                          <td>
+                              {% set total = stats.api_users.total.detail|map(attribute='1')|sum %}
+                              {% if total > 0 %}
+                                  {{ ((requests / total) * 100)|round(1) }}%
+                              {% endif %}
                           </td>
                       </tr>
                       {% endfor %}
@@ -625,82 +641,82 @@
 
         <!-- Категории -->
         <div class="section">
-            <div class="section-header">
-                📁 Категории
-            </div>
-            <div class="section-tabs">
-                <button class="tab-btn active" onclick="switchTab('categories', 'today')">Сегодня</button>
-                <button class="tab-btn" onclick="switchTab('categories', 'total')">Всё время</button>
-            </div>
-            <div id="categories-today" class="tab-content active">
-                <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px;">
-                    <strong>📊 Всего запросов сегодня:</strong>
-                    <span class="badge badge-orange" id="categoriesTodayTotalBadge">{{ stats.categories.today.total_requests }}</span>
-                </div>
-                <div class="category-grid" id="categoriesTodayGrid">
-                    {% for category, ips in stats.categories.today.detail.items() %}
-                    <div class="category-card">
-                        <h4>
-                            <span class="category-name">{{ category }}</span>
-                            <span class="ip-count">{{ stats.categories.today.unique_ips.get(category, 0) }} IP</span>
-                        </h4>
-                        <table style="margin-top: 10px; font-size: 14px;">
-                            <thead>
-                                <tr>
-                                    <th style="width: 60%;">IP адрес</th>
-                                    <th style="width: 40%;">Запросов</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in ips %}
-                                <tr>
-                                    <td><code>{{ item.ip }}</code></td>
-                                    <td>
-                                        <span class="badge badge-green">{{ item.requests }}</span>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            <div id="categories-total" class="tab-content">
-                <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 8px;">
-                    <strong>📊 Всего запросов за всё время:</strong>
-                    <span class="badge badge-green" id="categoriesTotalTotalBadge">{{ stats.categories.total.total_requests }}</span>
-                </div>
-                <div class="category-grid" id="categoriesTotalGrid">
-                    {% for category, ips in stats.categories.total.detail.items() %}
-                    <div class="category-card">
-                        <h4>
-                            <span class="category-name">{{ category }}</span>
-                            <span class="ip-count">{{ stats.categories.total.unique_ips.get(category, 0) }} IP</span>
-                        </h4>
-                        <table style="margin-top: 10px; font-size: 14px;">
-                            <thead>
-                                <tr>
-                                    <th style="width: 60%;">IP адрес</th>
-                                    <th style="width: 40%;">Запросов</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in ips %}
-                                <tr>
-                                    <td><code>{{ item.ip }}</code></td>
-                                    <td>
-                                        <span class="badge badge-green">{{ item.requests }}</span>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
+          <div class="section-header">
+              📁 Категории
+          </div>
+          <div class="section-tabs">
+              <button class="tab-btn active" onclick="switchTab('categories', 'today')">Сегодня</button>
+              <button class="tab-btn" onclick="switchTab('categories', 'total')">Всё время</button>
+          </div>
+          <div id="categories-today" class="tab-content active">
+              <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px;">
+                  <strong>📊 Всего запросов сегодня:</strong>
+                  <span class="badge badge-orange" id="categoriesTodayTotalBadge">{{ stats.categories.today.total_requests }}</span>
+              </div>
+              <div class="category-grid" id="categoriesTodayGrid">
+                  {% for category, ips in stats.categories.today.detail.items() %}
+                  <div class="category-card">
+                      <h4>
+                          <span class="category-name">{{ category }}</span>
+                          <span class="ip-count">{{ stats.categories.today.unique_ips.get(category, 0) }} IP</span>
+                      </h4>
+                      <table style="margin-top: 10px; font-size: 14px;">
+                          <thead>
+                              <tr>
+                                  <th style="width: 60%;">IP адрес</th>
+                                  <th style="width: 40%;">Запросов ({{ stats.categories.today.total_requests_per_category.get(category, 0) }})</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {% for item in ips %}
+                              <tr>
+                                  <td><code>{{ item.ip }}</code></td>
+                                  <td>
+                                      <span class="badge badge-green">{{ item.requests }}</span>
+                                  </td>
+                              </tr>
+                              {% endfor %}
+                          </tbody>
+                      </table>
+                  </div>
+                  {% endfor %}
+              </div>
+          </div>
+          <div id="categories-total" class="tab-content">
+              <div style="margin-bottom: 20px; padding: 15px; background: #e8f5e9; border-radius: 8px;">
+                  <strong>📊 Всего запросов за всё время:</strong>
+                  <span class="badge badge-green" id="categoriesTotalTotalBadge">{{ stats.categories.total.total_requests }}</span>
+              </div>
+              <div class="category-grid" id="categoriesTotalGrid">
+                  {% for category, ips in stats.categories.total.detail.items() %}
+                  <div class="category-card">
+                      <h4>
+                          <span class="category-name">{{ category }}</span>
+                          <span class="ip-count">{{ stats.categories.total.unique_ips.get(category, 0) }} IP</span>
+                      </h4>
+                      <table style="margin-top: 10px; font-size: 14px;">
+                          <thead>
+                              <tr>
+                                  <th style="width: 60%;">IP адрес</th>
+                                  <th style="width: 40%;">Запросов ({{ stats.categories.total.total_requests_per_category.get(category, 0) }})</th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {% for item in ips %}
+                              <tr>
+                                  <td><code>{{ item.ip }}</code></td>
+                                  <td>
+                                      <span class="badge badge-green">{{ item.requests }}</span>
+                                  </td>
+                              </tr>
+                              {% endfor %}
+                          </tbody>
+                      </table>
+                  </div>
+                  {% endfor %}
+              </div>
+          </div>
+      </div>
 
         <div class="last-update" id="lastUpdate">
             Последнее обновление: <span id="updateTime">{{ now.strftime('%H:%M:%S') }}</span>
@@ -821,7 +837,7 @@
             document.getElementById('categoriesTodayTotalBadge').textContent = stats.categories.today.total_requests;
             document.getElementById('categoriesTotalTotalBadge').textContent = stats.categories.total.total_requests;
 
-            // Обновляем таблицу пользователей сегодня
+            // Обновляем таблицу пользователей myshows сегодня
             const myshowsTodayTbody = document.querySelector('#myshowsTodayTable tbody');
             myshowsTodayTbody.innerHTML = '';
             const totalTodayRequests = stats.myshows.today.detail.reduce((sum, item) => sum + item[1], 0);
@@ -837,18 +853,27 @@
                 myshowsTodayTbody.appendChild(row);
             });
 
-            // Обновляем таблицу пользователей всего
+            // Обновляем таблицу пользователей myshows всего
             const myshowsTotalTbody = document.querySelector('#myshowsTotalTable tbody');
-            myshowsTotalTbody.innerHTML = '';
+            if (myshowsTotalTbody && stats.myshows?.total?.detail) {
+                myshowsTotalTbody.innerHTML = '';
+                const detail = stats.myshows.total.detail;
+                // Считаем общий итог для расчёта доли
+                const totalTotal = detail.reduce((sum, item) => sum + (item[1] || 0), 0);
 
-            stats.myshows.total.detail.forEach(([login, requests]) => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td><strong>${escapeHtml(login)}</strong></td>
-                    <td><span class="badge badge-green">${requests}</span></td>
-                `;
-                myshowsTotalTbody.appendChild(row);
-            });
+                detail.forEach(([login, requests]) => {
+                    if (!login || !requests) return;
+                    const row = document.createElement('tr');
+                    // Рассчитываем долю
+                    const share = totalTotal > 0 ? ((requests / totalTotal) * 100).toFixed(1) + '%' : '';
+                    row.innerHTML = `
+                        <td><strong>${escapeHtml(login)}</strong></td>
+                        <td><span class="badge badge-green">${requests}</span></td>
+                        <td>${share}</td>  <!-- ДОБАВЛЕНА ДОЛЯ -->
+                    `;
+                    myshowsTotalTbody.appendChild(row);
+                });
+            }
 
             // Обновляем таблицу обычных пользователей сегодня
             const apiUsersTodayTbody = document.querySelector('#apiUsersTodayTable tbody');
@@ -877,15 +902,18 @@
             if (apiUsersTotalTbody && stats.api_users?.total?.detail) {
                 apiUsersTotalTbody.innerHTML = '';
                 const detail = stats.api_users.total.detail;
+                const totalTotal = detail.reduce((sum, item) => sum + (item[1] || 0), 0);
 
                 detail.forEach(([ip, requests, country, city, region, flagEmoji]) => {
                     if (!ip || !requests) return;
                     const row = document.createElement('tr');
                     const location = `${flagEmoji || '🌍'} ${country || 'Unknown'}, ${city || 'Unknown'}${region && region !== city && region !== 'Unknown' ? ', ' + region : ''}`;
+                    const percent = totalTotal > 0 ? ((requests / totalTotal) * 100).toFixed(1) + '%' : '';
                     row.innerHTML = `
                         <td><code><strong>${escapeHtml(ip)}</strong></code></td>
                         <td><span title="${escapeHtml(country || '')}, ${escapeHtml(region || '')}">${escapeHtml(location)}</span></td>
                         <td><span class="badge badge-orange">${requests}</span></td>
+                        <td>${percent}%</td>
                     `;
                     apiUsersTotalTbody.appendChild(row);
                 });
@@ -895,13 +923,22 @@
             const categoriesTodayGrid = document.getElementById('categoriesTodayGrid');
             categoriesTodayGrid.innerHTML = '';
 
-            for (const [category, ips] of Object.entries(stats.categories.today.detail)) {
+            // Сортируем категории по общему числу запросов
+            const sortedCategoriesToday = Object.entries(stats.categories.today.detail).sort((a, b) => {
+                const totalA = stats.categories.today.total_requests_per_category[a[0]] || 0;
+                const totalB = stats.categories.today.total_requests_per_category[b[0]] || 0;
+                return totalB - totalA;
+            });
+
+            for (const [category, ips] of sortedCategoriesToday) {
                 const card = document.createElement('div');
                 card.className = 'category-card';
                 const uniqueIps = stats.categories.today.unique_ips[category] || 0;
+                const totalRequests = stats.categories.today.total_requests_per_category[category] || 0;
 
                 let tableRows = '';
                 ips.forEach(item => {
+                    if (!item?.ip || !item?.requests) return;
                     tableRows += `
                         <tr>
                             <td><code>${escapeHtml(item.ip)}</code></td>
@@ -919,11 +956,11 @@
                         <thead>
                             <tr>
                                 <th style="width: 60%;">IP адрес</th>
-                                <th style="width: 40%;">Запросов</th>
+                                <th style="width: 40%;">Запросов (${totalRequests})</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${tableRows}
+                            ${tableRows || '<tr><td colspan="2" style="text-align: center; color: #999;">Нет данных</td></tr>'}
                         </tbody>
                     </table>
                 `;
@@ -934,13 +971,21 @@
             const categoriesTotalGrid = document.getElementById('categoriesTotalGrid');
             categoriesTotalGrid.innerHTML = '';
 
-            for (const [category, ips] of Object.entries(stats.categories.total.detail)) {
+            const sortedCategoriesTotal = Object.entries(stats.categories.total.detail).sort((a, b) => {
+                const totalA = stats.categories.total.total_requests_per_category[a[0]] || 0;
+                const totalB = stats.categories.total.total_requests_per_category[b[0]] || 0;
+                return totalB - totalA;
+            });
+
+            for (const [category, ips] of sortedCategoriesTotal) {
                 const card = document.createElement('div');
                 card.className = 'category-card';
                 const uniqueIps = stats.categories.total.unique_ips[category] || 0;
+                const totalRequests = stats.categories.total.total_requests_per_category[category] || 0;
 
                 let tableRows = '';
                 ips.forEach(item => {
+                    if (!item?.ip || !item?.requests) return;
                     tableRows += `
                         <tr>
                             <td><code>${escapeHtml(item.ip)}</code></td>
@@ -958,11 +1003,11 @@
                         <thead>
                             <tr>
                                 <th style="width: 60%;">IP адрес</th>
-                                <th style="width: 40%;">Запросов</th>
+                                <th style="width: 40%;">Запросов (${totalRequests})</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${tableRows}
+                            ${tableRows || '<tr><td colspan="2" style="text-align: center; color: #999;">Нет данных</td></tr>'}
                         </tbody>
                     </table>
                 `;
