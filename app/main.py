@@ -19,6 +19,8 @@ from fastapi import FastAPI, Header, status, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app import myshows
 from app import stats
@@ -44,6 +46,7 @@ tmdb_cache: Dict[Tuple[str, int], Any] = None
 with open(BLOCKED_JSON_PATH, "r", encoding="utf-8") as f:
     BLOCKED_RESPONSE = json.load(f)
 
+STATIC_DIR = BASE_DIR / "static"
 # Настройка логирования
 DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
 logging.basicConfig(
@@ -91,6 +94,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("static/images/favicon/favicon.ico", media_type="image/x-icon")
+
+
 app.include_router(myshows.router)
 app.include_router(stats.router)
 
