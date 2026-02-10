@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- фон -->
+  <rect x="0" y="0" width="64" height="64" rx="12" fill="#111827"></rect>
+
+  <!-- сервер -->
+  <rect x="12" y="14" width="40" height="18" rx="4" fill="#1f2937"></rect>
+  <rect x="12" y="36" width="40" height="14" rx="4" fill="#1f2937"></rect>
+
+  <!-- индикаторы -->
+  <circle cx="20" cy="23" r="2" fill="#22c55e"></circle>
+  <circle cx="28" cy="23" r="2" fill="#22c55e"></circle>
+
+  <!-- график -->
+  <polyline points="20,44 26,38 32,42 38,34 44,40" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></polyline>
+</svg></svg><style>@media (prefers-color-scheme: light) { :root { filter: none; } }
+@media (prefers-color-scheme: dark) { :root { filter: none; } }
+</style></svg>
