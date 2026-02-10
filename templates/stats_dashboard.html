@@ -526,118 +526,159 @@
             </div>
         </div>
 
-      <!-- API Пользователи -->
-      <div class="section">
-          <div class="section-header">
-              👥 API Пользователи
-          </div>
-          <div class="section-tabs">
-              <button class="tab-btn active" onclick="switchTab('apiusers', 'today')">Сегодня</button>
-              <button class="tab-btn" onclick="switchTab('apiusers', 'total')">Всё время</button>
-          </div>
-          <div id="apiusers-today" class="tab-content active">
-            <div class="table-container">
-              <table id="apiUsersTodayTable">
-                  <thead>
-                      <tr>
-                          <th>IP адрес</th>
-                          <th>Местоположение</th>
-                          <th>Запросов</th>
-                          <th>Доля</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                      {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
-                      <tr>
-                          <td><code><strong>{{ ip }}</strong></code></td>
-                          <td>
-                              <span title="{{ country }}, {{ region }}">
-                                  {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
-                              </span>
-                          </td>
-                          <td>
-                              <span class="badge badge-blue">{{ requests }}</span>
-                          </td>
-                          <td>
-                              {% set total = stats.api_users.today.detail|map(attribute='1')|sum %}
-                              {% if total > 0 %}
-                                  {{ ((requests / total) * 100)|round(1) }}%
-                              {% endif %}
-                          </td>
-                      </tr>
-                      {% endfor %}
-                  </tbody>
-              </table>
-              </div>
-          </div>
-          <div id="apiusers-total" class="tab-content">
-              <table id="apiUsersTotalTable">
-                  <thead>
-                      <tr>
-                          <th>IP адрес</th>
-                          <th>Местоположение</th>
-                          <th>Запросов всего</th>
-                          <th>Доля</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                      {% for ip, requests, country, city, region, flag_emoji in stats.api_users.total.detail %}
-                      <tr>
-                          <td><code><strong>{{ ip }}</strong></code></td>
-                          <td>
-                              <span title="{{ country }}, {{ region }}">
-                                  {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
-                              </span>
-                          </td>
-                          <td>
-                              <span class="badge badge-orange">{{ requests }}</span>
-                          </td>
-                          <td>
-                              {% set total = stats.api_users.total.detail|map(attribute='1')|sum %}
-                              {% if total > 0 %}
-                                  {{ ((requests / total) * 100)|round(1) }}%
-                              {% endif %}
-                          </td>
-                      </tr>
-                      {% endfor %}
-                  </tbody>
-              </table>
-          </div>
-
-          <div id="apiUsersMobileCards" class="mobile-cards" style="display: none;">
+<div class="section">
+    <div class="section-header">
+        👥 API Пользователи
+    </div>
+    <div class="section-tabs">
+        <button class="tab-btn active" onclick="switchTab('apiusers', 'today')">Сегодня</button>
+        <button class="tab-btn" onclick="switchTab('apiusers', 'total')">Всё время</button>
+    </div>
+    
+    <!-- Сегодня -->
+    <div id="apiusers-today" class="tab-content active">
+        <div class="table-container">
+            <table id="apiUsersTodayTable">
+                <thead>
+                    <tr>
+                        <th>IP адрес</th>
+                        <th>Местоположение</th>
+                        <th>Запросов</th>
+                        <th>Доля</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
+                    <tr>
+                        <td><code><strong>{{ ip }}</strong></code></td>
+                        <td>
+                            <span title="{{ country }}, {{ region }}">
+                                {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge badge-blue">{{ requests }}</span>
+                        </td>
+                        <td>
+                            {% set total = stats.api_users.today.detail|map(attribute='1')|sum %}
+                            {% if total > 0 %}
+                                {{ ((requests / total) * 100)|round(1) }}%
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Карточки для мобильной версии (Сегодня) -->
+        <div id="apiusersMobileCardsToday" class="mobile-cards" style="display: none;">
             {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
             <div class="user-card">
-              <div class="user-card-row">
-                <span class="user-card-label">IP адрес:</span>
-                <span class="user-card-value"><code>{{ ip }}</code></span>
-              </div>
-              <div class="user-card-row">
-                <span class="user-card-label">Местоположение:</span>
-                <span class="user-card-value">
-                  <span title="{{ country }}, {{ region }}">
-                    {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
-                  </span>
-                </span>
-              </div>
-              <div class="user-card-row">
-                <span class="user-card-label">Запросов:</span>
-                <span class="user-card-value">
-                  <span class="badge badge-blue">{{ requests }}</span>
-                </span>
-              </div>
-              <div class="user-card-row">
-                <span class="user-card-label">Доля:</span>
-                <span class="user-card-value">
-                  {% set total = stats.api_users.today.detail|map(attribute='1')|sum %}
-                  {% if total > 0 %}
-                    {{ ((requests / total) * 100)|round(1) }}%
-                  {% endif %}
-                </span>
-              </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">IP адрес:</span>
+                    <span class="user-card-value"><code>{{ ip }}</code></span>
+                </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">Местоположение:</span>
+                    <span class="user-card-value">
+                        <span title="{{ country }}, {{ region }}">
+                            {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                        </span>
+                    </span>
+                </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">Запросов:</span>
+                    <span class="user-card-value">
+                        <span class="badge badge-blue">{{ requests }}</span>
+                    </span>
+                </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">Доля:</span>
+                    <span class="user-card-value">
+                        {% set total = stats.api_users.today.detail|map(attribute='1')|sum %}
+                        {% if total > 0 %}
+                            {{ ((requests / total) * 100)|round(1) }}%
+                        {% endif %}
+                    </span>
+                </div>
             </div>
             {% endfor %}
-          </div>
-      </div>
+        </div>
+    </div>
+    
+    <!-- Всё время -->
+    <div id="apiusers-total" class="tab-content">
+        <div class="table-container">
+            <table id="apiUsersTotalTable">
+                <thead>
+                    <tr>
+                        <th>IP адрес</th>
+                        <th>Местоположение</th>
+                        <th>Запросов всего</th>
+                        <th>Доля</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set total = stats.api_users.total.detail|map(attribute='1')|sum %}
+                    {% for ip, requests, country, city, region, flag_emoji in stats.api_users.total.detail %}
+                    <tr>
+                        <td><code><strong>{{ ip }}</strong></code></td>
+                        <td>
+                            <span title="{{ country }}, {{ region }}">
+                                {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge badge-orange">{{ requests }}</span>
+                        </td>
+                        <td>
+                            {% if total > 0 %}
+                                {{ ((requests / total) * 100)|round(1) }}%
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Карточки для мобильной версии (Всё время) - НОВОЕ! -->
+        <div id="apiusersMobileCardsTotal" class="mobile-cards" style="display: none;">
+            {% set total = stats.api_users.total.detail|map(attribute='1')|sum %}
+            {% for ip, requests, country, city, region, flag_emoji in stats.api_users.total.detail %}
+            <div class="user-card">
+                <div class="user-card-row">
+                    <span class="user-card-label">IP адрес:</span>
+                    <span class="user-card-value"><code>{{ ip }}</code></span>
+                </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">Местоположение:</span>
+                    <span class="user-card-value">
+                        <span title="{{ country }}, {{ region }}">
+                            {{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}
+                        </span>
+                    </span>
+                </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">Запросов:</span>
+                    <span class="user-card-value">
+                        <span class="badge badge-orange">{{ requests }}</span>
+                    </span>
+                </div>
+                <div class="user-card-row">
+                    <span class="user-card-label">Доля:</span>
+                    <span class="user-card-value">
+                        {% if total > 0 %}
+                            {{ ((requests / total) * 100)|round(1) }}%
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
 
         <!-- Категории -->
         <div class="section">
@@ -777,6 +818,8 @@
 
             // Добавляем активный класс к нажатой кнопке
             event.target.classList.add('active');
+
+            setTimeout(adjustTableForMobile, 50);
         }
 
         async function refreshData() {
@@ -1020,18 +1063,52 @@
             div.textContent = text;
             return div.innerHTML;
         }
-        function adjustTableForMobile() {
-          const isMobile = window.innerWidth < 600;
-          const tableContainer = document.querySelector('.table-container');
-          const mobileCards = document.getElementById('apiUsersMobileCards');
 
-          if (isMobile) {
-            tableContainer.style.display = 'none';
-            mobileCards.style.display = 'block';
-          } else {
-            tableContainer.style.display = 'block';
-            mobileCards.style.display = 'none';
-          }
+        function adjustTableForMobile() {
+            const isMobile = window.innerWidth < 600;
+            
+            // Скрываем ВСЕ таблицы и карточки
+            document.querySelectorAll('.table-container, .mobile-cards').forEach(el => {
+                el.style.display = 'none';
+            });
+            
+            if (!isMobile) {
+                // На десктопе показываем ВСЕ таблицы
+                document.querySelectorAll('.table-container').forEach(el => {
+                    el.style.display = 'block';
+                });
+                return;
+            }
+            
+            // На мобильном: определяем активную вкладку и показываем соответствующие карточки
+            const sections = ['myshows', 'apiusers', 'categories'];
+            
+            sections.forEach(section => {
+                const todayTab = document.getElementById(`${section}-today`);
+                const totalTab = document.getElementById(`${section}-total`);
+                
+                if (todayTab?.classList.contains('active')) {
+                    // Показываем карточки "Сегодня" если они есть
+                    const mobileCards = document.getElementById(`${section}MobileCardsToday`);
+                    if (mobileCards) {
+                        mobileCards.style.display = 'block';
+                    } else {
+                        // Если карточек нет (например, для категорий) - показываем таблицу
+                        const tableContainer = todayTab.querySelector('.table-container');
+                        if (tableContainer) tableContainer.style.display = 'block';
+                    }
+                } else if (totalTab?.classList.contains('active')) {
+                    // Показываем карточки "Всё время" если они есть
+                    const mobileCards = document.getElementById(`${section}MobileCardsTotal`);
+                    if (mobileCards) {
+                        mobileCards.style.display = 'block';
+                    } else {
+                        // Если карточек нет - показываем таблицу
+                        const tableContainer = totalTab.querySelector('.table-container');
+                        if (tableContainer) tableContainer.style.display = 'block';
+                    }
+                }
+            });
         }
 
         // Инициализация
