@@ -32,9 +32,6 @@ async def proxy_auth(request: Request):
         login = data.get("login")
         password = data.get("password")
 
-        if login:
-            stats.track_myshows_user(login)
-
         if not login or not password:
             raise HTTPException(
                 status_code=400, detail="Login and password are required"
@@ -76,6 +73,7 @@ async def proxy_auth(request: Request):
                 )
 
             logger.info(f"Successfully authenticated user: {login}")
+            stats.track_myshows_user(login)
 
             return {"token": token, "token_v3": token_v3, "refreshToken": refresh_token}
 
