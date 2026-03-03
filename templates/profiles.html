@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Профили — {{ user.username }}{% endblock %}
+
+{% block body %}
+<header class="container-fluid site-header">
+  <nav>
+    <ul>
+      <li><strong>NUMParser</strong></li>
+    </ul>
+    <ul>
+      <li><span class="username-badge">{{ user.username }}</span></li>
+      <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main class="container" style="padding-top: 1.5rem;">
+
+  {% if request.query_params.get('registered') %}
+  <p role="alert" class="alert-success">
+    Добро пожаловать! Создайте первый профиль — для каждого устройства или аккаунта Lampa.
+  </p>
+  {% endif %}
+
+  {% if error %}<p role="alert" class="alert-error">{{ error }}</p>{% endif %}
+  {% if success %}<p role="alert" class="alert-success">{{ success }}</p>{% endif %}
+
+  <!-- ═══════════════════════════════════════════
+       ПРОФИЛИ
+       ═══════════════════════════════════════════ -->
+  <section>
+    <div class="section-title-row">
+      <h2>Мои профили</h2>
+    </div>
+
+    {% if profiles %}
+    <figure>
+      <table>
+        <thead>
+          <tr>
+            <th>Профиль</th>
+            <th>API-ключ</th>
+            <th>Таймкодов</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in profiles %}
+          <tr>
+            <td><strong>{{ p.name }}</strong></td>
+            <td>
+              <code class="api-key-mono" title="{{ p.api_key }}">
+                {{ p.api_key[:4] }}-••••-••••-••••
+              </code>
+              <button class="btn-icon" title="Показать/скрыть"
+                      onclick="toggleKey(this, '{{ p.api_key }}')">👁</button>
+            </td>
+            <td>{{ p.timecodes_count }}</td>
+            <td class="actions-cell">
+              <form method="POST" action="/profiles/{{ p.id }}/regenerate"
+                    onsubmit="return confirm('Старый ключ перестанет работать в Lampa!')">
+                <button type="submit" class="btn-sm outline secondary">Новый ключ</button>
+              </form>
+              <form method="POST" action="/profiles/{{ p.id }}/clear-timecodes"
+                    onsubmit="return confirm('Удалить все таймкоды профиля «{{ p.name }}»?')">
+                <button type="submit" class="btn-sm outline warning-btn">Очистить</button>
+              </form>
+              <form method="POST" action="/profiles/{{ p.id }}/delete"
+                    onsubmit="return confirm('Удалить профиль «{{ p.name }}» и все его таймкоды?')">
+                <button type="submit" class="btn-sm outline danger-btn">Удалить</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </figure>
+    {% else %}
+    <p class="muted">Профилей ещё нет. Создайте первый.</p>
+    {% endif %}
+
+    <!-- Создать профиль -->
+    <form method="POST" action="/profiles/create" class="inline-form">
+      <input type="text" name="name" placeholder="Название нового профиля (напр. Гостиная)"
+             required maxlength="100" style="flex:1;">
+      <button type="submit">Создать профиль</button>
+    </form>
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       ПРИВЯЗКА УСТРОЙСТВА
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Привязать устройство</strong> — ввести ключ без ручного набора (Lampa на ТВ)</summary>
+    <div class="details-body">
+      <p>
+        В настройках плагина нажмите <em>«Привязать устройство»</em> — на экране появится
+        код вида <kbd>ABC-123</kbd>. Введите его ниже и выберите профиль.
+      </p>
+      <form id="linkDeviceForm" class="device-form">
+        <div class="grid">
+          <label>
+            Код с экрана Lampa
+            <input type="text" id="deviceCode" placeholder="ABC-123" maxlength="8"
+                   class="code-input" autocomplete="off" spellcheck="false">
+          </label>
+          <label>
+            Профиль
+            <select id="deviceProfile">
+              {% for p in profiles %}
+              <option value="{{ p.id }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <button type="submit" id="linkBtn">Привязать</button>
+        <span id="linkStatus" class="status-text"></span>
+      </form>
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       СИНХРОНИЗАЦИЯ MYSHOWS
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Синхронизация MyShows</strong> — импорт просмотренного</summary>
+    <div class="details-body">
+      <p>Все просмотренные фильмы и серии будут отмечены как 100% в выбранном профиле.</p>
+      <form id="myshowsSyncForm">
+        <div class="grid">
+          <label>
+            Профиль
+            <select id="syncProfileId" name="profile_id" required>
+              {% for p in profiles %}
+              <option value="{{ p.id }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Логин MyShows
+            <input type="text" id="myshowsLogin" required autocomplete="username">
+          </label>
+        </div>
+        <label>
+          Пароль MyShows
+          <input type="password" id="myshowsPassword" required autocomplete="current-password">
+        </label>
+        <button type="submit" id="syncBtn">Начать синхронизацию</button>
+        <div id="syncProgress" class="status-box" hidden>
+          <span id="syncStatus"></span>
+        </div>
+      </form>
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       ИМПОРТ ТАЙМКОДОВ
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Импорт таймкодов</strong> — из Lampa или Lampac</summary>
+    <div class="details-body">
+      <div class="grid">
+        <!-- Lampa (file_view) -->
+        <article class="import-card">
+          <header><strong>Из Lampa</strong></header>
+          <p class="muted small">
+            В консоли браузера Lampa выполните:<br>
+            <code>copy(localStorage.getItem('file_view'))</code><br>
+            Вставьте JSON ниже.
+          </p>
+          <form id="importLampaForm">
+            <label>
+              Профиль
+              <select id="importLampaProfile">
+                {% for p in profiles %}<option value="{{ p.api_key }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>
+              JSON
+              <textarea id="importLampaData" rows="4" placeholder='{"572566331":{"percent":95,...}}'></textarea>
+            </label>
+            <button type="submit" id="importLampaBtn" class="secondary">Импортировать</button>
+            <span id="importLampaStatus" class="status-text"></span>
+          </form>
+        </article>
+
+        <!-- Lampac (all_views) -->
+        <article class="import-card">
+          <header><strong>Из Lampac</strong></header>
+          <p class="muted small">
+            Вставьте JSON из эндпоинта вашего Lampac:<br>
+            <code>/timecode/all_views?uid=…</code>
+          </p>
+          <form id="importLampacForm">
+            <label>
+              Профиль
+              <select id="importLampacProfile">
+                {% for p in profiles %}<option value="{{ p.api_key }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>
+              JSON
+              <textarea id="importLampacData" rows="4" placeholder='{"123_movie":{"hash":"..."}}'></textarea>
+            </label>
+            <button type="submit" id="importLampacBtn" class="secondary">Импортировать</button>
+            <span id="importLampacStatus" class="status-text"></span>
+          </form>
+        </article>
+      </div>
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       НАСТРОЙКИ АККАУНТА
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Настройки аккаунта</strong> — пароль и удаление</summary>
+    <div class="details-body">
+
+      <h4>Электронная почта</h4>
+      <p class="muted small">Используется только для восстановления пароля через ссылку.</p>
+      <form method="POST" action="/profile/update-email">
+        <div class="grid">
+          <input type="email" name="email" placeholder="email@example.com"
+                 value="{{ user.email or '' }}" autocomplete="email">
+          <button type="submit" class="secondary">Сохранить</button>
+        </div>
+      </form>
+
+      <hr>
+
+      <h4>Сменить пароль</h4>
+      <form method="POST" action="/profile/reset-password" id="changePasswordForm">
+        <label>
+          Текущий пароль
+          <input type="password" id="current_password" name="current_password" required>
+        </label>
+        <label>
+          Новый пароль
+          <input type="password" id="new_password" name="new_password" required minlength="8">
+        </label>
+        <div id="newPasswordStrength" class="pwd-feedback"></div>
+        <ul id="newPasswordReqs" class="pwd-reqs">
+          <li id="new-req-length">Минимум 8 символов</li>
+          <li id="new-req-uppercase">Заглавная буква</li>
+          <li id="new-req-lowercase">Строчная буква</li>
+          <li id="new-req-digit">Цифра</li>
+        </ul>
+        <label>
+          Подтвердите новый пароль
+          <input type="password" id="new_password_confirm" name="new_password_confirm" required>
+        </label>
+        <div id="newPasswordMatch" class="pwd-feedback"></div>
+        <button type="submit" id="changePasswordBtn" disabled>Сменить пароль</button>
+      </form>
+
+      <hr>
+
+      <h4 style="color: var(--pico-del-color);">Удалить аккаунт</h4>
+      <p class="muted">Все профили и таймкоды будут удалены безвозвратно.</p>
+      <form method="POST" action="/profile/delete"
+            onsubmit="return confirm('Удалить аккаунт и все данные? Это необратимо!')">
+        <div class="grid">
+          <input type="password" name="password" placeholder="Введите пароль" required>
+          <button type="submit" class="outline danger-btn">Удалить аккаунт</button>
+        </div>
+      </form>
+    </div>
+  </details>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/password.js"></script>
+<script src="/static/js/profiles.js"></script>
+<script>
+  // Валидация смены пароля
+  initPasswordValidation({
+    passwordId: 'new_password',
+    confirmId: 'new_password_confirm',
+    strengthId: 'newPasswordStrength',
+    matchId: 'newPasswordMatch',
+    reqIds: {
+      length: 'new-req-length', uppercase: 'new-req-uppercase',
+      lowercase: 'new-req-lowercase', digit: 'new-req-digit',
+    },
+    submitId: 'changePasswordBtn',
+    currentPasswordId: 'current_password',
+  });
+</script>
+{% endblock %}

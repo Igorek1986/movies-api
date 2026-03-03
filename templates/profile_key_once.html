@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}API-ключ — {{ profile.name }}{% endblock %}
+
+{% block body %}
+<main class="container auth-container">
+  <article>
+    <hgroup>
+      <h2>Профиль «{{ profile.name }}»</h2>
+      <p>API-ключ для плагина Lampa</p>
+    </hgroup>
+
+    <p role="alert" class="alert-warning">
+      <strong>Скопируйте ключ</strong> — в дальнейшем его можно посмотреть на странице
+      профилей (кнопка <kbd>👁</kbd> рядом с ключом) или перевыпустить.
+    </p>
+
+    <div class="api-key-box" id="apiKey">{{ api_key }}</div>
+
+    <div class="grid" style="gap: var(--pico-spacing);">
+      <button onclick="copyKey()" class="secondary">Копировать</button>
+      <a href="/profiles" role="button" class="outline">← К профилям</a>
+    </div>
+
+    <details style="margin-top: var(--pico-spacing);">
+      <summary>Как использовать ключ?</summary>
+      <ol>
+        <li>Откройте Lampa → Настройки → Плагины → NUMParser</li>
+        <li>Вставьте ключ в поле «API Key»</li>
+        <li>Или привяжите устройство через код активации (<a href="/profiles">страница профилей</a>)</li>
+      </ol>
+    </details>
+  </article>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyKey() {
+  const key = document.getElementById('apiKey').textContent.trim();
+  navigator.clipboard.writeText(key).then(() => {
+    const btn = event.target;
+    btn.textContent = 'Скопировано!';
+    setTimeout(() => btn.textContent = 'Копировать', 2000);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = key;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+}
+</script>
+{% endblock %}

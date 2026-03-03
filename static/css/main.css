@@ -1,0 +1,251 @@
+/* ============================================================
+   PROFILE PAGES — Pico CSS additions & overrides
+   ============================================================ */
+
+/* Auth pages: narrow centered container */
+.auth-container {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.auth-link {
+  text-align: center;
+  margin-top: var(--pico-spacing);
+}
+
+/* Username chip in nav */
+.username-badge {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Small inline buttons (inside table cells) */
+button.btn-sm,
+a.btn-sm[role="button"] {
+  padding: 0.2em 0.6em;
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+/* Icon-only button (show/hide key) */
+.btn-icon {
+  background: none;
+  border: none;
+  padding: 0 0.3em;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* Warning / danger button outlines */
+button.warning-btn {
+  --pico-color: #d97706;
+  --pico-border-color: #d97706;
+}
+button.danger-btn {
+  --pico-color: var(--pico-del-color);
+  --pico-border-color: var(--pico-del-color);
+}
+
+/* Alert banners */
+[role="alert"].alert-success {
+  background-color: #dcfce7;
+  color: #166534;
+  padding: var(--pico-spacing);
+  border-radius: var(--pico-border-radius);
+  border-left: 4px solid #16a34a;
+}
+
+[role="alert"].alert-error {
+  background-color: #fee2e2;
+  color: #991b1b;
+  padding: var(--pico-spacing);
+  border-radius: var(--pico-border-radius);
+  border-left: 4px solid #dc2626;
+}
+
+[role="alert"].alert-warning {
+  background-color: #fef3c7;
+  color: #92400e;
+  padding: var(--pico-spacing);
+  border-radius: var(--pico-border-radius);
+  border-left: 4px solid #d97706;
+}
+
+/* Monospace API key in table */
+.api-key-mono {
+  font-family: var(--pico-font-family-monospace);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+}
+
+/* Table cell containing multiple action buttons */
+.actions-cell {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.actions-cell form {
+  margin: 0;
+}
+
+/* Inline profile creation form */
+.inline-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: var(--pico-spacing);
+}
+.inline-form input {
+  flex: 1;
+  min-width: 200px;
+  margin-bottom: 0;
+}
+.inline-form button {
+  white-space: nowrap;
+}
+
+/* Section heading row with right-aligned action */
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+/* Details/summary body */
+.details-body {
+  padding: calc(var(--pico-spacing) * 0.75) var(--pico-spacing);
+}
+
+/* Device code input */
+.code-input {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-family: var(--pico-font-family-monospace);
+  font-size: 1.1rem;
+}
+
+/* Inline status messages */
+.status-text {
+  margin-left: 0.5rem;
+  font-size: 0.88rem;
+}
+.status-ok  { color: #16a34a; }
+.status-err { color: #dc2626; }
+
+/* Progress/status box */
+.status-box {
+  margin-top: var(--pico-spacing);
+  padding: 0.75rem var(--pico-spacing);
+  border-radius: var(--pico-border-radius);
+  background: var(--pico-code-background-color);
+}
+
+/* Import cards (side-by-side grid) */
+.import-card {
+  height: 100%;
+}
+.import-card header {
+  padding: 0 0 var(--pico-spacing);
+  border-bottom: 1px solid var(--pico-table-border-color);
+  margin-bottom: var(--pico-spacing);
+}
+
+/* Password strength feedback */
+.pwd-feedback {
+  font-size: 0.82rem;
+  margin-top: -0.4rem;
+  margin-bottom: 0.4rem;
+  min-height: 1.1em;
+}
+.pwd-weak   { color: #dc2626; }
+.pwd-medium { color: #d97706; }
+.pwd-strong { color: #16a34a; }
+
+/* Password requirement list */
+.pwd-reqs {
+  font-size: 0.8rem;
+  padding-left: 1.2rem;
+  color: var(--pico-muted-color);
+  margin-bottom: 0.5rem;
+}
+.pwd-reqs li.req-met {
+  color: #16a34a;
+  text-decoration: line-through;
+}
+
+/* API key display box (profile_key_once.html) */
+.api-key-box {
+  font-family: var(--pico-font-family-monospace);
+  font-size: 1.5rem;
+  letter-spacing: 0.15em;
+  text-align: center;
+  padding: var(--pico-spacing);
+  background: var(--pico-code-background-color);
+  border-radius: var(--pico-border-radius);
+  margin: var(--pico-spacing) 0;
+  word-break: break-all;
+}
+
+/* Muted / small helpers */
+.muted { color: var(--pico-muted-color); }
+.small { font-size: 0.85rem; }
+
+
+/* ============================================================
+   STATS DASHBOARD — Pico CSS additions
+   ============================================================ */
+
+/* Summary grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--pico-spacing);
+  margin-bottom: calc(var(--pico-spacing) * 1.5);
+}
+.stat-card {
+  text-align: center;
+  padding: var(--pico-spacing);
+}
+.stat-card hgroup { margin-bottom: 0; }
+.stat-card hgroup h3 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--pico-primary);
+  margin-bottom: 0.1em;
+}
+.stat-card hgroup p { font-size: 0.82rem; color: var(--pico-muted-color); margin: 0; }
+
+/* Stats tabs */
+.stats-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: var(--pico-spacing);
+}
+.stats-tabs .tab-btn {
+  flex: 1;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+/* Tab content */
+.tab-content        { display: none; }
+.tab-content.active { display: block; }
+
+/* Category grid */
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--pico-spacing);
+}
+.category-card { padding: var(--pico-spacing); }
+.category-card header {
+  padding-bottom: calc(var(--pico-spacing) * 0.5);
+  margin-bottom: calc(var(--pico-spacing) * 0.5);
+  border-bottom: 1px solid var(--pico-table-border-color);
+}

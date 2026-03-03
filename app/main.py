@@ -15,12 +15,23 @@ from logging import DEBUG, INFO
 import aiofiles
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, status, Request, HTTPException
+from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+
+from app.db.database import init_db
+from app.config import get_settings
+from app.api import auth, myshows_sync, profiles, timecodes as timecodes_router
+from app.api.dependencies import get_profile_by_api_key
+from app.api.timecodes import load_profile_timecodes, get_watched_movie_ids
+from app.utils import lampa_hash, build_episode_hash_string
+from app.db.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
+settings = get_settings()
 
 from app import myshows
 from app import stats
@@ -47,6 +58,7 @@ with open(BLOCKED_JSON_PATH, "r", encoding="utf-8") as f:
     BLOCKED_RESPONSE = json.load(f)
 
 STATIC_DIR = BASE_DIR / "static"
+LAMPAC_DIR = BASE_DIR / "lampac"
 # Настройка логирования
 DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
 logging.basicConfig(
@@ -78,6 +90,11 @@ async def lifespan(app: FastAPI):
 
     stats.init_stats()
 
+    # === Startup ===
+    print("🔍 Connecting to:", settings.DATABASE_URL)
+    await init_db()
+    print("✅ Database tables created")
+
     yield  # Приложение работает
 
     # Очистка при завершении (опционально)
@@ -96,15 +113,31 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/lampac", StaticFiles(directory=LAMPAC_DIR), name="lampac")
+
+NP_JS_PATH = LAMPAC_DIR / "np.js"
+
+
+@app.get("/np.js")
+async def serve_np_js(request: Request):
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    base_url = f"{scheme}://{host}"
+    content = NP_JS_PATH.read_text(encoding="utf-8").replace("__BASE_URL__", base_url)
+    return PlainTextResponse(content, media_type="application/javascript")
 
 
 @app.get("/favicon.ico")
 async def favicon():
-    return FileResponse("static/images/favicon/favicon.ico", media_type="image/x-icon")
+    return FileResponse("static/favicon/favicon.ico", media_type="image/x-icon")
 
 
+app.include_router(auth.router)
+app.include_router(profiles.router)
+app.include_router(timecodes_router.router)
 app.include_router(myshows.router)
 app.include_router(stats.router)
+app.include_router(myshows_sync.router)
 
 
 @app.middleware("http")
@@ -356,6 +389,110 @@ def get_clear_cache_password():
     return password
 
 
+def _item_card_id(item: dict) -> str | None:
+    """Вычисляет card_id для элемента в формате '{tmdb_id}_{media_type}'."""
+    try:
+        tmdb_id = int(item.get("id", 0))
+        media_type = item.get("media_type")
+        if not media_type:
+            # Lampac-файлы не содержат media_type — определяем по TMDB-полям:
+            # сериалы имеют seasons/last_episode_to_air, фильмы — нет
+            if item.get("seasons") is not None or item.get("last_episode_to_air") is not None:
+                media_type = "tv"
+            else:
+                media_type = "movie"
+        if tmdb_id:
+            return f"{tmdb_id}_{media_type}"
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _tv_show_watched(item: dict, item_timecodes: dict[str, str], threshold: int = 90) -> bool:
+    """
+    Проверяет, все ли нужные эпизоды сериала просмотрены.
+
+    Сериалы/мультсериалы (есть last_episode_to_air):
+      - для предыдущих сезонов — все серии по seasons[].episode_count
+      - для последнего сезона — только до last_episode_to_air.episode_number
+        (следующая серия могла ещё не выйти)
+
+    Аниме (нет last_episode_to_air):
+      - проверяем все серии во всех сезонах по seasons[].episode_count
+    """
+    original_name = item.get("original_name") or item.get("original_title", "")
+    if not original_name:
+        logger.debug(f"[tv_watched] нет original_name/original_title, item keys={list(item.keys())}")
+        return False
+
+    seasons = [s for s in item.get("seasons", []) if s.get("season_number", 0) > 0]
+    if not seasons:
+        logger.debug(f"[tv_watched] нет seasons для {original_name!r}, raw seasons={item.get('seasons')}")
+        return False
+
+    # Хеши эпизодов с достаточным прогрессом
+    watched_hashes: set[str] = set()
+    for h, data_str in item_timecodes.items():
+        try:
+            if json.loads(data_str).get("percent", 0) >= threshold:
+                watched_hashes.add(h)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    last_ep = item.get("last_episode_to_air")
+    if last_ep:
+        # Сериал/мультсериал: проверяем до последней вышедшей серии
+        last_season = last_ep.get("season_number", 0)
+        last_episode = last_ep.get("episode_number", 0)
+        if not last_season or not last_episode:
+            logger.debug(f"[tv_watched] {original_name!r}: last_episode_to_air без season/episode: {last_ep}")
+            return False
+        season_ep_count = {s["season_number"]: s["episode_count"] for s in seasons}
+        logger.debug(f"[tv_watched] {original_name!r}: проверяем до S{last_season}E{last_episode}, "
+                     f"watched_hashes={len(watched_hashes)}, season_ep_count={season_ep_count}")
+        for sn in range(1, last_season + 1):
+            ep_count = last_episode if sn == last_season else season_ep_count.get(sn, 0)
+            for ep in range(1, ep_count + 1):
+                h = lampa_hash(build_episode_hash_string(sn, ep, original_name))
+                if h not in watched_hashes:
+                    logger.debug(f"[tv_watched] {original_name!r}: S{sn}E{ep} hash={h} НЕ просмотрен")
+                    return False
+    else:
+        # Аниме: нет last_episode_to_air — проверяем все серии всех сезонов
+        for s in seasons:
+            sn = s["season_number"]
+            for ep in range(1, s.get("episode_count", 0) + 1):
+                if lampa_hash(build_episode_hash_string(sn, ep, original_name)) not in watched_hashes:
+                    return False
+
+    return True
+
+
+def _item_watched(item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str]) -> bool:
+    """True если элемент уже полностью просмотрен и должен быть скрыт."""
+    card_id = _item_card_id(item)
+    if not card_id:
+        logger.debug(f"[filter] нет card_id для item id={item.get('id')} media_type={item.get('media_type')}")
+        return False
+    if card_id.endswith("_tv"):
+        if card_id not in timecodes:
+            logger.debug(f"[filter] {card_id} не найден в таймкодах (всего tv-ключей: {sum(1 for k in timecodes if k.endswith('_tv'))})")
+            return False
+        result = _tv_show_watched(item, timecodes[card_id])
+        logger.debug(f"[filter] {card_id} → _tv_show_watched={result}, "
+                     f"original_name={item.get('original_name') or item.get('original_title')!r}, "
+                     f"seasons={len(item.get('seasons', []))}, "
+                     f"last_episode_to_air={item.get('last_episode_to_air')}, "
+                     f"timecode_keys={len(timecodes[card_id])}")
+        return result
+    is_watched = card_id in watched_movies
+    if is_watched:
+        logger.debug(f"[filter] {card_id} → фильм просмотрен")
+    else:
+        logger.debug(f"[filter] {card_id} → не просмотрен (movie-ветка), media_type в item={item.get('media_type')!r}")
+    return is_watched
+
+
 @app.get("/{category}")
 async def get_category(
     category: str,
@@ -363,37 +500,60 @@ async def get_category(
     page: int = 1,
     per_page: int = 20,
     language: str = "ru",
+    apikey: str = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
-        logger.debug(f"Запрос: {category}, страница {page}")
+        logger.debug(
+            f"Запрос: {category}, страница {page}, apikey={'yes' if apikey else 'no'}"
+        )
 
-        # Загрузка данных
+        # Загружаем таймкоды профиля (если передан apikey)
+        timecodes: dict = {}
+        watched_movies: set[str] = set()
+        if apikey:
+            profile = await get_profile_by_api_key(apikey=apikey, db=db)
+            if profile:
+                timecodes = await load_profile_timecodes(db, profile.id)
+                watched_movies = get_watched_movie_ids(timecodes)
+                logger.debug(f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
+                             f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах")
+
+        # Загрузка данных из файла
         data = load_data(category)
 
-        # Обработка lampac-файлов
+        stats.track_api_user(request)
+        stats.track_category_request(request, category)
+
+        # ── Lampac-формат: {"results": [...]} или [...]  ─────────────────────
         if "results" in data or isinstance(data, list):
             items = data["results"] if "results" in data else data
+
+            if timecodes or watched_movies:
+                items = [i for i in items if not _item_watched(i, timecodes, watched_movies)]
+
             total = len(items)
             start = (page - 1) * per_page
-
-            stats.track_api_user(request)
-            stats.track_category_request(request, category)
-
             return {
                 "page": page,
                 "results": items[start : start + per_page],
-                "total_pages": ceil(total / per_page),
+                "total_pages": ceil(total / per_page) if per_page else 1,
                 "total_results": total,
             }
 
-        # Обработка не-lampac файлов
+        # ── NUMParser-формат: {"items": [...]} с обогащением TMDB  ───────────
         if "items" not in data:
             raise ValueError("Неизвестный формат данных")
 
-        items = data["items"]
-        total = len(items)
+        all_items = data["items"]
+
+        # Фильтруем ДО обогащения TMDB — экономим запросы к API
+        if timecodes or watched_movies:
+            all_items = [i for i in all_items if not _item_watched(i, timecodes, watched_movies)]
+
+        total = len(all_items)
         start = (page - 1) * per_page
-        page_items = items[start : start + per_page]
+        page_items = all_items[start : start + per_page]
 
         # Подготовка запросов к TMDB
         requests_to_make = []
@@ -403,10 +563,8 @@ async def get_category(
             if "media_type" in item and "id" in item:
                 try:
                     media_type = str(item["media_type"])
-                    tmdb_id = int(item["id"])  # Гарантируем что id будет int
+                    tmdb_id = int(item["id"])
                     cache_key = (media_type, tmdb_id)
-
-                    # Проверяем кэш более тщательно
                     if cache_key in tmdb_cache and isinstance(
                         tmdb_cache[cache_key], dict
                     ):
@@ -414,21 +572,15 @@ async def get_category(
                     else:
                         requests_to_make.append((media_type, tmdb_id))
                 except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Некорректные данные в item: {item}, ошибка: {str(e)}"
-                    )
+                    logger.warning(f"Некорректные данные в item: {item}, ошибка: {e}")
 
-        # Пакетный запрос для отсутствующих в кэше данных
         if requests_to_make:
-            logger.debug(
-                f"Делаем {len(requests_to_make)} запросов к TMDB для элементов: {requests_to_make}"
-            )
+            logger.debug(f"Запросы к TMDB: {len(requests_to_make)} элементов")
             tmdb_batch = await fetch_tmdb_batch(requests_to_make)
             tmdb_cache.update(tmdb_batch)
             cached_results.update(tmdb_batch)
-            await save_cache_to_file(tmdb_cache)  # Сохраняем обновленный кэш
+            await save_cache_to_file(tmdb_cache)
 
-        # Формируем ответ
         results = []
         for item in page_items:
             if "media_type" in item and "id" in item:
@@ -438,15 +590,12 @@ async def get_category(
                     if enhanced:
                         results.append(enhanced)
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Ошибка обработки item: {item}, ошибка: {str(e)}")
-
-        stats.track_api_user(request)
-        stats.track_category_request(request, category)
+                    logger.warning(f"Ошибка обработки item: {item}, ошибка: {e}")
 
         return {
             "page": page,
             "results": results,
-            "total_pages": ceil(total / per_page),
+            "total_pages": ceil(total / per_page) if per_page else 1,
             "total_results": total,
         }
     except Exception as e:

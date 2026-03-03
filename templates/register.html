@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Регистрация — NUMParser{% endblock %}
+
+{% block body %}
+<main class="container auth-container">
+  <article>
+    <hgroup>
+      <h1>NUMParser</h1>
+      <p>Создайте аккаунт</p>
+    </hgroup>
+
+    {% if error %}
+    <p role="alert" class="alert-error">{{ error }}</p>
+    {% endif %}
+
+    <form method="POST" action="/register" id="registerForm">
+      <!-- Honeypot: боты заполняют это поле, люди — нет -->
+      <input type="text" name="website" id="hp_website" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
+      <label for="username">
+        Имя пользователя
+        <input type="text" id="username" name="username" required autocomplete="username"
+               minlength="3" maxlength="50" autofocus>
+      </label>
+
+      <label for="password">
+        Пароль
+        <input type="password" id="password" name="password" required
+               autocomplete="new-password" minlength="8">
+      </label>
+      <div id="passwordStrength" class="pwd-feedback"></div>
+      <ul id="passwordReqs" class="pwd-reqs">
+        <li id="req-length">Минимум 8 символов</li>
+        <li id="req-uppercase">Заглавная буква</li>
+        <li id="req-lowercase">Строчная буква</li>
+        <li id="req-digit">Цифра</li>
+      </ul>
+
+      <label for="password_confirm">
+        Подтвердите пароль
+        <input type="password" id="password_confirm" name="password_confirm"
+               required autocomplete="new-password">
+      </label>
+      <div id="passwordMatch" class="pwd-feedback"></div>
+
+      <button type="submit" id="submitBtn" disabled>Зарегистрироваться</button>
+    </form>
+
+    <p class="auth-link">Уже есть аккаунт? <a href="/login">Войти</a></p>
+  </article>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/password.js"></script>
+<script>
+  initPasswordValidation({
+    passwordId: 'password',
+    confirmId: 'password_confirm',
+    strengthId: 'passwordStrength',
+    matchId: 'passwordMatch',
+    reqIds: { length: 'req-length', uppercase: 'req-uppercase', lowercase: 'req-lowercase', digit: 'req-digit' },
+    submitId: 'submitBtn',
+  });
+</script>
+{% endblock %}
