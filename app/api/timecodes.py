@@ -121,45 +121,55 @@ _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 
 
 async def _fetch_and_store_media_card(card_id: str, tmdb_id: int, media_type: str) -> None:
-    """Фоновая задача: получает метаданные из TMDB и сохраняет в media_cards если ещё нет."""
-    async with async_session_maker() as db:
-        existing = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
-        if existing.scalar_one_or_none():
-            return
+    """Фоновая задача: получает метаданные из TMDB и сохраняет/обновляет в media_cards."""
+    settings = get_settings()
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    endpoint = "tv" if media_type == "tv" else "movie"
+    title_key = "name" if media_type == "tv" else "title"
+    orig_key = "original_name" if media_type == "tv" else "original_title"
+    date_key = "first_air_date" if media_type == "tv" else "release_date"
 
-        settings = get_settings()
-        headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
-        endpoint = "tv" if media_type == "tv" else "movie"
-        title_key = "name" if media_type == "tv" else "title"
-        orig_key = "original_name" if media_type == "tv" else "original_title"
-        date_key = "first_air_date" if media_type == "tv" else "release_date"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                return
+            data = resp.json()
 
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
-                    headers=headers,
-                )
-                if resp.status_code != 200:
-                    return
-                data = resp.json()
+        date = data.get(date_key) or ""
+        values: dict = {
+            "card_id": card_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": data.get(title_key) or "",
+            "original_title": data.get(orig_key) or "",
+            "poster_path": data.get("poster_path") or "",
+            "year": date[:4],
+            "backdrop_path": data.get("backdrop_path") or "",
+            "overview": data.get("overview") or "",
+            "vote_average": data.get("vote_average"),
+            "release_date": date,
+        }
+        if media_type == "tv":
+            seasons = data.get("seasons")
+            values["last_air_date"] = data.get("last_air_date") or ""
+            values["number_of_seasons"] = data.get("number_of_seasons")
+            values["seasons_json"] = json.dumps(seasons, ensure_ascii=False) if seasons else None
 
-            date = data.get(date_key) or ""
-            mc_stmt = pg_insert(MediaCard).values([{
-                "card_id": card_id,
-                "tmdb_id": tmdb_id,
-                "media_type": media_type,
-                "title": data.get(title_key) or "",
-                "original_title": data.get(orig_key) or "",
-                "poster_path": data.get("poster_path") or "",
-                "year": date[:4],
-            }])
-            mc_stmt = mc_stmt.on_conflict_do_nothing(index_elements=["card_id"])
+        async with async_session_maker() as db:
+            mc_stmt = pg_insert(MediaCard).values([values])
+            mc_stmt = mc_stmt.on_conflict_do_update(
+                index_elements=["card_id"],
+                set_={k: mc_stmt.excluded[k] for k in values if k != "card_id"},
+            )
             await db.execute(mc_stmt)
             await db.commit()
-            logger.debug(f"MediaCard saved: {card_id}")
-        except Exception as e:
-            logger.warning(f"MediaCard fetch failed for {card_id}: {e}")
+        logger.debug(f"MediaCard saved: {card_id}")
+    except Exception as e:
+        logger.warning(f"MediaCard fetch failed for {card_id}: {e}")
 
 
 # ---------------------------------------------------------------------------

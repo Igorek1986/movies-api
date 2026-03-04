@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 from logging import DEBUG, INFO
 
-import aiofiles
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
@@ -21,15 +20,18 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import init_db
+from app.db.database import init_db, async_session_maker
+from app.db.models import MediaCard
 from app.config import get_settings
 from app.api import auth, myshows_sync, profiles, timecodes as timecodes_router
 from app.api.dependencies import get_profile_by_api_key
 from app.api.timecodes import load_profile_timecodes, get_watched_movie_ids
 from app.utils import lampa_hash, build_episode_hash_string
 from app.db.database import get_db
-from sqlalchemy.ext.asyncio import AsyncSession
 
 settings = get_settings()
 
@@ -52,7 +54,6 @@ else:
 # Получаем путь к директории, где находится текущий скрипт
 BASE_DIR = Path(__file__).parent.parent
 BLOCKED_JSON_PATH = BASE_DIR / "blocked.json"
-CACHE_FILE = BASE_DIR / "tmdb_cache.json"
 tmdb_cache: Dict[Tuple[str, int], Any] = None
 with open(BLOCKED_JSON_PATH, "r", encoding="utf-8") as f:
     BLOCKED_RESPONSE = json.load(f)
@@ -75,19 +76,6 @@ async def lifespan(app: FastAPI):
     """Собственный обработчик жизненного цикла приложения"""
     global tmdb_cache
 
-    # Инициализация кэша
-    tmdb_cache = await load_cache_from_file()
-    logger.debug(f"Кэш инициализирован, записей: {len(tmdb_cache)}")
-
-    # Логируем первые 5 ключей для проверки
-    sample_keys = list(tmdb_cache.keys())[:5]
-    logger.debug(f"Пример ключей в кэше: {sample_keys}")
-
-    # Добавьте проверку путей
-    logger.info(f"Рабочая директория: {BASE_DIR}")
-    logger.info(f"Директория с релизами: {RELEASES_DIR}")
-    logger.info(f"Файл кэша: {CACHE_FILE}")
-
     stats.init_stats()
 
     # === Startup ===
@@ -95,10 +83,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("✅ Database tables created")
 
-    yield  # Приложение работает
+    # Загрузка TMDB-кэша из PostgreSQL
+    tmdb_cache = await load_cache_from_db()
+    logger.info(f"TMDB кэш загружен из БД, записей: {len(tmdb_cache)}")
+    logger.info(f"Рабочая директория: {BASE_DIR}")
+    logger.info(f"Директория с релизами: {RELEASES_DIR}")
 
-    # Очистка при завершении (опционально)
-    await save_cache_to_file(tmdb_cache)
+    yield  # Приложение работает
 
 
 # app = FastAPI()
@@ -175,62 +166,126 @@ logger.debug("Настройки окружения загружены успе�
 executor = ThreadPoolExecutor(max_workers=10)  # Пул потоков для запросов
 
 
-# Кэш для TMDB данных
-def tuple_to_str(key: Tuple[str, int]) -> str:
-    """Преобразует кортеж (media_type, tmdb_id) в строку"""
-    return f"{key[0]}_{key[1]}"
+def _extract_tmdb_fields(media_type: str, data: dict) -> dict:
+    """Извлекает только нужные поля из полного ответа TMDB API для in-memory кэша."""
+    base = {
+        "poster_path": data.get("poster_path", ""),
+        "backdrop_path": data.get("backdrop_path", ""),
+        "overview": data.get("overview", ""),
+        "vote_average": data.get("vote_average", 0),
+    }
+    if media_type == "movie":
+        base.update({
+            "title": data.get("title", ""),
+            "original_title": data.get("original_title", ""),
+            "release_date": data.get("release_date", ""),
+        })
+    else:  # tv
+        base.update({
+            "name": data.get("name", ""),
+            "original_name": data.get("original_name", ""),
+            "first_air_date": data.get("first_air_date", ""),
+            "last_air_date": data.get("last_air_date", ""),
+            "number_of_seasons": data.get("number_of_seasons", 0),
+            "seasons": data.get("seasons", []),
+        })
+    return base
 
 
-def str_to_tuple(key_str: str) -> Tuple[str, int]:
-    """Преобразует строку обратно в кортеж"""
-    parts = key_str.split("_")
-    return (parts[0], int(parts[1]))
-
-
-async def save_cache_to_file(cache: Dict[Tuple[str, int], Any]) -> None:
-    """Асинхронно сохраняет кэш в сжатый GZIP файл"""
+async def load_cache_from_db() -> Dict[Tuple[str, int], Any]:
+    """Загружает TMDB-кэш из таблицы media_cards."""
     try:
-        # Преобразуем кортежные ключи в строки для JSON
-        cache_with_str_keys = {f"{k[0]}_{k[1]}": v for k, v in cache.items()}
+        async with async_session_maker() as db:
+            result = await db.execute(select(MediaCard))
+            rows = result.scalars().all()
 
-        async with aiofiles.open(CACHE_FILE, mode="wb") as f:
-            # Сжимаем данные с помощью gzip
-            json_data = json.dumps(cache_with_str_keys, ensure_ascii=False).encode(
-                "utf-8"
-            )
-            compressed_data = gzip.compress(json_data)
-            await f.write(compressed_data)
-
-        logger.debug(f"Кэш TMDB сохранен в сжатый файл: {CACHE_FILE}")
+        cache: Dict[Tuple[str, int], Any] = {}
+        for mc in rows:
+            key = (mc.media_type, mc.tmdb_id)
+            if mc.media_type == "movie":
+                cache[key] = {
+                    "title": mc.title or "",
+                    "original_title": mc.original_title or "",
+                    "poster_path": mc.poster_path or "",
+                    "backdrop_path": mc.backdrop_path or "",
+                    "overview": mc.overview or "",
+                    "vote_average": mc.vote_average or 0,
+                    "release_date": mc.release_date or "",
+                }
+            else:  # tv
+                seasons = []
+                if mc.seasons_json:
+                    try:
+                        seasons = json.loads(mc.seasons_json)
+                    except Exception:
+                        pass
+                cache[key] = {
+                    "name": mc.title or "",
+                    "original_name": mc.original_title or "",
+                    "poster_path": mc.poster_path or "",
+                    "backdrop_path": mc.backdrop_path or "",
+                    "overview": mc.overview or "",
+                    "vote_average": mc.vote_average or 0,
+                    "first_air_date": mc.release_date or "",
+                    "last_air_date": mc.last_air_date or "",
+                    "number_of_seasons": mc.number_of_seasons or 0,
+                    "seasons": seasons,
+                }
+        return cache
     except Exception as e:
-        logger.error(f"Ошибка сохранения сжатого кэша: {str(e)}")
-
-
-async def load_cache_from_file() -> Dict[Tuple[str, int], Any]:
-    """Асинхронно загружает кэш из сжатого GZIP файла"""
-    try:
-        if not CACHE_FILE.exists():
-            logger.debug("Файл кэша не найден, будет создан новый")
-            return {}
-
-        async with aiofiles.open(CACHE_FILE, mode="rb") as f:
-            compressed_data = await f.read()
-            json_data = gzip.decompress(compressed_data).decode("utf-8")
-            cache_with_str_keys = json.loads(json_data)
-
-            # Преобразуем строковые ключи обратно в кортежи с правильными типами
-            result = {}
-            for k, v in cache_with_str_keys.items():
-                media_type, tmdb_id_str = k.split("_")
-                try:
-                    tmdb_id = int(tmdb_id_str)
-                    result[(media_type, tmdb_id)] = v
-                except ValueError:
-                    logger.warning(f"Некорректный TMDB ID в кэше: {tmdb_id_str}")
-            return result
-    except Exception as e:
-        logger.error(f"Ошибка загрузки кэша: {str(e)}")
+        logger.error(f"Ошибка загрузки TMDB кэша из БД: {e}")
         return {}
+
+
+async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
+    """Сохраняет TMDB-данные в media_cards (upsert)."""
+    card_id = f"{tmdb_id}_{media_type}"
+    if media_type == "movie":
+        date_val = data.get("release_date") or ""
+        values = {
+            "card_id": card_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": data.get("title") or "",
+            "original_title": data.get("original_title") or "",
+            "poster_path": data.get("poster_path") or "",
+            "year": date_val[:4],
+            "backdrop_path": data.get("backdrop_path") or "",
+            "overview": data.get("overview") or "",
+            "vote_average": data.get("vote_average"),
+            "release_date": date_val,
+        }
+    else:  # tv
+        date_val = data.get("first_air_date") or ""
+        seasons = data.get("seasons")
+        values = {
+            "card_id": card_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": data.get("name") or "",
+            "original_title": data.get("original_name") or "",
+            "poster_path": data.get("poster_path") or "",
+            "year": date_val[:4],
+            "backdrop_path": data.get("backdrop_path") or "",
+            "overview": data.get("overview") or "",
+            "vote_average": data.get("vote_average"),
+            "release_date": date_val,
+            "last_air_date": data.get("last_air_date") or "",
+            "number_of_seasons": data.get("number_of_seasons"),
+            "seasons_json": json.dumps(seasons, ensure_ascii=False) if seasons else None,
+        }
+
+    try:
+        async with async_session_maker() as db:
+            stmt = pg_insert(MediaCard).values([values])
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["card_id"],
+                set_={k: stmt.excluded[k] for k in values if k != "card_id"},
+            )
+            await db.execute(stmt)
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Ошибка upsert MediaCard {card_id}: {e}")
 
 
 def convert_date(date_str: str) -> str:
@@ -315,15 +370,12 @@ async def fetch_tmdb_batch(requests_list: list) -> dict:
     for future in asyncio.as_completed(futures):
         key, data = await future
         if data:  # Сохраняем только успешные ответы
-            results[key] = data
-            tmdb_cache[key] = data  # Обновляем глобальный кэш
+            media_type, tmdb_id = key
+            cleaned = _extract_tmdb_fields(media_type, data)
+            results[key] = cleaned
+            tmdb_cache[key] = cleaned
+            asyncio.create_task(upsert_tmdb_cache(media_type, tmdb_id, data))
 
-            # Периодически сохраняем (каждые 10 записей)
-            if len(results) % 10 == 0:
-                await save_cache_to_file(tmdb_cache)
-
-    # Финализируем сохранение
-    await save_cache_to_file(tmdb_cache)
     return results
 
 
@@ -579,7 +631,6 @@ async def get_category(
             tmdb_batch = await fetch_tmdb_batch(requests_to_make)
             tmdb_cache.update(tmdb_batch)
             cached_results.update(tmdb_batch)
-            await save_cache_to_file(tmdb_cache)
 
         results = []
         for item in page_items:
@@ -612,17 +663,16 @@ async def health_check():
 
 @app.get("/cache/path")
 async def get_cache_path():
-    """Возвращает абсолютный путь к файлу кэша"""
+    """Возвращает информацию об источнике TMDB-кэша"""
     return {
-        "cache_path": str(CACHE_FILE.absolute()),
-        "exists": CACHE_FILE.exists(),
-        "size": CACHE_FILE.stat().st_size if CACHE_FILE.exists() else 0,
+        "source": "PostgreSQL (media_cards table)",
+        "cache_size": len(tmdb_cache),
     }
 
 
 @app.post("/cache/clear")
 async def clear_cache(x_password: str = Header(..., alias="X-Password")):
-    """Очистка кэша с проверкой пароля"""
+    """Очистка in-memory кэша с проверкой пароля"""
     correct_password = os.getenv("CACHE_CLEAR_PASSWORD")
 
     if not correct_password or x_password != correct_password:
@@ -632,7 +682,6 @@ async def clear_cache(x_password: str = Header(..., alias="X-Password")):
 
     global tmdb_cache
     tmdb_cache = {}
-    await save_cache_to_file(tmdb_cache)
 
     return PlainTextResponse("Кэш успешно очищен\n", status_code=200)
 
@@ -640,15 +689,10 @@ async def clear_cache(x_password: str = Header(..., alias="X-Password")):
 @app.get("/cache/info")
 async def cache_info():
     """Возвращает информацию о кэше"""
-    cache_size = len(tmdb_cache)
-    cache_size_mb = (
-        CACHE_FILE.stat().st_size / (1024 * 1024) if CACHE_FILE.exists() else 0
-    )
-
     return {
-        "cache_size": cache_size,
-        "cache_size_mb": round(cache_size_mb, 2),
-        "sample_keys": list(tmdb_cache.keys())[:5],
+        "cache_size": len(tmdb_cache),
+        "source": "PostgreSQL",
+        "sample_keys": [f"{k[0]}_{k[1]}" for k in list(tmdb_cache.keys())[:5]],
     }
 
 

@@ -4,6 +4,7 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     UniqueConstraint,
     Text,
@@ -102,6 +103,14 @@ class MediaCard(Base):
     original_title = Column(String(500), nullable=True)
     poster_path = Column(String(300), nullable=True)
     year = Column(String(4), nullable=True)
+    # Extended TMDB cache fields
+    backdrop_path = Column(String(300), nullable=True)
+    overview = Column(Text, nullable=True)
+    vote_average = Column(Float, nullable=True)
+    release_date = Column(String(20), nullable=True)   # release_date (movie) / first_air_date (tv)
+    last_air_date = Column(String(20), nullable=True)  # tv only
+    number_of_seasons = Column(Integer, nullable=True) # tv only
+    seasons_json = Column(Text, nullable=True)          # JSON list of seasons, tv only
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
