@@ -1,38 +1,14 @@
 // Password injected by template via window.STATS_PASSWORD
 const password = window.STATS_PASSWORD || '';
 
-let autoRefreshInterval = null;
 let isRefreshing = false;
 
-document.addEventListener('DOMContentLoaded', () => {
-    const autoRefreshEl = document.getElementById('autoRefresh');
-    const saved = localStorage.getItem('stats_autoRefresh');
-    autoRefreshEl.checked = saved !== 'false';
-    if (autoRefreshEl.checked) startAutoRefresh();
-
-    autoRefreshEl.addEventListener('change', (e) => {
-        localStorage.setItem('stats_autoRefresh', e.target.checked);
-        e.target.checked ? startAutoRefresh() : stopAutoRefresh();
-    });
-});
-
-function startAutoRefresh() {
-    stopAutoRefresh();
-    autoRefreshInterval = setInterval(refreshData, 30000);
-}
-function stopAutoRefresh() {
-    if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
-}
 
 function switchTab(section, period, btn) {
     document.querySelectorAll(`#${section}-today, #${section}-total`).forEach(el => el.classList.remove('active'));
-    // reset tab buttons in same group
     if (btn) {
-        btn.closest('.stats-tabs').querySelectorAll('.tab-btn').forEach(b => {
-            b.classList.remove('outline');
-            b.classList.add('outline', 'secondary');
-        });
-        btn.classList.remove('secondary');
+        btn.closest('.stats-tabs').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
     }
     document.getElementById(`${section}-${period}`).classList.add('active');
 }
@@ -44,14 +20,16 @@ async function refreshData() {
     isRefreshing = true;
 
     try {
-        const res = await fetch('/stats/api', { headers: { 'X-Password': password } });
-        if (!res.ok) throw new Error('Ошибка загрузки');
+        const res = await fetch('/stats/api', { headers: { 'X-Password': password }, cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         updateDashboard(data);
         const el = document.getElementById('lastUpdate');
-        if (el) el.textContent = `Обновлено: ${new Date().toLocaleTimeString('ru-RU')}`;
+        if (el) el.textContent = new Date().toLocaleTimeString('ru-RU');
     } catch (err) {
         console.error('Stats refresh error:', err);
+        const el = document.getElementById('lastUpdate');
+        if (el) el.textContent = `Ошибка: ${err.message}`;
     } finally {
         if (btn) { btn.removeAttribute('aria-busy'); btn.disabled = false; }
         isRefreshing = false;
@@ -59,46 +37,62 @@ async function refreshData() {
 }
 
 function updateDashboard(stats) {
-    setText('myshowsTodayCount',   stats.myshows?.today?.count);
-    setText('myshowsTotalCount',   stats.myshows?.total?.count);
-    setText('apiUsersTodayCount',  stats.api_users?.today?.count);
-    setText('apiUsersTotalCount',  stats.api_users?.total?.count);
-    setText('categoriesTodayCount',    stats.categories?.today?.count);
-    setText('categoriesTodayRequests', stats.categories?.today?.total_requests);
+    setText('usersTodayCount',       stats.registered_users?.today?.count);
+    setText('usersTotalCount',       stats.registered_users?.total?.count);
+    setText('myshowsTodayCount',     stats.myshows?.today?.count);
+    setText('myshowsTotalCount',     stats.myshows?.total?.count);
+    setText('apiUsersTodayCount',    stats.api_users?.today?.count);
+    setText('apiUsersTotalCount',    stats.api_users?.total?.count);
+    setText('categoriesTodayCount',      stats.categories?.today?.count);
+    setText('categoriesTodayRequests',   stats.categories?.today?.total_requests);
     setText('categoriesTodayTotalBadge', stats.categories?.today?.total_requests);
     setText('categoriesTotalTotalBadge', stats.categories?.total?.total_requests);
+
+    // Registered users today
+    rebuildTable('usersTodayTable', stats.registered_users?.today?.detail, (rows) =>
+        rows.map(([username, created_at]) => {
+            return `<tr><td data-label="Логин"><strong>${esc(username)}</strong></td><td data-label="Время">${esc(created_at) || '—'}</td></tr>`;
+        }),
+    '<tr><td colspan="99" class="muted">Новых пользователей сегодня нет</td></tr>');
+
+    // Registered users total
+    rebuildTable('usersTotalTable', stats.registered_users?.total?.detail, (rows) =>
+        rows.map(([username, created_at]) => {
+            return `<tr><td data-label="Логин"><strong>${esc(username)}</strong></td><td data-label="Дата">${esc(created_at) || '—'}</td></tr>`;
+        }),
+    '<tr><td colspan="99" class="muted">Нет данных</td></tr>');
 
     // MyShows today
     rebuildTable('myshowsTodayTable', stats.myshows?.today?.detail, (rows) => {
         const total = rows.reduce((s, r) => s + (r[1] || 0), 0);
         return rows.map(([login, req]) =>
-            `<tr><td><strong>${esc(login)}</strong></td><td>${req}</td><td>${pct(req, total)}</td></tr>`
-        ).join('');
-    }, '<tr><td colspan="3" class="muted">Нет данных</td></tr>');
+            `<tr><td data-label="Логин"><strong>${esc(login)}</strong></td><td data-label="Запросов">${req}</td><td data-label="Доля">${pct(req, total)}</td></tr>`
+        );
+    }, '<tr><td colspan="99" class="muted">Нет данных</td></tr>');
 
     // MyShows total
     rebuildTable('myshowsTotalTable', stats.myshows?.total?.detail, (rows) => {
         const total = rows.reduce((s, r) => s + (r[1] || 0), 0);
         return rows.map(([login, req]) =>
-            `<tr><td><strong>${esc(login)}</strong></td><td>${req}</td><td>${pct(req, total)}</td></tr>`
-        ).join('');
-    }, '<tr><td colspan="3" class="muted">Нет данных</td></tr>');
+            `<tr><td data-label="Логин"><strong>${esc(login)}</strong></td><td data-label="Запросов">${req}</td><td data-label="Доля">${pct(req, total)}</td></tr>`
+        );
+    }, '<tr><td colspan="99" class="muted">Нет данных</td></tr>');
 
     // API users today
     rebuildTable('apiUsersTodayTable', stats.api_users?.today?.detail, (rows) => {
         const total = rows.reduce((s, r) => s + (r[1] || 0), 0);
         return rows.map(([ip, req, country, city, region, flag]) =>
-            `<tr><td><code>${esc(ip)}</code></td><td>${locationStr(flag, country, city, region)}</td><td>${req}</td><td>${pct(req, total)}</td></tr>`
-        ).join('');
-    }, '<tr><td colspan="4" class="muted">Нет данных</td></tr>');
+            `<tr><td data-label="IP"><code>${esc(ip)}</code></td><td data-label="Место">${locationStr(flag, country, city, region)}</td><td data-label="Запросов">${req}</td><td data-label="Доля">${pct(req, total)}</td></tr>`
+        );
+    }, '<tr><td colspan="99" class="muted">Нет данных</td></tr>');
 
     // API users total
     rebuildTable('apiUsersTotalTable', stats.api_users?.total?.detail, (rows) => {
         const total = rows.reduce((s, r) => s + (r[1] || 0), 0);
         return rows.map(([ip, req, country, city, region, flag]) =>
-            `<tr><td><code>${esc(ip)}</code></td><td>${locationStr(flag, country, city, region)}</td><td>${req}</td><td>${pct(req, total)}</td></tr>`
-        ).join('');
-    }, '<tr><td colspan="4" class="muted">Нет данных</td></tr>');
+            `<tr><td data-label="IP"><code>${esc(ip)}</code></td><td data-label="Место">${locationStr(flag, country, city, region)}</td><td data-label="Запросов">${req}</td><td data-label="Доля">${pct(req, total)}</td></tr>`
+        );
+    }, '<tr><td colspan="99" class="muted">Нет данных</td></tr>');
 
     // Categories
     rebuildCategoryGrid('categoriesTodayGrid',
@@ -111,11 +105,33 @@ function updateDashboard(stats) {
         stats.categories?.total?.total_requests_per_category);
 }
 
+// builder(rows) must return an array of <tr> HTML strings
 function rebuildTable(id, rows, builder, empty) {
     const tbody = document.querySelector(`#${id} tbody`);
     if (!tbody) return;
     if (!rows || !rows.length) { tbody.innerHTML = empty; return; }
-    tbody.innerHTML = builder(rows);
+    const rowsHtml = builder(rows);
+    const visible = rowsHtml.slice(0, 5).join('');
+    const extra = rowsHtml.slice(5).map(h => h.replace(/^<tr/, '<tr class="tbl-extra" style="display:none"')).join('');
+    const btn = rowsHtml.length > 5
+        ? `<tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё ${rowsHtml.length - 5}…</button></td></tr>`
+        : '';
+    tbody.innerHTML = visible + extra + btn;
+}
+
+function expandTable(btn) {
+    const tbody = btn.closest('tbody');
+    tbody.querySelectorAll('.tbl-extra').forEach(r => r.style.display = '');
+    const row = btn.closest('.tbl-show-more');
+    row.innerHTML = `<td colspan="99"><button class="outline secondary btn-sm" onclick="collapseTable(this)">Свернуть</button></td>`;
+}
+
+function collapseTable(btn) {
+    const tbody = btn.closest('tbody');
+    tbody.querySelectorAll('.tbl-extra').forEach(r => r.style.display = 'none');
+    const extras = tbody.querySelectorAll('.tbl-extra').length;
+    const row = btn.closest('.tbl-show-more');
+    row.innerHTML = `<td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё ${extras}…</button></td>`;
 }
 
 function rebuildCategoryGrid(id, detail, uniqueIps, totalReq) {
@@ -125,17 +141,35 @@ function rebuildCategoryGrid(id, detail, uniqueIps, totalReq) {
         (totalReq?.[b[0]] || 0) - (totalReq?.[a[0]] || 0)
     );
     grid.innerHTML = entries.map(([cat, ips]) => {
-        const rows = (ips || []).map(item =>
-            `<tr><td><code>${esc(item.ip)}</code></td><td>${item.requests}</td></tr>`
+        const rows = (ips || []).map((item, i) =>
+            `<tr${i >= 5 ? ' class="cat-extra" style="display:none"' : ''}><td><code>${esc(item.ip)}</code></td><td>${item.requests}</td></tr>`
         ).join('');
+        const moreBtn = ips && ips.length > 5
+            ? `<tr class="cat-show-more"><td colspan="2"><button class="outline secondary btn-sm" onclick="expandCategory(this)">Ещё ${ips.length - 5}…</button></td></tr>`
+            : '';
         return `<article class="category-card">
             <header><strong>${esc(cat)}</strong>
             <small class="muted"> — ${uniqueIps?.[cat] || 0} IP, ${totalReq?.[cat] || 0} запросов</small></header>
             <table><thead><tr><th>IP адрес</th><th>Запросов</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="2" class="muted">Нет данных</td></tr>'}</tbody></table>
+            <tbody>${rows || '<tr><td colspan="2" class="muted">Нет данных</td></tr>'}${moreBtn}</tbody></table>
         </article>`;
     }).join('');
     if (!entries.length) grid.innerHTML = '<p class="muted">Нет данных</p>';
+}
+
+function expandCategory(btn) {
+    const tbody = btn.closest('tbody');
+    tbody.querySelectorAll('.cat-extra').forEach(r => r.style.display = '');
+    const row = btn.closest('.cat-show-more');
+    row.innerHTML = `<td colspan="2"><button class="outline secondary btn-sm" onclick="collapseCategory(this)">Свернуть</button></td>`;
+}
+
+function collapseCategory(btn) {
+    const tbody = btn.closest('tbody');
+    tbody.querySelectorAll('.cat-extra').forEach(r => r.style.display = 'none');
+    const extras = tbody.querySelectorAll('.cat-extra').length;
+    const row = btn.closest('.cat-show-more');
+    row.innerHTML = `<td colspan="2"><button class="outline secondary btn-sm" onclick="expandCategory(this)">Ещё ${extras}…</button></td>`;
 }
 
 function setText(id, val) {

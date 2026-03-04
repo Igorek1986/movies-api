@@ -174,7 +174,7 @@ async def get_stats_data() -> dict:
             text("SELECT login, requests FROM stats_myshows_users WHERE date = :d ORDER BY requests DESC"),
             {"d": today},
         )
-        myshows_today = res.fetchall()
+        myshows_today = [tuple(r) for r in res.fetchall()]
 
         # ── MyShows all time ──────────────────────────────────────
         res = await db.execute(
@@ -185,7 +185,7 @@ async def get_stats_data() -> dict:
         res = await db.execute(
             text("SELECT login, SUM(requests) AS total FROM stats_myshows_users GROUP BY login ORDER BY total DESC")
         )
-        myshows_total = res.fetchall()
+        myshows_total = [tuple(r) for r in res.fetchall()]
 
         # ── API users today ───────────────────────────────────────
         res = await db.execute(
@@ -199,7 +199,7 @@ async def get_stats_data() -> dict:
                     FROM stats_api_users WHERE date = :d ORDER BY requests DESC"""),
             {"d": today},
         )
-        api_users_today = res.fetchall()
+        api_users_today = [tuple(r) for r in res.fetchall()]
 
         # ── API users all time ────────────────────────────────────
         res = await db.execute(
@@ -212,7 +212,7 @@ async def get_stats_data() -> dict:
                     FROM stats_api_users GROUP BY ip, country, city, region, flag_emoji
                     ORDER BY total DESC""")
         )
-        api_users_total = res.fetchall()
+        api_users_total = [tuple(r) for r in res.fetchall()]
 
         # ── Categories today ──────────────────────────────────────
         res = await db.execute(
@@ -283,12 +283,12 @@ async def get_stats_data() -> dict:
                     WHERE DATE(created_at) = :d ORDER BY created_at DESC"""),
             {"d": today_date},
         )
-        users_today_detail = res.fetchall()
+        users_today_detail = [(r[0], r[1].strftime('%H:%M:%S') if r[1] else None) for r in res.fetchall()]
 
         res = await db.execute(
-            text("SELECT username, created_at FROM users ORDER BY created_at DESC LIMIT 50")
+            text("SELECT username, created_at FROM users ORDER BY created_at DESC")
         )
-        users_total_detail = res.fetchall()
+        users_total_detail = [(r[0], r[1].strftime('%Y-%m-%d %H:%M') if r[1] else None) for r in res.fetchall()]
 
         # ── Totals ────────────────────────────────────────────────
         res = await db.execute(text("SELECT COUNT(*) FROM stats_myshows_users"))

@@ -6,15 +6,10 @@
   <nav>
     <ul>
       <li><strong>Статистика API</strong></li>
+      <li><small class="muted" id="lastUpdate">{{ now.strftime('%H:%M:%S') }}</small></li>
     </ul>
     <ul>
-      <li>
-        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin:0;font-size:0.85rem;">
-          <input type="checkbox" id="autoRefresh" role="switch" style="margin:0;">
-          Авто (30с)
-        </label>
-      </li>
-      <li>
+<li>
         <button id="refreshBtn" class="outline secondary btn-sm" onclick="refreshData()">Обновить</button>
       </li>
       <li><a href="/stats" role="button" class="outline secondary btn-sm">Выйти</a></li>
@@ -26,6 +21,18 @@
 
   <!-- ═══ Сводка ════════════════════════════════════════════════ -->
   <div class="stats-grid">
+    <article class="stat-card">
+      <hgroup>
+        <h3 id="usersTodayCount">{{ stats.registered_users.today.count }}</h3>
+        <p>Новых пользователей сегодня</p>
+      </hgroup>
+    </article>
+    <article class="stat-card">
+      <hgroup>
+        <h3 id="usersTotalCount">{{ stats.registered_users.total.count }}</h3>
+        <p>Пользователей всего</p>
+      </hgroup>
+    </article>
     <article class="stat-card">
       <hgroup>
         <h3 id="myshowsTodayCount">{{ stats.myshows.today.count }}</h3>
@@ -62,19 +69,64 @@
         <p>Запросов сегодня</p>
       </hgroup>
     </article>
-    <article class="stat-card">
-      <hgroup>
-        <h3 id="usersTodayCount">{{ stats.registered_users.today.count }}</h3>
-        <p>Новых пользователей сегодня</p>
-      </hgroup>
-    </article>
-    <article class="stat-card">
-      <hgroup>
-        <h3 id="usersTotalCount">{{ stats.registered_users.total.count }}</h3>
-        <p>Пользователей всего</p>
-      </hgroup>
-    </article>
   </div>
+
+  <!-- ═══ Зарегистрированные пользователи ══════════════════════ -->
+  <section>
+    <div class="section-title-row">
+      <h2>Зарегистрированные пользователи</h2>
+    </div>
+    <div class="stats-tabs">
+      <button class="tab-btn active" onclick="switchTab('users', 'today', this)">Сегодня</button>
+      <button class="tab-btn" onclick="switchTab('users', 'total', this)">Всё время</button>
+    </div>
+
+    <div id="users-today" class="tab-content active">
+      <div class="mobile-cards">
+        <figure>
+          <table id="usersTodayTable">
+            <thead><tr><th>Логин</th><th>Время регистрации</th></tr></thead>
+            <tbody>
+            {% for username, created_at in stats.registered_users.today.detail %}
+            <tr{% if loop.index > 5 %} class="tbl-extra" style="display:none"{% endif %}>
+              <td data-label="Логин"><strong>{{ username }}</strong></td>
+              <td data-label="Время">{{ created_at or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="99" class="muted">Новых пользователей сегодня нет</td></tr>
+            {% endfor %}
+            {% if stats.registered_users.today.detail|length > 5 %}
+            <tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё {{ stats.registered_users.today.detail|length - 5 }}…</button></td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </figure>
+      </div>
+    </div>
+
+    <div id="users-total" class="tab-content">
+      <div class="mobile-cards">
+        <figure>
+          <table id="usersTotalTable">
+            <thead><tr><th>Логин</th><th>Дата регистрации</th></tr></thead>
+            <tbody>
+            {% for username, created_at in stats.registered_users.total.detail %}
+            <tr{% if loop.index > 5 %} class="tbl-extra" style="display:none"{% endif %}>
+              <td data-label="Логин"><strong>{{ username }}</strong></td>
+              <td data-label="Дата">{{ created_at or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="99" class="muted">Нет данных</td></tr>
+            {% endfor %}
+            {% if stats.registered_users.total.detail|length > 5 %}
+            <tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё {{ stats.registered_users.total.detail|length - 5 }}…</button></td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </figure>
+      </div>
+    </div>
+  </section>
 
   <!-- ═══ MyShows пользователи ══════════════════════════════════ -->
   <section>
@@ -82,48 +134,58 @@
       <h2>MyShows пользователи</h2>
     </div>
     <div class="stats-tabs">
-      <button class="outline tab-btn active" onclick="switchTab('myshows', 'today', this)">Сегодня</button>
-      <button class="outline secondary tab-btn" onclick="switchTab('myshows', 'total', this)">Всё время</button>
+      <button class="tab-btn active" onclick="switchTab('myshows', 'today', this)">Сегодня</button>
+      <button class="tab-btn" onclick="switchTab('myshows', 'total', this)">Всё время</button>
     </div>
 
     <div id="myshows-today" class="tab-content active">
-      <figure>
-        <table id="myshowsTodayTable">
-          <thead><tr><th>Логин</th><th>Запросов</th><th>Доля</th></tr></thead>
-          <tbody>
-          {% set ms_today_total = stats.myshows.today.detail | map(attribute='1') | sum %}
-          {% for login, requests in stats.myshows.today.detail %}
-          <tr>
-            <td><strong>{{ login }}</strong></td>
-            <td>{{ requests }}</td>
-            <td>{% if ms_today_total > 0 %}{{ ((requests / ms_today_total) * 100) | round(1) }}%{% endif %}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="3" class="muted">Нет данных за сегодня</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </figure>
+      <div class="mobile-cards">
+        <figure>
+          <table id="myshowsTodayTable">
+            <thead><tr><th>Логин</th><th>Запросов</th><th>Доля</th></tr></thead>
+            <tbody>
+            {% set ms_today_total = stats.myshows.today.detail | map(attribute='1') | sum %}
+            {% for login, requests in stats.myshows.today.detail %}
+            <tr{% if loop.index > 5 %} class="tbl-extra" style="display:none"{% endif %}>
+              <td data-label="Логин"><strong>{{ login }}</strong></td>
+              <td data-label="Запросов">{{ requests }}</td>
+              <td data-label="Доля">{% if ms_today_total > 0 %}{{ ((requests / ms_today_total) * 100) | round(1) }}%{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="99" class="muted">Нет данных за сегодня</td></tr>
+            {% endfor %}
+            {% if stats.myshows.today.detail|length > 5 %}
+            <tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё {{ stats.myshows.today.detail|length - 5 }}…</button></td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </figure>
+      </div>
     </div>
 
     <div id="myshows-total" class="tab-content">
-      <figure>
-        <table id="myshowsTotalTable">
-          <thead><tr><th>Логин</th><th>Запросов всего</th><th>Доля</th></tr></thead>
-          <tbody>
-          {% set ms_total = stats.myshows.total.detail | map(attribute='1') | sum %}
-          {% for login, requests in stats.myshows.total.detail %}
-          <tr>
-            <td><strong>{{ login }}</strong></td>
-            <td>{{ requests }}</td>
-            <td>{% if ms_total > 0 %}{{ ((requests / ms_total) * 100) | round(1) }}%{% endif %}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="3" class="muted">Нет данных</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </figure>
+      <div class="mobile-cards">
+        <figure>
+          <table id="myshowsTotalTable">
+            <thead><tr><th>Логин</th><th>Запросов всего</th><th>Доля</th></tr></thead>
+            <tbody>
+            {% set ms_total = stats.myshows.total.detail | map(attribute='1') | sum %}
+            {% for login, requests in stats.myshows.total.detail %}
+            <tr{% if loop.index > 5 %} class="tbl-extra" style="display:none"{% endif %}>
+              <td data-label="Логин"><strong>{{ login }}</strong></td>
+              <td data-label="Запросов">{{ requests }}</td>
+              <td data-label="Доля">{% if ms_total > 0 %}{{ ((requests / ms_total) * 100) | round(1) }}%{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="99" class="muted">Нет данных</td></tr>
+            {% endfor %}
+            {% if stats.myshows.total.detail|length > 5 %}
+            <tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё {{ stats.myshows.total.detail|length - 5 }}…</button></td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </figure>
+      </div>
     </div>
   </section>
 
@@ -133,97 +195,60 @@
       <h2>API пользователи</h2>
     </div>
     <div class="stats-tabs">
-      <button class="outline tab-btn active" onclick="switchTab('apiusers', 'today', this)">Сегодня</button>
-      <button class="outline secondary tab-btn" onclick="switchTab('apiusers', 'total', this)">Всё время</button>
+      <button class="tab-btn active" onclick="switchTab('apiusers', 'today', this)">Сегодня</button>
+      <button class="tab-btn" onclick="switchTab('apiusers', 'total', this)">Всё время</button>
     </div>
 
     <div id="apiusers-today" class="tab-content active">
-      <figure>
-        <table id="apiUsersTodayTable">
-          <thead><tr><th>IP адрес</th><th>Местоположение</th><th>Запросов</th><th>Доля</th></tr></thead>
-          <tbody>
-          {% set api_today_total = stats.api_users.today.detail | map(attribute='1') | sum %}
-          {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
-          <tr>
-            <td><code>{{ ip }}</code></td>
-            <td>{{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}</td>
-            <td>{{ requests }}</td>
-            <td>{% if api_today_total > 0 %}{{ ((requests / api_today_total) * 100) | round(1) }}%{% endif %}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="muted">Нет данных за сегодня</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </figure>
+      <div class="mobile-cards">
+        <figure>
+          <table id="apiUsersTodayTable">
+            <thead><tr><th>IP адрес</th><th>Местоположение</th><th>Запросов</th><th>Доля</th></tr></thead>
+            <tbody>
+            {% set api_today_total = stats.api_users.today.detail | map(attribute='1') | sum %}
+            {% for ip, requests, country, city, region, flag_emoji in stats.api_users.today.detail %}
+            <tr{% if loop.index > 5 %} class="tbl-extra" style="display:none"{% endif %}>
+              <td data-label="IP"><code>{{ ip }}</code></td>
+              <td data-label="Место">{{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}</td>
+              <td data-label="Запросов">{{ requests }}</td>
+              <td data-label="Доля">{% if api_today_total > 0 %}{{ ((requests / api_today_total) * 100) | round(1) }}%{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="99" class="muted">Нет данных за сегодня</td></tr>
+            {% endfor %}
+            {% if stats.api_users.today.detail|length > 5 %}
+            <tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё {{ stats.api_users.today.detail|length - 5 }}…</button></td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </figure>
+      </div>
     </div>
 
     <div id="apiusers-total" class="tab-content">
-      <figure>
-        <table id="apiUsersTotalTable">
-          <thead><tr><th>IP адрес</th><th>Местоположение</th><th>Запросов всего</th><th>Доля</th></tr></thead>
-          <tbody>
-          {% set api_total = stats.api_users.total.detail | map(attribute='1') | sum %}
-          {% for ip, requests, country, city, region, flag_emoji in stats.api_users.total.detail %}
-          <tr>
-            <td><code>{{ ip }}</code></td>
-            <td>{{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}</td>
-            <td>{{ requests }}</td>
-            <td>{% if api_total > 0 %}{{ ((requests / api_total) * 100) | round(1) }}%{% endif %}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="muted">Нет данных</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </figure>
-    </div>
-  </section>
-
-  <!-- ═══ Зарегистрированные пользователи ══════════════════════ -->
-  <section>
-    <div class="section-title-row">
-      <h2>Зарегистрированные пользователи</h2>
-    </div>
-    <div class="stats-tabs">
-      <button class="outline tab-btn active" onclick="switchTab('users', 'today', this)">Сегодня</button>
-      <button class="outline secondary tab-btn" onclick="switchTab('users', 'total', this)">Последние 50</button>
-    </div>
-
-    <div id="users-today" class="tab-content active">
-      <figure>
-        <table>
-          <thead><tr><th>Логин</th><th>Время регистрации</th></tr></thead>
-          <tbody>
-          {% for username, created_at in stats.registered_users.today.detail %}
-          <tr>
-            <td><strong>{{ username }}</strong></td>
-            <td>{{ created_at.strftime('%H:%M:%S') if created_at else '—' }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="2" class="muted">Новых пользователей сегодня нет</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </figure>
-    </div>
-
-    <div id="users-total" class="tab-content">
-      <figure>
-        <table>
-          <thead><tr><th>Логин</th><th>Дата регистрации</th></tr></thead>
-          <tbody>
-          {% for username, created_at in stats.registered_users.total.detail %}
-          <tr>
-            <td><strong>{{ username }}</strong></td>
-            <td>{{ created_at.strftime('%Y-%m-%d %H:%M') if created_at else '—' }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="2" class="muted">Нет данных</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </figure>
+      <div class="mobile-cards">
+        <figure>
+          <table id="apiUsersTotalTable">
+            <thead><tr><th>IP адрес</th><th>Местоположение</th><th>Запросов всего</th><th>Доля</th></tr></thead>
+            <tbody>
+            {% set api_total = stats.api_users.total.detail | map(attribute='1') | sum %}
+            {% for ip, requests, country, city, region, flag_emoji in stats.api_users.total.detail %}
+            <tr{% if loop.index > 5 %} class="tbl-extra" style="display:none"{% endif %}>
+              <td data-label="IP"><code>{{ ip }}</code></td>
+              <td data-label="Место">{{ flag_emoji or '🌍' }} {{ country or 'Unknown' }}, {{ city or 'Unknown' }}{% if region and region != city and region != 'Unknown' %}, {{ region }}{% endif %}</td>
+              <td data-label="Запросов">{{ requests }}</td>
+              <td data-label="Доля">{% if api_total > 0 %}{{ ((requests / api_total) * 100) | round(1) }}%{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="99" class="muted">Нет данных</td></tr>
+            {% endfor %}
+            {% if stats.api_users.total.detail|length > 5 %}
+            <tr class="tbl-show-more"><td colspan="99"><button class="outline secondary btn-sm" onclick="expandTable(this)">Ещё {{ stats.api_users.total.detail|length - 5 }}…</button></td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </figure>
+      </div>
     </div>
   </section>
 
@@ -233,8 +258,8 @@
       <h2>Категории</h2>
     </div>
     <div class="stats-tabs">
-      <button class="outline tab-btn active" onclick="switchTab('categories', 'today', this)">Сегодня</button>
-      <button class="outline secondary tab-btn" onclick="switchTab('categories', 'total', this)">Всё время</button>
+      <button class="tab-btn active" onclick="switchTab('categories', 'today', this)">Сегодня</button>
+      <button class="tab-btn" onclick="switchTab('categories', 'total', this)">Всё время</button>
     </div>
 
     <div id="categories-today" class="tab-content active">
@@ -251,8 +276,11 @@
             <thead><tr><th>IP адрес</th><th>Запросов</th></tr></thead>
             <tbody>
             {% for item in ips %}
-            <tr><td><code>{{ item.ip }}</code></td><td>{{ item.requests }}</td></tr>
+            <tr{% if loop.index > 5 %} class="cat-extra" style="display:none"{% endif %}><td>{{ item.ip }}</td><td>{{ item.requests }}</td></tr>
             {% endfor %}
+            {% if ips|length > 5 %}
+            <tr class="cat-show-more"><td colspan="2"><button class="outline secondary btn-sm" onclick="expandCategory(this)">Ещё {{ ips|length - 5 }}…</button></td></tr>
+            {% endif %}
             </tbody>
           </table>
         </article>
@@ -276,8 +304,11 @@
             <thead><tr><th>IP адрес</th><th>Запросов</th></tr></thead>
             <tbody>
             {% for item in ips %}
-            <tr><td><code>{{ item.ip }}</code></td><td>{{ item.requests }}</td></tr>
+            <tr{% if loop.index > 5 %} class="cat-extra" style="display:none"{% endif %}><td>{{ item.ip }}</td><td>{{ item.requests }}</td></tr>
             {% endfor %}
+            {% if ips|length > 5 %}
+            <tr class="cat-show-more"><td colspan="2"><button class="outline secondary btn-sm" onclick="expandCategory(this)">Ещё {{ ips|length - 5 }}…</button></td></tr>
+            {% endif %}
             </tbody>
           </table>
         </article>
@@ -288,7 +319,6 @@
     </div>
   </section>
 
-  <p class="muted small" id="lastUpdate">Обновлено: {{ now.strftime('%H:%M:%S') }}</p>
 
 </main>
 {% endblock %}

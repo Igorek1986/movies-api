@@ -1,15 +1,31 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="light">
+<html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'dark');</script>
   <link rel="icon" href="/static/favicon/favicon.ico">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/static/css/main.css">
   <title>{% block title %}NUMParser{% endblock %}</title>
 </head>
 <body>
+  <button class="theme-toggle" id="themeToggle" title="Переключить тему" onclick="toggleTheme()"></button>
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeIcon();
+    }
+    function updateThemeIcon() {
+      const btn = document.getElementById('themeToggle');
+      if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
+    }
+    updateThemeIcon();
+  </script>
 </body>
 </html>

@@ -2,6 +2,24 @@
    PROFILE PAGES — Pico CSS additions & overrides
    ============================================================ */
 
+/* Theme toggle button (fixed bottom-right) */
+.theme-toggle {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 2000;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--pico-muted-border-color);
+  background: var(--pico-card-background-color);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+
 /* Auth pages: narrow centered container */
 .auth-container {
   max-width: 480px;
@@ -11,6 +29,15 @@
 .auth-link {
   text-align: center;
   margin-top: var(--pico-spacing);
+}
+
+/* Sticky header */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: var(--pico-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
 }
 
 /* Username chip in nav */
@@ -220,17 +247,32 @@ button.danger-btn {
 }
 .stat-card hgroup p { font-size: 0.82rem; color: var(--pico-muted-color); margin: 0; }
 
-/* Stats tabs */
+/* Stats tabs — segmented toggle */
 .stats-tabs {
   display: flex;
-  gap: 0.5rem;
+  border: 1px solid var(--pico-primary);
+  border-radius: var(--pico-border-radius);
+  overflow: hidden;
   margin-bottom: var(--pico-spacing);
+  gap: 0;
 }
 .stats-tabs .tab-btn {
+  all: unset;
+  box-sizing: border-box;
   flex: 1;
-  padding: 0.4rem 0.75rem;
+  padding: 0.45rem 1rem;
   font-size: 0.88rem;
-  margin: 0;
+  text-align: center;
+  color: var(--pico-primary);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.stats-tabs .tab-btn + .tab-btn {
+  border-left: 1px solid var(--pico-primary);
+}
+.stats-tabs .tab-btn.active {
+  background: var(--pico-primary);
+  color: #fff;
 }
 
 /* Tab content */
@@ -248,4 +290,59 @@ button.danger-btn {
   padding-bottom: calc(var(--pico-spacing) * 0.5);
   margin-bottom: calc(var(--pico-spacing) * 0.5);
   border-bottom: 1px solid var(--pico-table-border-color);
+}
+
+/* Table overflow fallback */
+figure { overflow-x: auto; }
+
+/* Expand/collapse row for tables and category cards */
+.cat-show-more td,
+.tbl-show-more td {
+  text-align: center;
+  padding-top: 0.4rem;
+}
+
+/* Mobile card layout for stat tables */
+@media (max-width: 640px) {
+  .category-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-cards figure {
+    overflow-x: visible;
+    margin: 0;
+  }
+  .mobile-cards table,
+  .mobile-cards tbody { display: block; width: 100%; }
+  .mobile-cards thead { display: none; }
+  .mobile-cards tbody tr {
+    display: block;
+    border: 1px solid var(--pico-table-border-color);
+    border-radius: var(--pico-border-radius);
+    margin-bottom: 0.5rem;
+    padding: 0.4rem 0.75rem;
+  }
+  .mobile-cards tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.2rem 0;
+    border: none !important;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    word-break: break-word;
+  }
+  .mobile-cards tbody td::before {
+    content: attr(data-label);
+    color: var(--pico-muted-color);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding-top: 0.15em;
+  }
+  .mobile-cards tbody td[colspan] {
+    display: block;
+    text-align: center;
+  }
+  .mobile-cards tbody td[colspan]::before { display: none; }
 }
