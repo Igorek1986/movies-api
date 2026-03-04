@@ -3,6 +3,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import httpx
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -559,6 +560,9 @@ async def get_category(
     apikey: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
+    if not re.match(r'^[\w\-]+$', category):
+        raise HTTPException(status_code=404, detail="Not found")
+
     try:
         logger.debug(
             f"Запрос: {category}, страница {page}, apikey={'yes' if apikey else 'no'}"
