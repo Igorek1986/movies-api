@@ -341,6 +341,9 @@ def load_data(category: str):
     """Загружает данные из файла в releases/"""
     path = RELEASES_DIR / f"{category}.json"
 
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+
     try:
         with gzip.open(path, "rt") as f:
             return json.load(f)
