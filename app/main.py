@@ -59,7 +59,8 @@ with open(BLOCKED_JSON_PATH, "r", encoding="utf-8") as f:
     BLOCKED_RESPONSE = json.load(f)
 
 STATIC_DIR = BASE_DIR / "static"
-LAMPAC_DIR = BASE_DIR / "lampac"
+PLUGINS_DIR = BASE_DIR / "lampa-plugins"
+PLUGINS_DIR.mkdir(exist_ok=True)
 # Настройка логирования
 DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
 logging.basicConfig(
@@ -104,18 +105,6 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/lampac", StaticFiles(directory=LAMPAC_DIR), name="lampac")
-
-NP_JS_PATH = LAMPAC_DIR / "np.js"
-
-
-@app.get("/np.js")
-async def serve_np_js(request: Request):
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.url.netloc)
-    base_url = f"{scheme}://{host}"
-    content = NP_JS_PATH.read_text(encoding="utf-8").replace("__BASE_URL__", base_url)
-    return PlainTextResponse(content, media_type="application/javascript")
 
 
 @app.get("/favicon.ico")
@@ -150,6 +139,21 @@ async def block_banned_origins(request: Request, call_next):
             },
         )
 
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def serve_lampa_plugins(request: Request, call_next):
+    if request.method == "GET":
+        rel = request.url.path.lstrip("/")
+        if rel:
+            try:
+                plugin_path = (PLUGINS_DIR / rel).resolve()
+                plugin_path.relative_to(PLUGINS_DIR.resolve())
+                if plugin_path.is_file():
+                    return FileResponse(str(plugin_path))
+            except (ValueError, OSError):
+                pass
     return await call_next(request)
 
 
