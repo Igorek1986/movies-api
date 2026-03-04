@@ -686,7 +686,47 @@
         }
 
         // Создаём DOM
+
+        // CSS для фокуса на кнопках управления (однократно)
+        if (!document.getElementById('np-ctrl-style')) {
+            $('<style id="np-ctrl-style">').text(
+                '.menu-edit-list__ctrl{justify-content:center;opacity:.7;transition:opacity .15s;}' +
+                '.menu-edit-list__ctrl.focus{opacity:1;background:rgba(255,255,255,.12);border-radius:.3em;}'
+            ).appendTo('head');
+        }
+
+        // Скролл к элементу по центру — Lampa двигает scroll__body через CSS transform
+        function scrollItemCenter(el) {
+            var body = el.parentNode;
+            while (body && (body.className || '').indexOf('scroll__body') < 0) {
+                body = body.parentNode;
+            }
+            if (!body) { return; }
+            var content = body.parentNode;
+            var viewH = content.clientHeight;
+            var bodyH = body.offsetHeight;
+            var elR = el.getBoundingClientRect();
+            var bodyR = body.getBoundingClientRect();
+            var elOffset = elR.top - bodyR.top;
+            var elH = elR.bottom - elR.top;
+            var targetY = -elOffset + (viewH - elH) / 2;
+            if (targetY > 0) targetY = 0;
+            // Отступ 50px снизу: последний элемент не прячется за край контейнера
+            if (targetY < viewH - 50 - bodyH) targetY = viewH - 50 - bodyH;
+            body.style.transform = 'translateY(' + targetY + 'px)';
+        }
+
         var list = $('<div class="menu-edit-list"></div>');
+
+        // Кнопки "Включить все / Отключить все" — внутри list чтобы не ломать навигацию Lampa
+        var btnEnableAll = $('<div class="menu-edit-list__item menu-edit-list__ctrl selector">Включить все</div>');
+        var btnDisableAll = $('<div class="menu-edit-list__item menu-edit-list__ctrl selector">Отключить все</div>');
+        btnEnableAll.on('hover:enter', function () { list.find('.dot').attr('opacity', '1'); });
+        btnDisableAll.on('hover:enter', function () { list.find('.dot').attr('opacity', '0'); });
+        list.append(btnEnableAll).append(btnDisableAll);
+
+        // Единый таймер дебаунса для всех строк списка
+        var npScrollTimer;
 
         ordered.forEach(function (cat) {
             var isVisible = savedHide.indexOf(cat.key) === -1;
@@ -713,19 +753,28 @@
                 </div>
             `).data('key', cat.key);
 
+            // При навигации: clearTimeout отменяет предыдущий если пришёл новый hover:focus,
+            // setTimeout(0) запускается до следующего кадра — Lampa и мы рисуемся за один рендер
+            item.find('.selector').on('hover:focus', function () {
+                clearTimeout(npScrollTimer);
+                npScrollTimer = setTimeout(function () { scrollItemCenter(item[0]); }, 0);
+            });
+
             item.find('.move-up').on('hover:enter', function () {
-                var prev = item.prev();
+                var prev = item.prev(':not(.menu-edit-list__ctrl)');
                 if (prev.length) {
                     item.insertBefore(prev);
                     Lampa.Controller.toggle('modal');
+                    scrollItemCenter(item[0]); // синхронно — выигрываем у Lampa
                 };
             });
 
             item.find('.move-down').on('hover:enter', function () {
-                var next = item.next();
+                var next = item.next(':not(.menu-edit-list__ctrl)');
                 if (next.length) {
                     item.insertAfter(next);
                     Lampa.Controller.toggle('modal');
+                    scrollItemCenter(item[0]); // синхронно — выигрываем у Lampa
                 };
             });
 
@@ -748,6 +797,7 @@
 
                 list.find('.menu-edit-list__item').each(function () {
                     var key = $(this).data('key');
+                    if (!key) return; // кнопки "Включить все / Отключить все" не имеют key
                     var isVisible = $(this).find('.dot').attr('opacity') === '1';
                     newOrder.push(key);
                     if (!isVisible) newHide.push(key);
