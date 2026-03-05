@@ -152,7 +152,9 @@ async def serve_lampa_plugins(request: Request, call_next):
                 plugin_path = (PLUGINS_DIR / rel).resolve()
                 plugin_path.relative_to(PLUGINS_DIR.resolve())
                 if plugin_path.is_file():
-                    return FileResponse(str(plugin_path))
+                    response = FileResponse(str(plugin_path))
+                    response.headers["Access-Control-Allow-Origin"] = "*"
+                    return response
             except (ValueError, OSError):
                 pass
     return await call_next(request)
@@ -180,21 +182,25 @@ def _extract_tmdb_fields(media_type: str, data: dict) -> dict:
         "vote_average": data.get("vote_average", 0),
     }
     if media_type == "movie":
-        base.update({
-            "title": data.get("title", ""),
-            "original_title": data.get("original_title", ""),
-            "release_date": data.get("release_date", ""),
-        })
+        base.update(
+            {
+                "title": data.get("title", ""),
+                "original_title": data.get("original_title", ""),
+                "release_date": data.get("release_date", ""),
+            }
+        )
     else:  # tv
-        base.update({
-            "name": data.get("name", ""),
-            "original_name": data.get("original_name", ""),
-            "first_air_date": data.get("first_air_date", ""),
-            "last_air_date": data.get("last_air_date", ""),
-            "number_of_seasons": data.get("number_of_seasons", 0),
-            "seasons": data.get("seasons", []),
-            "last_episode_to_air": data.get("last_episode_to_air"),
-        })
+        base.update(
+            {
+                "name": data.get("name", ""),
+                "original_name": data.get("original_name", ""),
+                "first_air_date": data.get("first_air_date", ""),
+                "last_air_date": data.get("last_air_date", ""),
+                "number_of_seasons": data.get("number_of_seasons", 0),
+                "seasons": data.get("seasons", []),
+                "last_episode_to_air": data.get("last_episode_to_air"),
+            }
+        )
     return base
 
 
@@ -227,7 +233,10 @@ async def load_cache_from_db() -> Dict[Tuple[str, int], Any]:
                         pass
                 last_ep = None
                 if mc.last_ep_season and mc.last_ep_number:
-                    last_ep = {"season_number": mc.last_ep_season, "episode_number": mc.last_ep_number}
+                    last_ep = {
+                        "season_number": mc.last_ep_season,
+                        "episode_number": mc.last_ep_number,
+                    }
                 cache[key] = {
                     "name": mc.title or "",
                     "original_name": mc.original_title or "",
@@ -282,9 +291,15 @@ async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
             "release_date": date_val,
             "last_air_date": data.get("last_air_date") or "",
             "number_of_seasons": data.get("number_of_seasons"),
-            "seasons_json": json.dumps(seasons, ensure_ascii=False) if seasons else None,
-            "last_ep_season": (data.get("last_episode_to_air") or {}).get("season_number"),
-            "last_ep_number": (data.get("last_episode_to_air") or {}).get("episode_number"),
+            "seasons_json": (
+                json.dumps(seasons, ensure_ascii=False) if seasons else None
+            ),
+            "last_ep_season": (data.get("last_episode_to_air") or {}).get(
+                "season_number"
+            ),
+            "last_ep_number": (data.get("last_episode_to_air") or {}).get(
+                "episode_number"
+            ),
         }
 
     try:
@@ -464,7 +479,10 @@ def _item_card_id(item: dict) -> str | None:
         if not media_type:
             # Lampac-файлы не содержат media_type — определяем по TMDB-полям:
             # сериалы имеют seasons/last_episode_to_air, фильмы — нет
-            if item.get("seasons") is not None or item.get("last_episode_to_air") is not None:
+            if (
+                item.get("seasons") is not None
+                or item.get("last_episode_to_air") is not None
+            ):
                 media_type = "tv"
             else:
                 media_type = "movie"
@@ -475,7 +493,9 @@ def _item_card_id(item: dict) -> str | None:
     return None
 
 
-def _tv_show_watched(item: dict, item_timecodes: dict[str, str], threshold: int = 90) -> bool:
+def _tv_show_watched(
+    item: dict, item_timecodes: dict[str, str], threshold: int = 90
+) -> bool:
     """
     Проверяет, все ли нужные эпизоды сериала просмотрены.
 
@@ -489,12 +509,16 @@ def _tv_show_watched(item: dict, item_timecodes: dict[str, str], threshold: int 
     """
     original_name = item.get("original_name") or item.get("original_title", "")
     if not original_name:
-        logger.debug(f"[tv_watched] нет original_name/original_title, item keys={list(item.keys())}")
+        logger.debug(
+            f"[tv_watched] нет original_name/original_title, item keys={list(item.keys())}"
+        )
         return False
 
     seasons = [s for s in item.get("seasons", []) if s.get("season_number", 0) > 0]
     if not seasons:
-        logger.debug(f"[tv_watched] нет seasons для {original_name!r}, raw seasons={item.get('seasons')}")
+        logger.debug(
+            f"[tv_watched] нет seasons для {original_name!r}, raw seasons={item.get('seasons')}"
+        )
         return False
 
     # Хеши эпизодов с достаточным прогрессом
@@ -512,51 +536,70 @@ def _tv_show_watched(item: dict, item_timecodes: dict[str, str], threshold: int 
         last_season = last_ep.get("season_number", 0)
         last_episode = last_ep.get("episode_number", 0)
         if not last_season or not last_episode:
-            logger.debug(f"[tv_watched] {original_name!r}: last_episode_to_air без season/episode: {last_ep}")
+            logger.debug(
+                f"[tv_watched] {original_name!r}: last_episode_to_air без season/episode: {last_ep}"
+            )
             return False
         season_ep_count = {s["season_number"]: s["episode_count"] for s in seasons}
-        logger.debug(f"[tv_watched] {original_name!r}: проверяем до S{last_season}E{last_episode}, "
-                     f"watched_hashes={len(watched_hashes)}, season_ep_count={season_ep_count}")
+        logger.debug(
+            f"[tv_watched] {original_name!r}: проверяем до S{last_season}E{last_episode}, "
+            f"watched_hashes={len(watched_hashes)}, season_ep_count={season_ep_count}"
+        )
         for sn in range(1, last_season + 1):
             ep_count = last_episode if sn == last_season else season_ep_count.get(sn, 0)
             for ep in range(1, ep_count + 1):
                 h = lampa_hash(build_episode_hash_string(sn, ep, original_name))
                 if h not in watched_hashes:
-                    logger.debug(f"[tv_watched] {original_name!r}: S{sn}E{ep} hash={h} НЕ просмотрен")
+                    logger.debug(
+                        f"[tv_watched] {original_name!r}: S{sn}E{ep} hash={h} НЕ просмотрен"
+                    )
                     return False
     else:
         # Аниме: нет last_episode_to_air — проверяем все серии всех сезонов
         for s in seasons:
             sn = s["season_number"]
             for ep in range(1, s.get("episode_count", 0) + 1):
-                if lampa_hash(build_episode_hash_string(sn, ep, original_name)) not in watched_hashes:
+                if (
+                    lampa_hash(build_episode_hash_string(sn, ep, original_name))
+                    not in watched_hashes
+                ):
                     return False
 
     return True
 
 
-def _item_watched(item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str]) -> bool:
+def _item_watched(
+    item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str]
+) -> bool:
     """True если элемент уже полностью просмотрен и должен быть скрыт."""
     card_id = _item_card_id(item)
     if not card_id:
-        logger.debug(f"[filter] нет card_id для item id={item.get('id')} media_type={item.get('media_type')}")
+        logger.debug(
+            f"[filter] нет card_id для item id={item.get('id')} media_type={item.get('media_type')}"
+        )
         return False
     if card_id.endswith("_tv"):
         if card_id not in timecodes:
-            logger.debug(f"[filter] {card_id} не найден в таймкодах (всего tv-ключей: {sum(1 for k in timecodes if k.endswith('_tv'))})")
+            logger.debug(
+                f"[filter] {card_id} не найден в таймкодах (всего tv-ключей: {sum(1 for k in timecodes if k.endswith('_tv'))})"
+            )
             return False
         result = _tv_show_watched(item, timecodes[card_id])
-        logger.debug(f"[filter] {card_id} → _tv_show_watched={result}, "
-                     f"original_name={item.get('original_name') or item.get('original_title')!r}, "
-                     f"seasons={len(item.get('seasons', []))}, "
-                     f"last_episode_to_air={item.get('last_episode_to_air')}, "
-                     f"timecode_keys={len(timecodes[card_id])}")
+        logger.debug(
+            f"[filter] {card_id} → _tv_show_watched={result}, "
+            f"original_name={item.get('original_name') or item.get('original_title')!r}, "
+            f"seasons={len(item.get('seasons', []))}, "
+            f"last_episode_to_air={item.get('last_episode_to_air')}, "
+            f"timecode_keys={len(timecodes[card_id])}"
+        )
         return result
     is_watched = card_id in watched_movies
     if is_watched:
         logger.debug(f"[filter] {card_id} → фильм просмотрен")
     else:
-        logger.debug(f"[filter] {card_id} → не просмотрен (movie-ветка), media_type в item={item.get('media_type')!r}")
+        logger.debug(
+            f"[filter] {card_id} → не просмотрен (movie-ветка), media_type в item={item.get('media_type')!r}"
+        )
     return is_watched
 
 
@@ -570,7 +613,7 @@ async def get_category(
     apikey: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    if not re.match(r'^[\w\-]+$', category):
+    if not re.match(r"^[\w\-]+$", category):
         raise HTTPException(status_code=404, detail="Not found")
 
     try:
@@ -586,8 +629,10 @@ async def get_category(
             if profile:
                 timecodes = await load_profile_timecodes(db, profile.id)
                 watched_movies = get_watched_movie_ids(timecodes)
-                logger.debug(f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
-                             f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах")
+                logger.debug(
+                    f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
+                    f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах"
+                )
 
         # Загрузка данных из файла
         data = load_data(category)
@@ -600,26 +645,40 @@ async def get_category(
             items = data["results"] if "results" in data else data
 
             if timecodes or watched_movies:
+
                 def _enrich_lampac_item(item: dict) -> dict:
-                    """Подмешивает last_episode_to_air из tmdb_cache если есть свежее значение."""
+                    """Подмешивает поля из tmdb_cache нужные для фильтрации сериалов."""
                     tmdb_id = item.get("id")
                     if not tmdb_id:
                         return item
-                    # media_type определяем так же как _item_card_id
                     media_type = item.get("media_type")
                     if not media_type:
-                        if item.get("seasons") is not None or item.get("last_episode_to_air") is not None:
+                        if (
+                            item.get("seasons") is not None
+                            or item.get("last_episode_to_air") is not None
+                        ):
                             media_type = "tv"
                         else:
-                            return item  # фильм, last_episode_to_air не нужен
+                            return item  # фильм
                     if media_type != "tv":
                         return item
                     cached = tmdb_cache.get((media_type, int(tmdb_id)))
-                    if cached and cached.get("last_episode_to_air"):
-                        item = {**item, "last_episode_to_air": cached["last_episode_to_air"]}
-                    return item
+                    if not cached:
+                        return item
+                    patch = {}
+                    if not item.get("original_name") and cached.get("original_name"):
+                        patch["original_name"] = cached["original_name"]
+                    if not item.get("seasons") and cached.get("seasons"):
+                        patch["seasons"] = cached["seasons"]
+                    if cached.get("last_episode_to_air"):
+                        patch["last_episode_to_air"] = cached["last_episode_to_air"]
+                    return {**item, **patch} if patch else item
 
-                items = [i for i in map(_enrich_lampac_item, items) if not _item_watched(i, timecodes, watched_movies)]
+                items = [
+                    i
+                    for i in map(_enrich_lampac_item, items)
+                    if not _item_watched(i, timecodes, watched_movies)
+                ]
 
             total = len(items)
             start = (page - 1) * per_page
@@ -637,8 +696,31 @@ async def get_category(
         all_items = data["items"]
 
         # Фильтруем ДО обогащения TMDB — экономим запросы к API
+        # Но подмешиваем last_episode_to_air из кэша для корректной фильтрации сериалов
         if timecodes or watched_movies:
-            all_items = [i for i in all_items if not _item_watched(i, timecodes, watched_movies)]
+
+            def _enrich_numparser_item(item: dict) -> dict:
+                if item.get("media_type") != "tv":
+                    return item
+                cached = (
+                    tmdb_cache.get(("tv", int(item["id"]))) if item.get("id") else None
+                )
+                if not cached:
+                    return item
+                patch = {}
+                if not item.get("original_name") and cached.get("original_name"):
+                    patch["original_name"] = cached["original_name"]
+                if not item.get("seasons") and cached.get("seasons"):
+                    patch["seasons"] = cached["seasons"]
+                if cached.get("last_episode_to_air"):
+                    patch["last_episode_to_air"] = cached["last_episode_to_air"]
+                return {**item, **patch} if patch else item
+
+            all_items = [
+                i
+                for i in map(_enrich_numparser_item, all_items)
+                if not _item_watched(i, timecodes, watched_movies)
+            ]
 
         total = len(all_items)
         start = (page - 1) * per_page
