@@ -158,6 +158,9 @@ async def _fetch_and_store_media_card(card_id: str, tmdb_id: int, media_type: st
             values["last_air_date"] = data.get("last_air_date") or ""
             values["number_of_seasons"] = data.get("number_of_seasons")
             values["seasons_json"] = json.dumps(seasons, ensure_ascii=False) if seasons else None
+            last_ep = data.get("last_episode_to_air") or {}
+            values["last_ep_season"] = last_ep.get("season_number")
+            values["last_ep_number"] = last_ep.get("episode_number")
 
         async with async_session_maker() as db:
             mc_stmt = pg_insert(MediaCard).values([values])

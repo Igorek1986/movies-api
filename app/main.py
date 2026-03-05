@@ -193,6 +193,7 @@ def _extract_tmdb_fields(media_type: str, data: dict) -> dict:
             "last_air_date": data.get("last_air_date", ""),
             "number_of_seasons": data.get("number_of_seasons", 0),
             "seasons": data.get("seasons", []),
+            "last_episode_to_air": data.get("last_episode_to_air"),
         })
     return base
 
@@ -224,6 +225,9 @@ async def load_cache_from_db() -> Dict[Tuple[str, int], Any]:
                         seasons = json.loads(mc.seasons_json)
                     except Exception:
                         pass
+                last_ep = None
+                if mc.last_ep_season and mc.last_ep_number:
+                    last_ep = {"season_number": mc.last_ep_season, "episode_number": mc.last_ep_number}
                 cache[key] = {
                     "name": mc.title or "",
                     "original_name": mc.original_title or "",
@@ -235,6 +239,7 @@ async def load_cache_from_db() -> Dict[Tuple[str, int], Any]:
                     "last_air_date": mc.last_air_date or "",
                     "number_of_seasons": mc.number_of_seasons or 0,
                     "seasons": seasons,
+                    "last_episode_to_air": last_ep,
                 }
         return cache
     except Exception as e:
@@ -278,6 +283,8 @@ async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
             "last_air_date": data.get("last_air_date") or "",
             "number_of_seasons": data.get("number_of_seasons"),
             "seasons_json": json.dumps(seasons, ensure_ascii=False) if seasons else None,
+            "last_ep_season": (data.get("last_episode_to_air") or {}).get("season_number"),
+            "last_ep_number": (data.get("last_episode_to_air") or {}).get("episode_number"),
         }
 
     try:
@@ -593,7 +600,26 @@ async def get_category(
             items = data["results"] if "results" in data else data
 
             if timecodes or watched_movies:
-                items = [i for i in items if not _item_watched(i, timecodes, watched_movies)]
+                def _enrich_lampac_item(item: dict) -> dict:
+                    """Подмешивает last_episode_to_air из tmdb_cache если есть свежее значение."""
+                    tmdb_id = item.get("id")
+                    if not tmdb_id:
+                        return item
+                    # media_type определяем так же как _item_card_id
+                    media_type = item.get("media_type")
+                    if not media_type:
+                        if item.get("seasons") is not None or item.get("last_episode_to_air") is not None:
+                            media_type = "tv"
+                        else:
+                            return item  # фильм, last_episode_to_air не нужен
+                    if media_type != "tv":
+                        return item
+                    cached = tmdb_cache.get((media_type, int(tmdb_id)))
+                    if cached and cached.get("last_episode_to_air"):
+                        item = {**item, "last_episode_to_air": cached["last_episode_to_air"]}
+                    return item
+
+                items = [i for i in map(_enrich_lampac_item, items) if not _item_watched(i, timecodes, watched_movies)]
 
             total = len(items)
             start = (page - 1) * per_page

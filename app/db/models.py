@@ -111,6 +111,8 @@ class MediaCard(Base):
     last_air_date = Column(String(20), nullable=True)  # tv only
     number_of_seasons = Column(Integer, nullable=True) # tv only
     seasons_json = Column(Text, nullable=True)          # JSON list of seasons, tv only
+    last_ep_season = Column(Integer, nullable=True)    # last_episode_to_air.season_number, tv only
+    last_ep_number = Column(Integer, nullable=True)    # last_episode_to_air.episode_number, tv only
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
