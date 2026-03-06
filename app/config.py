@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     # Базовый URL сайта (для формирования webhook и ссылок)
     BASE_URL: str = "http://localhost:8000"
+    # URL плагина np.js (если пусто — используется {BASE_URL}/np.js)
+    PLUGIN_URL: str = ""
     # Пароль для доступа к админ-панели /admin
     ADMIN_PASSWORD: str = ""
 

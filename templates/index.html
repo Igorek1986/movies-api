@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}NUMParser — медиасервер для Lampa{% endblock %}
+
+{% block body %}
+<main class="container" style="max-width: 860px; padding-top: 3rem;">
+
+  <div style="text-align: center; margin-bottom: 3rem;">
+    <h1 style="margin-bottom: .5rem;">NUMParser</h1>
+    <p class="muted">Персональный медиасервер для плагина Lampa</p>
+  </div>
+
+  {% if user %}
+  <div style="text-align: center; margin-bottom: 2.5rem;">
+    <a href="/profiles" role="button">Перейти в профиль</a>
+  </div>
+  {% else %}
+  <div style="text-align: center; margin-bottom: 2.5rem; display: flex; gap: 1rem; justify-content: center;">
+    <a href="/login" role="button">Войти</a>
+    <a href="/register" role="button" class="outline">Регистрация</a>
+  </div>
+  {% endif %}
+
+  <div class="grid">
+    <article>
+      <header><strong>История просмотров</strong></header>
+      <p>Прогресс просмотра сохраняется и отображается на сайте. Видно что и до какого момента смотрели на каждом устройстве.</p>
+    </article>
+    <article>
+      <header><strong>Фильтрация просмотренного</strong></header>
+      <p>Уже просмотренные фильмы и сериалы убираются из категорий автоматически.</p>
+    </article>
+    <article>
+      <header><strong>Подключение к Lampa</strong></header>
+      <p>Установите плагин NUMParser в Lampa, введите токен устройства — и всё готово.</p>
+    </article>
+  </div>
+
+  <div class="grid">
+    <article style="border: 1px solid var(--pico-muted-border-color);">
+      <header><strong>Базовый</strong> <small class="muted">— бесплатно</small></header>
+      <ul>
+        <li>До 3 устройств</li>
+        <li>До 300 таймкодов на устройство</li>
+        <li>Привязка Telegram для восстановления пароля</li>
+      </ul>
+    </article>
+    <article style="border: 1px solid var(--pico-primary);;">
+      <header><strong>Премиум</strong> <small class="muted">— по запросу</small></header>
+      <ul>
+        <li>До 8 устройств</li>
+        <li>Без ограничений на таймкоды</li>
+        <li>Синхронизация просмотренного из MyShows</li>
+      </ul>
+    </article>
+  </div>
+
+  <p class="muted" style="font-size: .85rem; margin-top: .5rem;">
+    * Аккаунты удаляются автоматически при отсутствии активности более 6 месяцев.
+    За месяц до удаления придёт уведомление в Telegram.
+  </p>
+
+  <footer style="text-align:center; margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--pico-muted-border-color);">
+    <small class="muted">
+      Плагин для Lampa: <a href="{{ plugin_url }}">np.js</a>
+      {% if bot_name %} &nbsp;·&nbsp; <a href="https://t.me/{{ bot_name }}">@{{ bot_name }}</a>{% endif %}
+    </small>
+  </footer>
+
+</main>
+{% endblock %}

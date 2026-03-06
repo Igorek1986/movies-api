@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -26,7 +27,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import init_db, async_session_maker
-from app.db.models import MediaCard
+from app.db.models import MediaCard, User
+from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app.api import auth, myshows_sync, timecodes as timecodes_router
 from app.api import devices
@@ -810,9 +812,17 @@ async def get_category(
         )
 
 
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "message": "NUMParser API работает"}
+_templates = Jinja2Templates(directory="templates")
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request, current_user: User = Depends(get_current_user)):
+    plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
+    return _templates.TemplateResponse("index.html", {
+        "request": request,
+        "user": current_user,
+        "plugin_url": plugin_url,
+        "bot_name": settings.TELEGRAM_BOT_NAME,
+    })
 
 
 @app.get("/cache/path")
