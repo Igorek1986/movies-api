@@ -12,6 +12,64 @@ function toggleKey(btn, fullKey) {
 
 document.addEventListener('DOMContentLoaded', () => {
 
+  // ── Telegram link ───────────────────────────────────────────────────────────
+  const tgLinkBtn = document.getElementById('tgLinkBtn');
+  if (tgLinkBtn) {
+    tgLinkBtn.addEventListener('click', async () => {
+      const statusEl = document.getElementById('tgLinkStatus');
+      tgLinkBtn.disabled = true;
+      statusEl.textContent = 'Открываю Telegram…';
+      statusEl.className = 'status-text';
+
+      try {
+        const res  = await fetch('/telegram/generate-link-code', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.textContent = data.detail || 'Ошибка';
+          statusEl.className = 'status-text status-err';
+          tgLinkBtn.disabled = false;
+          return;
+        }
+
+        // Открываем Telegram deep link — бот получит /start CODE автоматически
+        window.open(`https://t.me/${data.bot_name}?start=${data.code}`, '_blank');
+
+        statusEl.textContent = 'Подтвердите в Telegram…';
+
+        // Поллинг пока пользователь не привяжется
+        const pollInterval = setInterval(async () => {
+          try {
+            const r = await fetch('/telegram/status');
+            const d = await r.json();
+            if (d.linked) {
+              clearInterval(pollInterval);
+              statusEl.textContent = 'Telegram привязан!';
+              statusEl.className = 'status-text status-ok';
+              setTimeout(() => location.reload(), 1000);
+            }
+          } catch { /* игнорируем */ }
+        }, 3000);
+
+        // Прекращаем поллинг по истечении TTL
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          tgLinkBtn.disabled = false;
+          if (statusEl.className !== 'status-text status-ok') {
+            statusEl.textContent = 'Время истекло. Попробуйте снова.';
+            statusEl.className = 'status-text status-err';
+          }
+        }, data.expires_in * 1000);
+
+      } catch {
+        statusEl.textContent = 'Ошибка соединения';
+        statusEl.className = 'status-text status-err';
+        tgLinkBtn.disabled = false;
+      }
+    });
+  }
+
+
+
   // ── Device activation ──────────────────────────────────────
   const linkForm = document.getElementById('linkDeviceForm');
   if (linkForm) {

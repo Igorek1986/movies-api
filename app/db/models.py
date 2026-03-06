@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     String,
     Boolean,
     DateTime,
@@ -33,8 +34,6 @@ class User(Base):
     # session_key используется только для cookie-авторизации в веб-интерфейсе.
     # Для доступа к API (Lampa) используется Device.token.
     session_key = Column(String(64), unique=True, nullable=True, index=True)
-    # email — необязательный, только для восстановления пароля
-    email = Column(String(200), unique=True, nullable=True)
     # Роль: "simple" (3 уст.), "premium" (8 уст.), "super" (без лимита)
     role = Column(String(20), nullable=False, default="simple", server_default="simple")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -185,7 +184,7 @@ class CategoryRequest(Base):
 
 
 class PasswordResetToken(Base):
-    """Одноразовый токен для сброса пароля через email."""
+    """Одноразовый токен для сброса пароля через Telegram."""
 
     __tablename__ = "password_reset_tokens"
 
@@ -197,3 +196,33 @@ class PasswordResetToken(Base):
 
     def __repr__(self):
         return f"<PasswordResetToken(user_id={self.user_id})>"
+
+
+class TelegramUser(Base):
+    """Привязка Telegram-аккаунта к пользователю сайта."""
+
+    __tablename__ = "telegram_users"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    user_id     = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
+    username    = Column(String(100), nullable=True)   # @handle без @
+    linked_at   = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<TelegramUser(user_id={self.user_id}, telegram_id={self.telegram_id})>"
+
+
+class TelegramLinkCode(Base):
+    """Одноразовый код для привязки Telegram-аккаунта (TTL 10 мин)."""
+
+    __tablename__ = "telegram_link_codes"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code       = Column(String(6), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<TelegramLinkCode(user_id={self.user_id}, code={self.code})>"

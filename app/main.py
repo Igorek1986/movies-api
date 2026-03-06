@@ -30,6 +30,7 @@ from app.db.models import MediaCard
 from app.config import get_settings
 from app.api import auth, myshows_sync, timecodes as timecodes_router
 from app.api import devices
+from app.api import telegram as telegram_router
 from app.admin import router as admin_router
 from app.api.dependencies import get_device_by_token
 from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
@@ -93,7 +94,36 @@ async def lifespan(app: FastAPI):
     logger.info(f"Рабочая директория: {BASE_DIR}")
     logger.info(f"Директория с релизами: {RELEASES_DIR}")
 
+    # Инициализация Telegram-бота
+    _polling_task = None
+    if settings.TELEGRAM_BOT_TOKEN:
+        from app.bot import init_bot
+        bot, dp = init_bot(settings.TELEGRAM_BOT_TOKEN)
+        if settings.TELEGRAM_USE_POLLING:
+            await bot.delete_webhook(drop_pending_updates=True)
+            _polling_task = asyncio.create_task(
+                dp.start_polling(bot, handle_signals=False)
+            )
+            logger.info("Telegram bot started in polling mode")
+        else:
+            # webhook регистрируется через dp.startup hook в bot.py
+            await dp.emit_startup(bot=bot)
+    else:
+        logger.warning("TELEGRAM_BOT_TOKEN не задан — бот отключён")
+
     yield  # Приложение работает
+
+    # Shutdown
+    if settings.TELEGRAM_BOT_TOKEN:
+        from app.bot import get_bot, get_dp
+        b = get_bot()
+        d = get_dp()
+        if _polling_task:
+            _polling_task.cancel()
+        elif d and b:
+            await d.emit_shutdown(bot=b)
+        if b:
+            await b.session.close()
 
 
 # app = FastAPI()
@@ -122,6 +152,7 @@ app.include_router(myshows.router)
 app.include_router(stats.router)
 app.include_router(myshows_sync.router)
 app.include_router(admin_router)
+app.include_router(telegram_router.router)
 
 
 @app.middleware("http")

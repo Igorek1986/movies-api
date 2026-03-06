@@ -83,7 +83,6 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         users_data.append({
             "id": u.id,
             "username": u.username,
-            "email": u.email or "—",
             "role": u.role,
             "device_count": device_count,
             "device_limit": limit if limit is not None else "∞",

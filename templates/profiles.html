@@ -235,15 +235,20 @@
     <summary><strong>Настройки аккаунта</strong> — пароль и удаление</summary>
     <div class="details-body">
 
-      <h4>Электронная почта</h4>
-      <p class="muted small">Используется только для восстановления пароля через ссылку.</p>
-      <form method="POST" action="/profile/update-email">
-        <div class="grid">
-          <input type="email" name="email" placeholder="email@example.com"
-                 value="{{ user.email or '' }}" autocomplete="email">
-          <button type="submit" class="secondary">Сохранить</button>
-        </div>
-      </form>
+      <h4>Telegram</h4>
+      <p class="muted small">Используется для восстановления пароля.</p>
+      <div id="tgStatus">
+        {% if tg_linked %}
+        <p class="muted small">Привязан{% if tg_username %}: <strong>@{{ tg_username }}</strong>{% endif %}</p>
+        <form method="POST" action="/telegram/unlink">
+          <button type="submit" class="outline secondary btn-sm">Отвязать</button>
+        </form>
+        {% else %}
+        <p class="muted small">Telegram не привязан.</p>
+        <button type="button" id="tgLinkBtn" class="secondary">Привязать Telegram</button>
+        <span id="tgLinkStatus" class="status-text"></span>
+        {% endif %}
+      </div>
 
       <hr>
 

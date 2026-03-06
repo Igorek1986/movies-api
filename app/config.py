@@ -20,17 +20,27 @@ class Settings(BaseSettings):
     MYSHOWS_API: str
     MYSHOWS_AUTH_URL: str
 
-    # Email / SMTP (для восстановления пароля; оставьте пустыми если не нужно)
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM: str = ""
-    SMTP_TLS: bool = True
-    # Базовый URL сайта (для формирования ссылки сброса пароля)
+    # Базовый URL сайта (для формирования webhook и ссылок)
     BASE_URL: str = "http://localhost:8000"
     # Пароль для доступа к админ-панели /admin
     ADMIN_PASSWORD: str = ""
+
+    # Telegram Bot
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_BOT_NAME: str = ""  # для ссылок t.me/...
+    # JSON-массив telegram_id администраторов, напр. "[123456789]"
+    TELEGRAM_ADMIN_IDS: str = "[]"
+    # True если сервер за NAT без публичного порта (polling вместо webhook)
+    TELEGRAM_USE_POLLING: bool = False
+
+    @property
+    def telegram_admin_id_list(self) -> list[int]:
+        import json
+
+        try:
+            return [int(x) for x in json.loads(self.TELEGRAM_ADMIN_IDS)]
+        except Exception:
+            return []
 
     # === Pydantic v2 Config ===
     model_config = SettingsConfigDict(

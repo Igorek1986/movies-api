@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 
 from app.db.database import get_db
-from app.db.models import Device, DeviceCode, Timecode, User, DEVICE_LIMITS
+from app.db.models import Device, DeviceCode, Timecode, User, DEVICE_LIMITS, TelegramUser
 from app.utils import generate_profile_api_key, generate_device_code, validate_name
 from app.api.dependencies import get_current_user
 
@@ -82,11 +82,17 @@ async def profiles_page(
 
     devices = await _devices_with_stats(current_user.id, db)
     limit = DEVICE_LIMITS.get(current_user.role, 3)
+    tg_result = await db.execute(
+        select(TelegramUser).where(TelegramUser.user_id == current_user.id)
+    )
+    tg = tg_result.scalar_one_or_none()
     return templates.TemplateResponse("profiles.html", {
         "request": request,
         "user": current_user,
         "profiles": devices,
         "device_limit": limit,
+        "tg_linked": tg is not None,
+        "tg_username": tg.username if (tg and tg.username) else None,
     })
 
 
