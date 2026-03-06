@@ -639,6 +639,11 @@ def _item_watched(
     return is_watched
 
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
 @app.get("/{category}")
 async def get_category(
     category: str,
