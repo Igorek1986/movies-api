@@ -66,7 +66,7 @@ class DeviceCode(Base):
     __tablename__ = "device_codes"
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(8), unique=True, nullable=False, index=True)  # формат: "ABC-123"
+    code = Column(String(6), unique=True, nullable=False, index=True)  # формат: "483921"
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)

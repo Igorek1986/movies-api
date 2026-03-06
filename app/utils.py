@@ -70,12 +70,10 @@ def generate_profile_api_key() -> str:
 
 
 def generate_device_code() -> str:
-    """Генерирует короткий код для привязки устройства.
-    Формат: ABC-123 (3 буквы + дефис + 3 цифры).
+    """Генерирует короткий числовой код для привязки устройства.
+    Формат: 6 цифр (например: 483921).
     """
-    letters = "".join(secrets.choice(string.ascii_uppercase) for _ in range(3))
-    digits = "".join(secrets.choice(string.digits) for _ in range(3))
-    return f"{letters}-{digits}"
+    return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
 def lampa_hash(s: str) -> str:

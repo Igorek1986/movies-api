@@ -915,22 +915,39 @@
                 }
             });
 
-            // Настройка API ключа профиля
+            // Токен устройства (ввод вручную)
             Lampa.SettingsApi.addParam({
                 component: 'numparser_settings',
                 param: {
                     name: 'numparser_api_key',
                     type: 'input',
-                    placeholder: 'Вставьте TOKEN',
+                    placeholder: 'Вставьте токен',
                     values: '',
                     default: Lampa.Storage.get('numparser_api_key', ''),
                 },
                 field: {
-                    name: 'API ключ',
-                    description: 'Ключ профиля для идентификации запросов. Получите на сайте в разделе «Профили».'
+                    name: 'Токен устройства',
+                    description: 'Токен для идентификации устройства. Получите на сайте или привяжите кнопкой ниже.'
                 },
                 onChange: function (value) {
                     Lampa.Storage.set('numparser_api_key', value);
+                }
+            });
+
+            // Привязка через код (без ручного ввода токена)
+            Lampa.SettingsApi.addParam({
+                component: 'numparser_settings',
+                param: {
+                    name: 'numparser_activate_device',
+                    type: 'button',
+                    title: 'Привязать устройство'
+                },
+                field: {
+                    name: 'Привязать устройство',
+                    description: 'Показать код для ввода на сайте — без ручного набора токена'
+                },
+                onChange: function () {
+                    startDeviceActivation();
                 }
             });
         }
@@ -998,6 +1015,120 @@
 
         return qualityStr;
     }
+
+    // ── Device Activation Flow ──────────────────────────────────────────────────
+
+    function startDeviceActivation() {
+        var overlay = null;
+        var pollTimer = null;
+
+        function removeOverlay() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            if (overlay)   { overlay.remove(); overlay = null; }
+        }
+
+        function setStatus(text, color) {
+            if (overlay) overlay.find('.num-act-status').css('color', color || '').text(text);
+        }
+
+        function showOverlay(code, expiresIn) {
+            var remaining = expiresIn;
+
+            overlay = $([
+                '<div class="num-act-overlay">',
+                  '<div class="num-act-box">',
+                    '<div class="num-act-title">Привязка устройства</div>',
+                    '<div class="num-act-url">' + BASE_URL + '</div>',
+                    '<div class="num-act-hint">Мои устройства → Привязать устройство</div>',
+                    '<div class="num-act-hint">Введите этот код:</div>',
+                    '<div class="num-act-code">' + code.replace(/(.{3})(.{3})/, '$1 $2') + '</div>',
+                    '<div class="num-act-timer">Действует ' + remaining + ' сек.</div>',
+                    '<div class="num-act-status">Ожидаю привязки…</div>',
+                    '<div class="num-act-close">Нажмите Назад для отмены</div>',
+                  '</div>',
+                '</div>'
+            ].join('')).appendTo('body');
+
+            // Обратный отсчёт
+            var countdown = setInterval(function () {
+                remaining--;
+                if (!overlay) { clearInterval(countdown); return; }
+                overlay.find('.num-act-timer').text('Действует ' + remaining + ' сек.');
+                if (remaining <= 0) {
+                    clearInterval(countdown);
+                    setStatus('Код истёк. Закройте и попробуйте снова.', '#f87171');
+                    removeOverlay();
+                }
+            }, 1000);
+
+            // Закрытие по клику на фон или кнопке Back
+            overlay.on('click', function (e) {
+                if ($(e.target).hasClass('num-act-overlay')) removeOverlay();
+            });
+
+            // Перехватываем Back (keydown Escape / Lampa back)
+            function onBack() { removeOverlay(); }
+            Lampa.Controller.add('num_act', { back: onBack, up: onBack, down: onBack });
+            Lampa.Controller.toggle('num_act');
+        }
+
+        function startPolling(code, interval) {
+            pollTimer = setInterval(function () {
+                fetch(BASE_URL + '/device/status?code=' + encodeURIComponent(code))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.linked && data.token) {
+                            Lampa.Storage.set('numparser_api_key', data.token);
+                            setStatus('Устройство привязано!', '#4ade80');
+                            Lampa.Noty.show('NUMParser: устройство привязано');
+                            setTimeout(function () {
+                                removeOverlay();
+                                Lampa.Settings.update();
+
+                                setTimeout(function () {
+                                    location.reload();
+                                }, 1000);
+                            }, 2000);
+                        }
+                    })
+                    .catch(function () { /* сеть временно недоступна — продолжаем */ });
+            }, interval * 1000);
+        }
+
+        // Запрос кода у сервера
+        fetch(BASE_URL + '/device/code', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                showOverlay(data.code, data.expires_in);
+                startPolling(data.code, data.poll_interval || 3);
+            })
+            .catch(function () {
+                Lampa.Noty.show('NUMParser: не удалось получить код активации');
+            });
+    }
+
+    // CSS для оверлея активации (инжектируем один раз)
+    (function injectActivationStyles() {
+        if (document.getElementById('num-act-styles')) return;
+        var s = document.createElement('style');
+        s.id = 'num-act-styles';
+        s.textContent = [
+            '.num-act-overlay{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;display:flex;align-items:center;justify-content:center}',
+            '.num-act-box{background:#1a1a2e;border-radius:1.2rem;padding:2.5rem 3.5rem;text-align:center;max-width:560px;width:90%}',
+            '.num-act-title{font-size:1.5rem;font-weight:700;margin-bottom:1.2rem}',
+            '.num-act-url{color:#60a5fa;font-size:1rem;font-weight:600;margin-bottom:.8rem;word-break:break-all}',
+            '.num-act-hint{color:#aaa;font-size:.95rem;margin-bottom:.4rem}',
+            '.num-act-code{font-size:3rem;font-weight:800;letter-spacing:.6rem;color:#4ade80;',
+              'font-family:monospace;border:2px solid #4ade80;border-radius:.6rem;',
+              'padding:.4rem 1.5rem;display:inline-block;margin:1rem 0}',
+            '.num-act-timer{color:#888;font-size:.85rem;margin-bottom:.6rem}',
+            '.num-act-status{font-size:.95rem;min-height:1.4rem}',
+            '.num-act-close{color:#555;font-size:.8rem;margin-top:1.2rem}',
+        ].join('');
+        document.head.appendChild(s);
+    })();
+
+    // ── End Device Activation Flow ──────────────────────────────────────────────
 
     var _timecodeInterceptorActive = false;
     var _lastSentTimecodes = {};  // { "cardId::hash": { percent, sentAt } }

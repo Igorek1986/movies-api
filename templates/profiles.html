@@ -59,6 +59,8 @@
             </td>
             <td>{{ p.timecodes_count }}</td>
             <td class="actions-cell">
+              <button class="btn-sm outline"
+                      onclick="openLinkForm({{ p.id }})">Привязать</button>
               <form method="POST" action="/profiles/{{ p.id }}/regenerate"
                     onsubmit="return confirm('Старый токен перестанет работать в Lampa!')">
                 <button type="submit" class="btn-sm outline secondary">Новый токен</button>
@@ -96,19 +98,20 @@
   <!-- ═══════════════════════════════════════════
        ПРИВЯЗКА УСТРОЙСТВА
        ═══════════════════════════════════════════ -->
-  <details>
-    <summary><strong>Привязать устройство</strong> — ввести токен без ручного набора (Lampa на ТВ)</summary>
+  <details id="linkDeviceDetails">
+    <summary><strong>Привязать устройство</strong> — по коду с экрана Lampa</summary>
     <div class="details-body">
       <p>
-        В настройках плагина нажмите <em>«Привязать устройство»</em> — на экране появится
-        код вида <kbd>ABC-123</kbd>. Введите его ниже и выберите устройство.
+        В настройках плагина NUMParser нажмите <em>«Привязать устройство»</em> —
+        на экране появится 6-значный код. Введите его ниже.
       </p>
       <form id="linkDeviceForm" class="device-form">
         <div class="grid">
           <label>
             Код с экрана Lampa
-            <input type="text" id="deviceCode" placeholder="ABC-123" maxlength="8"
-                   class="code-input" autocomplete="off" spellcheck="false">
+            <input type="text" id="deviceCode" placeholder="483921" maxlength="6"
+                   class="code-input" autocomplete="off" spellcheck="false"
+                   pattern="[0-9]{6}" inputmode="numeric">
           </label>
           <label>
             Устройство
@@ -116,7 +119,16 @@
               {% for p in profiles %}
               <option value="{{ p.id }}">{{ p.name }}</option>
               {% endfor %}
+              {% if device_limit is none or profiles|length < device_limit %}
+              <option value="new">+ Создать новое устройство</option>
+              {% endif %}
             </select>
+          </label>
+        </div>
+        <div id="newDeviceNameRow" style="display:none;">
+          <label>
+            Название нового устройства
+            <input type="text" id="newDeviceName" placeholder="Гостиная ТВ" maxlength="100">
           </label>
         </div>
         <button type="submit" id="linkBtn">Привязать</button>
@@ -280,6 +292,25 @@
 {% block scripts %}
 <script src="/static/js/password.js"></script>
 <script src="/static/js/profiles.js"></script>
+<script>
+function openLinkForm(deviceId) {
+  // Открываем аккордеон
+  const details = document.getElementById('linkDeviceDetails');
+  if (details) details.open = true;
+  // Выбираем нужное устройство
+  const sel = document.getElementById('deviceProfile');
+  if (sel) {
+    sel.value = String(deviceId);
+    sel.dispatchEvent(new Event('change'));
+  }
+  // Фокус на поле кода
+  const codeInput = document.getElementById('deviceCode');
+  if (codeInput) {
+    codeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => codeInput.focus(), 400);
+  }
+}
+</script>
 <script>
   initPasswordValidation({
     passwordId: 'new_password',

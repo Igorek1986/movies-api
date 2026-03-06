@@ -15,28 +15,53 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Device activation ──────────────────────────────────────
   const linkForm = document.getElementById('linkDeviceForm');
   if (linkForm) {
+    const deviceSelect   = document.getElementById('deviceProfile');
+    const newDeviceRow   = document.getElementById('newDeviceNameRow');
+
+    // Показываем поле имени если выбрано «Создать новое»
+    if (deviceSelect) {
+      deviceSelect.addEventListener('change', () => {
+        newDeviceRow.style.display = deviceSelect.value === 'new' ? '' : 'none';
+      });
+    }
+
     linkForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const code      = document.getElementById('deviceCode').value.trim().toUpperCase();
-      const profileId = parseInt(document.getElementById('deviceProfile').value);
-      const statusEl  = document.getElementById('linkStatus');
-      const btn       = document.getElementById('linkBtn');
+      const code     = document.getElementById('deviceCode').value.trim();
+      const selected = deviceSelect ? deviceSelect.value : '';
+      const statusEl = document.getElementById('linkStatus');
+      const btn      = document.getElementById('linkBtn');
+
+      if (!/^\d{6}$/.test(code)) {
+        statusEl.textContent = 'Код должен состоять из 6 цифр';
+        statusEl.className = 'status-text status-err';
+        return;
+      }
 
       btn.disabled = true;
       statusEl.textContent = 'Привязываю…';
       statusEl.className = 'status-text';
 
       try {
+        const body = { code };
+        if (selected === 'new') {
+          body.device_name = (document.getElementById('newDeviceName').value.trim()) || 'Новое устройство';
+        } else {
+          body.device_id = parseInt(selected);
+        }
+
         const res = await fetch('/device/link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, device_id: profileId }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (res.ok) {
           statusEl.textContent = 'Устройство привязано!';
           statusEl.className = 'status-text status-ok';
           linkForm.reset();
+          if (newDeviceRow) newDeviceRow.style.display = 'none';
+          setTimeout(() => location.reload(), 1500);
         } else {
           statusEl.textContent = data.detail || 'Ошибка';
           statusEl.className = 'status-text status-err';

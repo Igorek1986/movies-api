@@ -256,7 +256,8 @@ async def create_device_code(db: AsyncSession = Depends(get_db)):
 
 class _LinkDeviceBody(BaseModel):
     code: str
-    device_id: int
+    device_id: int | None = None
+    device_name: str | None = None  # создать новое устройство с этим именем
 
 
 @router.post("/device/link")
@@ -266,13 +267,17 @@ async def link_device(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Пользователь на веб-странице вводит код из Lampa и выбирает устройство.
-    Принимает JSON: {"code": "ABC-123", "device_id": 1}.
+    Пользователь вводит код из Lampa и выбирает (или создаёт) устройство.
+    JSON: {"code": "483921", "device_id": 1}
+       или {"code": "483921", "device_name": "Гостиная ТВ"}
     """
     if not current_user:
         raise HTTPException(status_code=401)
 
-    code = body.code.strip().upper()
+    if body.device_id is None and not body.device_name:
+        raise HTTPException(status_code=400, detail="Укажите device_id или device_name")
+
+    code = body.code.strip()
     now = datetime.now(timezone.utc)
 
     result = await db.execute(select(DeviceCode).where(DeviceCode.code == code))
@@ -285,14 +290,24 @@ async def link_device(
     if device_code.device_id is not None:
         raise HTTPException(status_code=409, detail="Код уже использован")
 
-    # Проверяем что устройство принадлежит пользователю
-    await _get_device_or_404(body.device_id, current_user, db)
+    if body.device_id is not None:
+        # Привязка к существующему устройству
+        device = await _get_device_or_404(body.device_id, current_user, db)
+    else:
+        # Создание нового устройства
+        await _check_device_limit(current_user, db)
+        name = (body.device_name or "Новое устройство").strip()[:100]
+        token = generate_profile_api_key()
+        device = Device(user_id=current_user.id, name=name, token=token)
+        db.add(device)
+        await db.flush()  # получаем device.id до commit
+        logger.info(f"Device created via activation: user={current_user.username}, name={name}")
 
-    device_code.device_id = body.device_id
+    device_code.device_id = device.id
     device_code.user_id = current_user.id
     await db.commit()
 
-    return {"success": True, "message": "Устройство привязано"}
+    return {"success": True, "message": "Устройство привязано", "device_name": device.name}
 
 
 @router.get("/device/status")
