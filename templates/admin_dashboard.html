@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Пользователи — Админ{% endblock %}
+
+{% block body %}
+<header class="container-fluid site-header">
+  <nav>
+    <ul>
+      <li><strong>NUMParser Admin</strong></li>
+    </ul>
+    <ul>
+      <li><a href="/admin/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main class="container" style="padding-top: 1.5rem;">
+  <h2>Пользователи</h2>
+
+  <figure>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Имя</th>
+          <th>Email</th>
+          <th>Роль</th>
+          <th>Устройств</th>
+          <th>Зарегистрирован</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td>{{ u.id }}</td>
+          <td><strong>{{ u.username }}</strong></td>
+          <td>{{ u.email }}</td>
+          <td>
+            <span class="role-badge role-{{ u.role }}">{{ u.role }}</span>
+          </td>
+          <td>{{ u.device_count }} / {{ u.device_limit }}</td>
+          <td>{{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}</td>
+          <td>
+            <form method="POST" action="/admin/user/{{ u.id }}/role" class="role-form">
+              <select name="role" onchange="this.form.submit()">
+                {% for r in roles %}
+                <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </figure>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  .role-badge {
+    display: inline-block;
+    padding: .15rem .5rem;
+    border-radius: .25rem;
+    font-size: .8rem;
+    font-weight: 600;
+  }
+  .role-simple  { background: var(--pico-secondary-background); color: var(--pico-secondary-foreground); }
+  .role-premium { background: #2563eb22; color: #2563eb; }
+  .role-super   { background: #d97706222; color: #d97706; }
+  .role-form select { padding: .2rem .4rem; font-size: .85rem; }
+</style>
+{% endblock %}

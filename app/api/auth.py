@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from app.db.database import get_db
-from app.db.models import User, Profile, Timecode, PasswordResetToken
+from app.db.models import User, PasswordResetToken
+from app.api.devices import _devices_with_stats, DEVICE_LIMITS
 from app.utils import hash_password, verify_password, generate_api_key, validate_password, validate_name
 from app.api.dependencies import get_current_user
 from app.config import get_settings
@@ -35,19 +36,16 @@ def _set_session_cookie(response, session_key: str):
     )
 
 
-async def _profiles_list(user_id: int, db: AsyncSession) -> list[dict]:
-    """Load profiles with timecode counts for the given user."""
-    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
-    profiles = result.scalars().all()
-    out = []
-    for p in profiles:
-        cnt = await db.execute(select(Timecode).where(Timecode.profile_id == p.id))
-        out.append({
-            "id": p.id, "name": p.name, "api_key": p.api_key,
-            "created_at": p.created_at,
-            "timecodes_count": len(cnt.scalars().all()),
-        })
-    return out
+async def _profiles_ctx(request, user, db, **extra) -> dict:
+    """Контекст для шаблона profiles.html."""
+    devices = await _devices_with_stats(user.id, db)
+    return {
+        "request": request,
+        "user": user,
+        "profiles": devices,
+        "device_limit": DEVICE_LIMITS.get(user.role, 3),
+        **extra,
+    }
 
 
 # ─── Login ────────────────────────────────────────────────────────────────────
@@ -177,10 +175,9 @@ async def change_password(
         return RedirectResponse(url="/login", status_code=302)
 
     async def _err(msg):
-        profiles = await _profiles_list(current_user.id, db)
-        return templates.TemplateResponse("profiles.html", {
-            "request": request, "user": current_user, "profiles": profiles, "error": msg,
-        })
+        return templates.TemplateResponse(
+            "profiles.html", await _profiles_ctx(request, current_user, db, error=msg)
+        )
 
     if not verify_password(current_password, current_user.password_hash):
         return await _err("Неверный текущий пароль")
@@ -199,11 +196,10 @@ async def change_password(
     await db.commit()
     logger.info(f"Password changed: {current_user.username}")
 
-    profiles = await _profiles_list(current_user.id, db)
-    return templates.TemplateResponse("profiles.html", {
-        "request": request, "user": current_user, "profiles": profiles,
-        "success": "Пароль успешно изменён",
-    })
+    return templates.TemplateResponse(
+        "profiles.html",
+        await _profiles_ctx(request, current_user, db, success="Пароль успешно изменён"),
+    )
 
 
 # ─── Update email ─────────────────────────────────────────────────────────────
@@ -219,10 +215,9 @@ async def update_email(
         return RedirectResponse(url="/login", status_code=302)
 
     async def _err(msg):
-        profiles = await _profiles_list(current_user.id, db)
-        return templates.TemplateResponse("profiles.html", {
-            "request": request, "user": current_user, "profiles": profiles, "error": msg,
-        })
+        return templates.TemplateResponse(
+            "profiles.html", await _profiles_ctx(request, current_user, db, error=msg)
+        )
 
     email = email.strip().lower() or None
 
@@ -238,11 +233,13 @@ async def update_email(
     current_user.email = email
     await db.commit()
 
-    profiles = await _profiles_list(current_user.id, db)
-    return templates.TemplateResponse("profiles.html", {
-        "request": request, "user": current_user, "profiles": profiles,
-        "success": "Email сохранён" if email else "Email удалён",
-    })
+    return templates.TemplateResponse(
+        "profiles.html",
+        await _profiles_ctx(
+            request, current_user, db,
+            success="Email сохранён" if email else "Email удалён",
+        ),
+    )
 
 
 # ─── Delete account ───────────────────────────────────────────────────────────
@@ -258,11 +255,10 @@ async def delete_account(
         return RedirectResponse(url="/login", status_code=302)
 
     if not verify_password(password, current_user.password_hash):
-        profiles = await _profiles_list(current_user.id, db)
-        return templates.TemplateResponse("profiles.html", {
-            "request": request, "user": current_user, "profiles": profiles,
-            "error": "Неверный пароль",
-        })
+        return templates.TemplateResponse(
+            "profiles.html",
+            await _profiles_ctx(request, current_user, db, error="Неверный пароль"),
+        )
 
     await db.delete(current_user)
     await db.commit()

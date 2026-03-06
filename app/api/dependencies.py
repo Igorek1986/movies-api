@@ -1,11 +1,9 @@
-from datetime import datetime, timezone
-
 from fastapi import Depends, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.database import get_db
-from app.db.models import User, Profile
+from app.db.models import User, Device
 
 
 async def get_current_user(
@@ -23,16 +21,16 @@ async def get_current_user(
     return result.scalar_one_or_none()
 
 
-async def get_profile_by_api_key(
-    apikey: str = Query(None),
+async def get_device_by_token(
+    token: str = Query(None),
     db: AsyncSession = Depends(get_db),
-) -> Profile | None:
+) -> Device | None:
     """
-    Авторизация API-запросов (Lampa) по apikey из query параметра.
+    Авторизация API-запросов (Lampa) по token из query параметра.
     Используется для эндпоинтов /timecode и /{category}.
     """
-    if not apikey:
+    if not token:
         return None
 
-    result = await db.execute(select(Profile).where(Profile.api_key == apikey))
+    result = await db.execute(select(Device).where(Device.token == token))
     return result.scalar_one_or_none()

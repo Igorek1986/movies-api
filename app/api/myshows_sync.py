@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import select
 from app.db.database import get_db
-from app.db.models import User, Profile, Timecode, MediaCard
+from app.db.models import User, Device, Timecode, MediaCard
 from app.utils import lampa_hash
 from app.config import get_settings
 from app.api.dependencies import get_current_user
@@ -125,7 +125,7 @@ def _lampa_hash_for_episode(season: int, episode: int, show_title: str) -> str:
 
 # ─── Sync stream generator ─────────────────────────────────────────────────────
 
-async def _sync_generator(profile: Profile, ms_login: str, ms_password: str, db: AsyncSession):
+async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession):
     all_timecodes: list[dict] = []
     all_media_cards: list[dict] = []
     tmdb_cache: dict = {}
@@ -298,13 +298,16 @@ async def _sync_generator(profile: Profile, ms_login: str, ms_password: str, db:
                 cleaned = list(unique.values())
 
                 values = [
-                    {"profile_id": profile.id, "card_id": tc["card_id"],
+                    {"device_id": device.id, "lampa_profile_id": "", "card_id": tc["card_id"],
                      "item": tc["item"], "data": tc["data"]}
                     for tc in cleaned
                 ]
                 stmt = insert(Timecode).values(values)
                 stmt = stmt.on_conflict_do_update(
-                    index_elements=[Timecode.profile_id, Timecode.card_id, Timecode.item],
+                    index_elements=[
+                        Timecode.device_id, Timecode.lampa_profile_id,
+                        Timecode.card_id, Timecode.item,
+                    ],
                     set_={"data": stmt.excluded.data},
                 )
                 await db.execute(stmt)
@@ -356,13 +359,13 @@ async def _sync_generator(profile: Profile, ms_login: str, ms_password: str, db:
 @router.post("/myshows/sync")
 async def sync_myshows(
     request: Request,
-    profile_id: int = Form(...),
+    device_id: int = Form(...),
     login: str = Form(...),
     password: str = Form(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Синхронизация MyShows → профиль. Возвращает SSE-поток прогресса."""
+    """Синхронизация MyShows → устройство. Возвращает SSE-поток прогресса."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Необходима авторизация")
 
@@ -377,17 +380,17 @@ async def sync_myshows(
             detail=f"Синхронизация недавно запускалась. Подождите ещё {wait_str}",
         )
 
-    profile_result = await db.execute(
-        select(Profile).where(Profile.id == profile_id, Profile.user_id == current_user.id)
+    device_result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.user_id == current_user.id)
     )
-    profile = profile_result.scalar_one_or_none()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Профиль не найден")
+    device = device_result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Устройство не найдено")
 
-    logger.info(f"MyShows sync: user={current_user.username}, profile={profile.name}")
+    logger.info(f"MyShows sync: user={current_user.username}, device={device.name}")
 
     return StreamingResponse(
-        _sync_generator(profile, login, password, db),
+        _sync_generator(device, login, password, db),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

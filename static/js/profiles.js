@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch('/device/link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, profile_id: profileId }),
+          body: JSON.stringify({ code, device_id: profileId }),
         });
         const data = await res.json();
         if (res.ok) {
@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
       status.textContent = 'Начинаю синхронизацию…';
 
       const body = new FormData();
-      body.append('profile_id', profileId);
+      body.append('device_id', profileId);
       body.append('login', login);
       body.append('password', password);
 
@@ -150,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
       statusEl.className = 'status-text';
 
       try {
-        const res = await fetch(`/timecode/import/lampa?apikey=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(`/timecode/import/lampa?token=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),
@@ -194,7 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
       statusEl.className = 'status-text';
 
       try {
-        const res = await fetch(`/timecode/import/lampac?apikey=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(`/timecode/import/lampac?token=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),

@@ -162,11 +162,15 @@
             var category = params.url;
             var page = params.page || 1;
             if (Lampa.Storage.get('numparser_hide_watched')) {
-                var apikey = getProfileSetting('numparser_api_key', '');
+                var token = Lampa.Storage.get('numparser_api_key', '');
             }
 
             var url = BASE_URL + '/' + category + '?page=' + page + '&language=' + Lampa.Storage.get('tmdb_lang', 'ru');
-            if (apikey) url += '&apikey=' + encodeURIComponent(apikey);
+            if (token) {
+                url += '&token=' + encodeURIComponent(token);
+                var profileId = getProfileId();
+                if (profileId) url += '&profile_id=' + encodeURIComponent(profileId);
+            }
 
             self.get(url, params, function (json) {
                 onComplete({
@@ -412,10 +416,14 @@
             function makeRequest(category, title, callback) {
                 var page = 1;
                 if (Lampa.Storage.get('numparser_hide_watched')) {
-                    var apikey = getProfileSetting('numparser_api_key', '');
+                    var token = Lampa.Storage.get('numparser_api_key', '');
                 }
                 var url = BASE_URL + '/' + category + '?page=' + page + '&language=' + Lampa.Storage.get('tmdb_lang', 'ru');
-                if (apikey) url += '&apikey=' + encodeURIComponent(apikey);
+                if (token) {
+                    url += '&token=' + encodeURIComponent(token);
+                    var profileId = getProfileId();
+                    if (profileId) url += '&profile_id=' + encodeURIComponent(profileId);
+                }
 
                 self.get(url, params, function (json) {
                     var results = json.results || [];
@@ -593,13 +601,19 @@
                 profileId = '_' + Lampa.Account.Permit.account.profile.id;
             }
         } catch (e) {}
+        if (profileId && profileId.charAt(0) === '_') {
+            profileId = profileId.substring(1);
+        }
         return profileId;
     }
 
     function getProfileKey(baseKey) {
         var profileId = getProfileId();
-        Log.info('getProfileKey profileId', 'baseKey', baseKey, 'profile' + profileId);
-        return baseKey + '_profile' + profileId;
+        if (profileId) {
+            return baseKey + '_profile_' + profileId;
+        } else {
+            return baseKey;
+        }
     }
 
     function getProfileSetting(key, defaultValue) {
@@ -632,12 +646,8 @@
         if (!hasProfileSetting('numparser_menu_hide')) {
             setProfileSetting('numparser_menu_hide', []);
         }
-        if (!hasProfileSetting('numparser_api_key')) {
-            setProfileSetting('numparser_api_key', '');
-        }
 
         // Восстанавливаем значения в Lampa.Storage, чтобы UI знал актуальные данные
-        Lampa.Storage.set('numparser_api_key', getProfileSetting('numparser_api_key', ''));
         Lampa.Storage.set('numparser_hide_watched', getProfileSetting('numparser_hide_watched', "true"), "true");
         Lampa.Storage.set('numparser_min_progress', getProfileSetting('numparser_min_progress', DEFAULT_MIN_PROGRESS), "true");
         Lampa.Storage.set('numparser_source_name', getProfileSetting('numparser_source_name', DEFAULT_SOURCE_NAME), "true");
@@ -911,16 +921,16 @@
                 param: {
                     name: 'numparser_api_key',
                     type: 'input',
-                    placeholder: 'Вставьте API ключ профиля',
+                    placeholder: 'Вставьте TOKEN',
                     values: '',
-                    default: getProfileSetting('numparser_api_key', ''),
+                    default: Lampa.Storage.get('numparser_api_key', ''),
                 },
                 field: {
                     name: 'API ключ',
                     description: 'Ключ профиля для идентификации запросов. Получите на сайте в разделе «Профили».'
                 },
                 onChange: function (value) {
-                    setProfileSetting('numparser_api_key', value);
+                    Lampa.Storage.set('numparser_api_key', value);
                 }
             });
         }
@@ -1049,9 +1059,9 @@
     function onTimelineUpdate(data) {
         if (!data || !data.data || !data.data.hash || !data.data.road) return;
 
-        var apikey = getProfileSetting('numparser_api_key', '');
-        if (!apikey) {
-            Log.info('Timecode sync: skip — no apikey');
+        var token = Lampa.Storage.get('numparser_api_key', '');
+        if (!token) {
+            Log.info('Timecode sync: skip — no token');
             return;
         }
 
@@ -1080,7 +1090,11 @@
 
         Log.info('Timecode sync: sending', cardId, hash, percent + '%');
 
-        fetch(BASE_URL + '/timecode?apikey=' + encodeURIComponent(apikey), {
+        var timecodeUrl = BASE_URL + '/timecode?token=' + encodeURIComponent(token);
+        var profileId = getProfileId();
+        if (profileId) timecodeUrl += '&profile_id=' + encodeURIComponent(profileId);
+
+        fetch(timecodeUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1169,11 +1183,6 @@
 
                 var minProgress = settingsPanel.querySelector('select[data-name="numparser_min_progress"]');
                 if (minProgress) minProgress.value = getProfileSetting('numparser_min_progress', DEFAULT_MIN_PROGRESS).toString();
-
-                var apiKeyInput = settingsPanel.querySelector('input[data-name="numparser_api_key"]');
-                if (apiKeyInput) {
-                    apiKeyInput.value = getProfileSetting('numparser_api_key', '');
-                }
 
                 var sourceName = settingsPanel.querySelector('input[data-name="numparser_source_name"]');
                 if (sourceName) {

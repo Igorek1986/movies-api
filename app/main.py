@@ -28,9 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import init_db, async_session_maker
 from app.db.models import MediaCard
 from app.config import get_settings
-from app.api import auth, myshows_sync, profiles, timecodes as timecodes_router
-from app.api.dependencies import get_profile_by_api_key
-from app.api.timecodes import load_profile_timecodes, get_watched_movie_ids
+from app.api import auth, myshows_sync, timecodes as timecodes_router
+from app.api import devices
+from app.admin import router as admin_router
+from app.api.dependencies import get_device_by_token
+from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
 from app.utils import lampa_hash, build_episode_hash_string
 from app.db.database import get_db
 
@@ -114,11 +116,12 @@ async def favicon():
 
 
 app.include_router(auth.router)
-app.include_router(profiles.router)
+app.include_router(devices.router)
 app.include_router(timecodes_router.router)
 app.include_router(myshows.router)
 app.include_router(stats.router)
 app.include_router(myshows_sync.router)
+app.include_router(admin_router)
 
 
 @app.middleware("http")
@@ -610,7 +613,8 @@ async def get_category(
     page: int = 1,
     per_page: int = 20,
     language: str = "ru",
-    apikey: str = Query(None),
+    token: str = Query(None),
+    profile_id: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     if not re.match(r"^[\w\-]+$", category):
@@ -618,16 +622,16 @@ async def get_category(
 
     try:
         logger.debug(
-            f"Запрос: {category}, страница {page}, apikey={'yes' if apikey else 'no'}"
+            f"Запрос: {category}, страница {page}, token={'yes' if token else 'no'}"
         )
 
-        # Загружаем таймкоды профиля (если передан apikey)
+        # Загружаем таймкоды устройства (если передан token)
         timecodes: dict = {}
         watched_movies: set[str] = set()
-        if apikey:
-            profile = await get_profile_by_api_key(apikey=apikey, db=db)
-            if profile:
-                timecodes = await load_profile_timecodes(db, profile.id)
+        if token:
+            device = await get_device_by_token(token=token, db=db)
+            if device:
+                timecodes = await load_device_timecodes(db, device.id, profile_id or "")
                 watched_movies = get_watched_movie_ids(timecodes)
                 logger.debug(
                     f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "

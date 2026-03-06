@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Профили — {{ user.username }}{% endblock %}
+{% block title %}Устройства — {{ user.username }}{% endblock %}
 
 {% block body %}
 <header class="container-fluid site-header">
@@ -8,8 +8,10 @@
       <li><strong>NUMParser</strong></li>
     </ul>
     <ul>
-      <li><span class="username-badge">{{ user.username }}</span></li>
-<li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+      <li><span class="username-badge">{{ user.username }}</span>
+          <small class="muted" style="margin-left:.4rem;">({{ user.role }}{% if device_limit is not none %}, лимит: {{ device_limit }}{% else %}, без лимита{% endif %})</small>
+      </li>
+      <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
     </ul>
   </nav>
 </header>
@@ -18,7 +20,7 @@
 
   {% if request.query_params.get('registered') %}
   <p role="alert" class="alert-success">
-    Добро пожаловать! Создайте первый профиль — для каждого устройства или аккаунта Lampa.
+    Добро пожаловать! Создайте первое устройство для доступа к API из Lampa.
   </p>
   {% endif %}
 
@@ -26,11 +28,11 @@
   {% if success %}<p role="alert" class="alert-success">{{ success }}</p>{% endif %}
 
   <!-- ═══════════════════════════════════════════
-       ПРОФИЛИ
+       УСТРОЙСТВА
        ═══════════════════════════════════════════ -->
   <section>
     <div class="section-title-row">
-      <h2>Мои профили</h2>
+      <h2>Мои устройства</h2>
     </div>
 
     {% if profiles %}
@@ -38,8 +40,8 @@
       <table>
         <thead>
           <tr>
-            <th>Профиль</th>
-            <th>API-ключ</th>
+            <th>Устройство</th>
+            <th>Токен</th>
             <th>Таймкодов</th>
             <th>Действия</th>
           </tr>
@@ -49,24 +51,24 @@
           <tr>
             <td><strong>{{ p.name }}</strong></td>
             <td>
-              <code class="api-key-mono" title="{{ p.api_key }}">
-                {{ p.api_key[:4] }}-••••-••••-••••
+              <code class="api-key-mono" title="{{ p.token }}">
+                {{ p.token[:4] }}-••••-••••-••••
               </code>
               <button class="btn-icon" title="Показать/скрыть"
-                      onclick="toggleKey(this, '{{ p.api_key }}')">👁</button>
+                      onclick="toggleKey(this, '{{ p.token }}')">👁</button>
             </td>
             <td>{{ p.timecodes_count }}</td>
             <td class="actions-cell">
               <form method="POST" action="/profiles/{{ p.id }}/regenerate"
-                    onsubmit="return confirm('Старый ключ перестанет работать в Lampa!')">
-                <button type="submit" class="btn-sm outline secondary">Новый ключ</button>
+                    onsubmit="return confirm('Старый токен перестанет работать в Lampa!')">
+                <button type="submit" class="btn-sm outline secondary">Новый токен</button>
               </form>
               <form method="POST" action="/profiles/{{ p.id }}/clear-timecodes"
-                    onsubmit="return confirm('Удалить все таймкоды профиля «{{ p.name }}»?')">
+                    onsubmit="return confirm('Удалить все таймкоды устройства «{{ p.name }}»?')">
                 <button type="submit" class="btn-sm outline warning-btn">Очистить</button>
               </form>
               <form method="POST" action="/profiles/{{ p.id }}/delete"
-                    onsubmit="return confirm('Удалить профиль «{{ p.name }}» и все его таймкоды?')">
+                    onsubmit="return confirm('Удалить устройство «{{ p.name }}» и все его таймкоды?')">
                 <button type="submit" class="btn-sm outline danger-btn">Удалить</button>
               </form>
             </td>
@@ -76,26 +78,30 @@
       </table>
     </figure>
     {% else %}
-    <p class="muted">Профилей ещё нет. Создайте первый.</p>
+    <p class="muted">Устройств ещё нет. Создайте первое.</p>
     {% endif %}
 
-    <!-- Создать профиль -->
+    <!-- Создать устройство -->
+    {% if device_limit is none or profiles|length < device_limit %}
     <form method="POST" action="/profiles/create" class="inline-form">
-      <input type="text" name="name" placeholder="Название нового профиля (напр. Гостиная)"
+      <input type="text" name="name" placeholder="Название устройства (напр. Гостиная ТВ)"
              required maxlength="100" style="flex:1;">
-      <button type="submit">Создать профиль</button>
+      <button type="submit">Добавить устройство</button>
     </form>
+    {% else %}
+    <p class="muted">Достигнут лимит устройств ({{ device_limit }}). Для увеличения лимита обратитесь к администратору.</p>
+    {% endif %}
   </section>
 
   <!-- ═══════════════════════════════════════════
        ПРИВЯЗКА УСТРОЙСТВА
        ═══════════════════════════════════════════ -->
   <details>
-    <summary><strong>Привязать устройство</strong> — ввести ключ без ручного набора (Lampa на ТВ)</summary>
+    <summary><strong>Привязать устройство</strong> — ввести токен без ручного набора (Lampa на ТВ)</summary>
     <div class="details-body">
       <p>
         В настройках плагина нажмите <em>«Привязать устройство»</em> — на экране появится
-        код вида <kbd>ABC-123</kbd>. Введите его ниже и выберите профиль.
+        код вида <kbd>ABC-123</kbd>. Введите его ниже и выберите устройство.
       </p>
       <form id="linkDeviceForm" class="device-form">
         <div class="grid">
@@ -105,7 +111,7 @@
                    class="code-input" autocomplete="off" spellcheck="false">
           </label>
           <label>
-            Профиль
+            Устройство
             <select id="deviceProfile">
               {% for p in profiles %}
               <option value="{{ p.id }}">{{ p.name }}</option>
@@ -125,12 +131,12 @@
   <details>
     <summary><strong>Синхронизация MyShows</strong> — импорт просмотренного</summary>
     <div class="details-body">
-      <p>Все просмотренные фильмы и серии будут отмечены как 100% в выбранном профиле.</p>
+      <p>Все просмотренные фильмы и серии будут отмечены как 100% в выбранном устройстве.</p>
       <form id="myshowsSyncForm">
         <div class="grid">
           <label>
-            Профиль
-            <select id="syncProfileId" name="profile_id" required>
+            Устройство
+            <select id="syncProfileId" name="device_id" required>
               {% for p in profiles %}
               <option value="{{ p.id }}">{{ p.name }}</option>
               {% endfor %}
@@ -170,9 +176,9 @@
           </p>
           <form id="importLampaForm">
             <label>
-              Профиль
+              Устройство
               <select id="importLampaProfile">
-                {% for p in profiles %}<option value="{{ p.api_key }}">{{ p.name }}</option>{% endfor %}
+                {% for p in profiles %}<option value="{{ p.token }}">{{ p.name }}</option>{% endfor %}
               </select>
             </label>
             <label>
@@ -193,9 +199,9 @@
           </p>
           <form id="importLampacForm">
             <label>
-              Профиль
+              Устройство
               <select id="importLampacProfile">
-                {% for p in profiles %}<option value="{{ p.api_key }}">{{ p.name }}</option>{% endfor %}
+                {% for p in profiles %}<option value="{{ p.token }}">{{ p.name }}</option>{% endfor %}
               </select>
             </label>
             <label>
@@ -257,7 +263,7 @@
       <hr>
 
       <h4 style="color: var(--pico-del-color);">Удалить аккаунт</h4>
-      <p class="muted">Все профили и таймкоды будут удалены безвозвратно.</p>
+      <p class="muted">Все устройства и таймкоды будут удалены безвозвратно.</p>
       <form method="POST" action="/profile/delete"
             onsubmit="return confirm('Удалить аккаунт и все данные? Это необратимо!')">
         <div class="grid">
@@ -275,7 +281,6 @@
 <script src="/static/js/password.js"></script>
 <script src="/static/js/profiles.js"></script>
 <script>
-  // Валидация смены пароля
   initPasswordValidation({
     passwordId: 'new_password',
     confirmId: 'new_password_confirm',

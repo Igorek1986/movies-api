@@ -1,32 +1,32 @@
 {% extends "base.html" %}
-{% block title %}API-ключ — {{ profile.name }}{% endblock %}
+{% block title %}Токен — {{ profile.name }}{% endblock %}
 
 {% block body %}
 <main class="container auth-container">
   <article>
     <hgroup>
-      <h2>Профиль «{{ profile.name }}»</h2>
-      <p>API-ключ для плагина Lampa</p>
+      <h2>Устройство «{{ profile.name }}»</h2>
+      <p>Токен для плагина Lampa</p>
     </hgroup>
 
     <p role="alert" class="alert-warning">
-      <strong>Скопируйте ключ</strong> — в дальнейшем его можно посмотреть на странице
-      профилей (кнопка <kbd>👁</kbd> рядом с ключом) или перевыпустить.
+      <strong>Скопируйте токен</strong> — в дальнейшем его можно посмотреть на странице
+      устройств (кнопка <kbd>👁</kbd> рядом с токеном) или перевыпустить.
     </p>
 
     <div class="api-key-box" id="apiKey">{{ api_key }}</div>
 
     <div class="grid" style="gap: var(--pico-spacing);">
       <button onclick="copyKey()" class="secondary">Копировать</button>
-      <a href="/profiles" role="button" class="outline">← К профилям</a>
+      <a href="/profiles" role="button" class="outline">← К устройствам</a>
     </div>
 
     <details style="margin-top: var(--pico-spacing);">
       <summary>Как использовать ключ?</summary>
       <ol>
         <li>Откройте Lampa → Настройки → Плагины → NUMParser</li>
-        <li>Вставьте ключ в поле «API Key»</li>
-        <li>Или привяжите устройство через код активации (<a href="/profiles">страница профилей</a>)</li>
+        <li>Вставьте токен в поле «Token»</li>
+        <li>Или привяжите устройство через код активации (<a href="/profiles">страница устройств</a>)</li>
       </ol>
     </details>
   </article>

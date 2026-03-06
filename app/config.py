@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     SMTP_TLS: bool = True
     # Базовый URL сайта (для формирования ссылки сброса пароля)
     BASE_URL: str = "http://localhost:8000"
+    # Пароль для доступа к админ-панели /admin
+    ADMIN_PASSWORD: str = ""
 
     # === Pydantic v2 Config ===
     model_config = SettingsConfigDict(

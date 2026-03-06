@@ -13,6 +13,15 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 
+# Роли пользователей и лимиты устройств
+USER_ROLES = ("simple", "premium", "super")
+DEVICE_LIMITS = {
+    "simple": 3,
+    "premium": 8,
+    "super": None,  # без ограничений
+}
+
+
 class User(Base):
     """Модель пользователя — только для веб-авторизации."""
 
@@ -22,60 +31,63 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     # session_key используется только для cookie-авторизации в веб-интерфейсе.
-    # Для доступа к API (Lampa) используется Profile.api_key.
+    # Для доступа к API (Lampa) используется Device.token.
     session_key = Column(String(64), unique=True, nullable=True, index=True)
     # email — необязательный, только для восстановления пароля
     email = Column(String(200), unique=True, nullable=True)
-    is_superuser = Column(Boolean, default=False)
+    # Роль: "simple" (3 уст.), "premium" (8 уст.), "super" (без лимита)
+    role = Column(String(20), nullable=False, default="simple", server_default="simple")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def __repr__(self):
-        return f"<User(id={self.id}, username={self.username})>"
+        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
 
 
-class Profile(Base):
-    """Профиль пользователя. Каждый профиль имеет собственный API-ключ для Lampa."""
+class Device(Base):
+    """Устройство пользователя. Каждое устройство имеет уникальный токен для Lampa."""
 
-    __tablename__ = "profiles"
+    __tablename__ = "devices"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    name = Column(String(100), nullable=False, default="Основной")
+    name = Column(String(100), nullable=False, default="Основное")
     # Хранится plaintext — нужен для device activation flow.
-    # Не является паролем, управляет только доступом к спискам фильмов.
-    api_key = Column(String(64), unique=True, nullable=False, index=True)
+    token = Column(String(64), unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):
-        return f"<Profile(id={self.id}, user_id={self.user_id}, name={self.name})>"
+        return f"<Device(id={self.id}, user_id={self.user_id}, name={self.name})>"
 
 
 class DeviceCode(Base):
-    """Одноразовый код для привязки устройства (Lampa) к профилю без ручного ввода токена."""
+    """Одноразовый код для привязки устройства (Lampa) к Device без ручного ввода токена."""
 
     __tablename__ = "device_codes"
 
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String(8), unique=True, nullable=False, index=True)  # формат: "ABC-123"
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=True)
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):
-        return f"<DeviceCode(code={self.code}, linked={self.profile_id is not None})>"
+        return f"<DeviceCode(code={self.code}, linked={self.device_id is not None})>"
 
 
 class Timecode(Base):
-    """Прогресс просмотра — привязан к профилю, не к пользователю напрямую."""
+    """Прогресс просмотра — привязан к устройству и опциональному профилю Lampa."""
 
     __tablename__ = "timecodes"
 
     id = Column(Integer, primary_key=True, index=True)
-    profile_id = Column(
-        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    device_id = Column(
+        Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Опциональный ID профиля из встроенной системы профилей Lampa.
+    # Пустая строка означает «без профиля» (дефолт).
+    lampa_profile_id = Column(String(100), nullable=False, default="", server_default="")
     card_id = Column(String(100), nullable=False, index=True)  # "{tmdb_id}_movie" или "_tv"
     item = Column(String(100), nullable=False, index=True)     # хэш эпизода/фильма (lampa_hash)
     data = Column(Text, nullable=False)                        # JSON: {duration, time, percent}
@@ -84,11 +96,14 @@ class Timecode(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("profile_id", "card_id", "item", name="uq_timecode_unique"),
+        UniqueConstraint(
+            "device_id", "lampa_profile_id", "card_id", "item",
+            name="uq_timecode_unique"
+        ),
     )
 
     def __repr__(self):
-        return f"<Timecode(profile_id={self.profile_id}, card_id={self.card_id}, item={self.item})>"
+        return f"<Timecode(device_id={self.device_id}, card_id={self.card_id}, item={self.item})>"
 
 
 class MediaCard(Base):
