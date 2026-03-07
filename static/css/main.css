@@ -176,7 +176,7 @@ button.danger-btn {
 .import-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: repeat(5, auto);
+  grid-template-rows: repeat(6, auto);
   gap: var(--pico-spacing);
 }
 @media (max-width: 768px) {
@@ -184,7 +184,7 @@ button.danger-btn {
 }
 .import-card {
   display: grid;
-  grid-row: span 5;
+  grid-row: span 6;
   grid-template-rows: subgrid;
   background: var(--pico-card-background-color);
   border: var(--pico-border-width) solid var(--pico-card-border-color);

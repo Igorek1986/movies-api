@@ -26,11 +26,11 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 
 from app.config import get_settings
 from app.db.database import get_db, async_session_maker
-from app.db.models import Device, Timecode, MediaCard, LampaProfile
+from app.db.models import Device, Timecode, MediaCard, LampaProfile, User
 from app.api.dependencies import get_device_by_token
 
 logger = logging.getLogger(__name__)
@@ -224,6 +224,29 @@ async def save_timecode(
         raise HTTPException(status_code=400, detail="data должна быть JSON-строкой")
 
     lampa_profile_id = profile_id or ""
+
+    # Проверяем лимит профилей для неизвестного (нового) profile_id
+    if lampa_profile_id:
+        existing_lp = (await db.execute(
+            select(LampaProfile).where(
+                LampaProfile.device_id == device.id,
+                LampaProfile.lampa_profile_id == lampa_profile_id,
+            )
+        )).scalar_one_or_none()
+
+        if not existing_lp:
+            user = (await db.execute(select(User).where(User.id == device.user_id))).scalar_one_or_none()
+            role = user.role if user else "simple"
+            _LIMITS = {"simple": 3, "premium": 8, "super": None}
+            limit = _LIMITS.get(role, 3)
+            if limit is not None:
+                count = (await db.execute(
+                    select(func.count()).select_from(LampaProfile)
+                    .where(LampaProfile.device_id == device.id)
+                )).scalar() or 0
+                if count >= limit:
+                    raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
+
     await _upsert_timecodes(
         db, device.id, lampa_profile_id,
         [{"card_id": card_id, "item": item, "data": data}]

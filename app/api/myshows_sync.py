@@ -298,7 +298,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 cleaned = list(unique.values())
 
                 values = [
-                    {"device_id": device.id, "lampa_profile_id": "", "card_id": tc["card_id"],
+                    {"device_id": device.id, "lampa_profile_id": profile_id, "card_id": tc["card_id"],
                      "item": tc["item"], "data": tc["data"]}
                     for tc in cleaned
                 ]
@@ -362,6 +362,7 @@ async def sync_myshows(
     device_id: int = Form(...),
     login: str = Form(...),
     password: str = Form(...),
+    profile_id: str = Form(""),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

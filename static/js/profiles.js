@@ -10,13 +10,38 @@ function toggleKey(btn, fullKey) {
   }
 }
 
+// Загружает lampa-профили устройства и заполняет select
+async function _loadLampaProfiles(deviceId, selectEl) {
+  selectEl.innerHTML = '<option value="">Основной (без профиля)</option>';
+  if (!deviceId) return;
+  try {
+    const res  = await fetch(`/api/profile-ids?device_id=${deviceId}`);
+    const data = await res.json();
+    (data.profiles || []).forEach(p => {
+      if (!p.profile_id) return;
+      const opt   = document.createElement('option');
+      opt.value   = p.profile_id;
+      opt.textContent = p.name || p.profile_id;
+      selectEl.appendChild(opt);
+    });
+  } catch { /* молча игнорируем */ }
+}
+
+function _updateLampaCmd(profileId) {
+  const btn = document.getElementById('copyLampaCmd');
+  if (!btn) return;
+  const key = profileId ? `file_view_${profileId}` : 'file_view';
+  btn.dataset.cmd = `copy(localStorage.getItem('${key}'))`;
+  btn.textContent = btn.dataset.cmd;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
   // ── Copy Lampa console command ──────────────────────────────────────────────
   const copyLampaCmd = document.getElementById('copyLampaCmd');
   if (copyLampaCmd) {
-    const cmd = copyLampaCmd.textContent.trim();
     copyLampaCmd.addEventListener('click', () => {
+      const cmd = (copyLampaCmd.dataset.cmd || copyLampaCmd.textContent).trim();
       navigator.clipboard.writeText(cmd).then(() => {
         copyLampaCmd.textContent = 'Скопировано ✓';
         setTimeout(() => { copyLampaCmd.textContent = cmd; }, 2000);
@@ -148,14 +173,26 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── MyShows sync (SSE streaming) ───────────────────────────
   const syncForm = document.getElementById('myshowsSyncForm');
   if (syncForm) {
+    const syncDeviceSel  = document.getElementById('syncProfileId');
+    const syncLampaSel   = document.getElementById('syncLampaProfile');
+    if (syncDeviceSel && syncLampaSel) {
+      const initialDeviceId = syncDeviceSel.options[syncDeviceSel.selectedIndex]?.dataset.deviceId;
+      _loadLampaProfiles(initialDeviceId, syncLampaSel);
+      syncDeviceSel.addEventListener('change', () => {
+        const did = syncDeviceSel.options[syncDeviceSel.selectedIndex]?.dataset.deviceId;
+        _loadLampaProfiles(did, syncLampaSel);
+      });
+    }
+
     syncForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const profileId = document.getElementById('syncProfileId').value;
-      const login     = document.getElementById('myshowsLogin').value.trim();
-      const password  = document.getElementById('myshowsPassword').value;
-      const btn       = document.getElementById('syncBtn');
-      const progress  = document.getElementById('syncProgress');
-      const status    = document.getElementById('syncStatus');
+      const profileId  = document.getElementById('syncProfileId').value;
+      const lampaProfile = document.getElementById('syncLampaProfile')?.value || '';
+      const login      = document.getElementById('myshowsLogin').value.trim();
+      const password   = document.getElementById('myshowsPassword').value;
+      const btn        = document.getElementById('syncBtn');
+      const progress   = document.getElementById('syncProgress');
+      const status     = document.getElementById('syncStatus');
 
       btn.disabled = true;
       progress.hidden = false;
@@ -165,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
       body.append('device_id', profileId);
       body.append('login', login);
       body.append('password', password);
+      body.append('profile_id', lampaProfile);
 
       try {
         const res = await fetch('/myshows/sync', { method: 'POST', body });
@@ -227,9 +265,24 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Import from Lampa ──────────────────────────────────────
   const importLampaForm = document.getElementById('importLampaForm');
   if (importLampaForm) {
+    const lampaDevSel = document.getElementById('importLampaProfile');
+    const lampaPidSel = document.getElementById('importLampaProfilePid');
+    if (lampaDevSel && lampaPidSel) {
+      const _loadAndSyncCmd = async (deviceId) => {
+        await _loadLampaProfiles(deviceId, lampaPidSel);
+        _updateLampaCmd(lampaPidSel.value);
+      };
+      _loadAndSyncCmd(lampaDevSel.options[0]?.dataset?.deviceId);
+      lampaDevSel.addEventListener('change', () =>
+        _loadAndSyncCmd(lampaDevSel.options[lampaDevSel.selectedIndex]?.dataset?.deviceId));
+      lampaPidSel.addEventListener('change', () => _updateLampaCmd(lampaPidSel.value));
+    }
+    _updateLampaCmd(lampaPidSel?.value || '');
+
     importLampaForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const apiKey   = document.getElementById('importLampaProfile').value;
+      const pid      = document.getElementById('importLampaProfilePid')?.value || '';
       const raw      = document.getElementById('importLampaData').value.trim();
       const statusEl = document.getElementById('importLampaStatus');
       const btn      = document.getElementById('importLampaBtn');
@@ -245,8 +298,9 @@ document.addEventListener('DOMContentLoaded', () => {
       statusEl.textContent = 'Импортирую…';
       statusEl.className = 'status-text';
 
+      const pidParam = pid ? `&profile_id=${encodeURIComponent(pid)}` : '';
       try {
-        const res = await fetch(`/timecode/import/lampa?token=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(`/timecode/import/lampa?token=${encodeURIComponent(apiKey)}${pidParam}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),
@@ -272,9 +326,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Import from Lampac ─────────────────────────────────────
   const importLampacForm = document.getElementById('importLampacForm');
   if (importLampacForm) {
+    const lampacDevSel = document.getElementById('importLampacProfile');
+    const lampacPidSel = document.getElementById('importLampacProfilePid');
+    if (lampacDevSel && lampacPidSel) {
+      _loadLampaProfiles(lampacDevSel.options[0]?.dataset?.deviceId, lampacPidSel);
+      lampacDevSel.addEventListener('change', () =>
+        _loadLampaProfiles(lampacDevSel.options[lampacDevSel.selectedIndex]?.dataset?.deviceId, lampacPidSel));
+    }
+
     importLampacForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const apiKey   = document.getElementById('importLampacProfile').value;
+      const pid      = document.getElementById('importLampacProfilePid')?.value || '';
       const raw      = document.getElementById('importLampacData').value.trim();
       const statusEl = document.getElementById('importLampacStatus');
       const btn      = document.getElementById('importLampacBtn');
@@ -290,8 +353,9 @@ document.addEventListener('DOMContentLoaded', () => {
       statusEl.textContent = 'Импортирую…';
       statusEl.className = 'status-text';
 
+      const pidParam = pid ? `&profile_id=${encodeURIComponent(pid)}` : '';
       try {
-        const res = await fetch(`/timecode/import/lampac?token=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(`/timecode/import/lampac?token=${encodeURIComponent(apiKey)}${pidParam}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(json),
@@ -309,6 +373,111 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch {
         statusEl.textContent = 'Ошибка соединения';
         statusEl.className = 'status-text status-err';
+        btn.disabled = false;
+      }
+    });
+  }
+
+  // ── Lampa Profiles management ──────────────────────────────
+  const lpDeviceSel  = document.getElementById('lpDeviceSelect');
+  const lpList       = document.getElementById('lpProfilesList');
+  const lpCreateForm = document.getElementById('lpCreateForm');
+  const lpQuota      = document.getElementById('lpQuota');
+
+  async function _lpLoad() {
+    const deviceId = lpDeviceSel?.value;
+    if (!deviceId || !lpList) return;
+    try {
+      const res  = await fetch(`/api/profile-ids?device_id=${deviceId}`);
+      const data = await res.json();
+      const profiles = data.profiles || [];
+
+      if (!profiles.length) {
+        lpList.innerHTML = '<p class="muted small">Профилей нет. Они появятся автоматически при первом использовании или после создания вручную.</p>';
+      } else {
+        lpList.innerHTML = `<table style="margin:0;"><tbody>${
+          profiles.map(p => `
+            <tr data-pid="${p.profile_id}">
+              <td style="font-family:var(--pico-font-family-monospace);font-size:.8rem;color:var(--pico-muted-color);width:30%">${p.profile_id || '(основной)'}</td>
+              <td><span class="lp-name">${p.name || '—'}</span></td>
+              <td style="white-space:nowrap;text-align:right;" class="actions-cell">
+                <button class="btn-sm outline lp-rename-btn" data-pid="${p.profile_id}" data-name="${p.name || ''}">✎</button>
+                ${p.profile_id ? `<form method="POST" style="margin:0"><button type="button" class="btn-sm outline danger-btn lp-delete-btn" data-pid="${p.profile_id}">Удалить</button></form>` : ''}
+              </td>
+            </tr>`
+          ).join('')
+        }</tbody></table>`;
+
+        lpList.querySelectorAll('.lp-rename-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const current = btn.dataset.name || '';
+            const name = window.prompt('Новое название:', current);
+            if (name === null) return;
+            await fetch('/api/profile-name', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ device_id: parseInt(deviceId), profile_id: btn.dataset.pid, name: name.trim() }),
+            });
+            _lpLoad();
+          });
+        });
+
+        lpList.querySelectorAll('.lp-delete-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            if (!confirm(`Удалить профиль «${btn.dataset.pid}» и все его таймкоды?`)) return;
+            await fetch(`/api/lampa-profile?device_id=${deviceId}&profile_id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'DELETE' });
+            _lpLoad();
+          });
+        });
+      }
+
+      // Обновляем квоту
+      if (lpQuota) {
+        const r = await fetch('/api/lampa-profile/quota?device_id=' + deviceId).catch(() => null);
+        if (r?.ok) {
+          const q = await r.json();
+          lpQuota.textContent = q.limit === null ? `Профилей: ${q.count} (без лимита)` : `Профилей: ${q.count} из ${q.limit}`;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (lpDeviceSel) {
+    lpDeviceSel.addEventListener('change', _lpLoad);
+    _lpLoad();
+  }
+
+  if (lpCreateForm) {
+    lpCreateForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const name      = document.getElementById('lpProfileName').value.trim();
+      const profileId = document.getElementById('lpProfileIdInput').value.trim();
+      const statusEl  = document.getElementById('lpCreateStatus');
+      const btn       = document.getElementById('lpCreateBtn');
+
+      btn.disabled = true;
+      statusEl.textContent = '';
+      try {
+        const res  = await fetch('/api/lampa-profile/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: parseInt(lpDeviceSel.value), name, profile_id: profileId || null }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          document.getElementById('lpProfileName').value = '';
+          document.getElementById('lpProfileIdInput').value = '';
+          statusEl.textContent = `Профиль создан: ${data.profile_id}`;
+          statusEl.className = 'status-text status-ok';
+          _lpLoad();
+        } else {
+          statusEl.textContent = data.detail || 'Ошибка';
+          statusEl.className = 'status-text status-err';
+        }
+      } catch {
+        statusEl.textContent = 'Ошибка соединения';
+        statusEl.className = 'status-text status-err';
+      } finally {
         btn.disabled = false;
       }
     });

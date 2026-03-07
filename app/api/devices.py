@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -15,6 +16,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, DEVICE_LIMITS, TelegramUser
+
+LAMPA_PROFILE_LIMITS: dict[str, int | None] = {"simple": 3, "premium": 8, "super": None}
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name
@@ -432,24 +435,25 @@ async def api_profile_ids(
         raise HTTPException(status_code=401)
     await _get_device_or_404(device_id, current_user, db)
 
-    ids_result = await db.execute(
+    # Профили из LampaProfile (включая созданные вручную без таймкодов)
+    lp_result = await db.execute(
+        select(LampaProfile).where(LampaProfile.device_id == device_id)
+    )
+    lp_map = {lp.lampa_profile_id: lp.name for lp in lp_result.scalars().all()}
+
+    # Профили из таймкодов (могут быть не в LampaProfile)
+    tc_result = await db.execute(
         select(distinct(Timecode.lampa_profile_id))
         .where(Timecode.device_id == device_id)
     )
-    profile_ids = sorted([r[0] for r in ids_result.all()])
+    tc_ids = {r[0] for r in tc_result.all()}
 
-    names_result = await db.execute(
-        select(LampaProfile).where(
-            LampaProfile.device_id == device_id,
-            LampaProfile.lampa_profile_id.in_(profile_ids),
-        )
-    )
-    names = {lp.lampa_profile_id: lp.name for lp in names_result.scalars().all()}
+    all_ids = sorted(lp_map.keys() | tc_ids)
 
     return {
         "profiles": [
-            {"profile_id": pid, "name": names.get(pid, "")}
-            for pid in profile_ids
+            {"profile_id": pid, "name": lp_map.get(pid, "")}
+            for pid in all_ids
         ]
     }
 
@@ -472,6 +476,24 @@ async def api_set_profile_name(
     await _get_device_or_404(body.device_id, current_user, db)
 
     name = body.name.strip()[:100]
+
+    # Если запись уже есть — просто обновляем имя; если нет — проверяем лимит
+    existing = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == body.device_id,
+            LampaProfile.lampa_profile_id == body.profile_id,
+        )
+    )).scalar_one_or_none()
+
+    if not existing:
+        count = (await db.execute(
+            select(func.count()).select_from(LampaProfile)
+            .where(LampaProfile.device_id == body.device_id)
+        )).scalar() or 0
+        limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+        if limit is not None and count >= limit:
+            raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
+
     stmt = pg_insert(LampaProfile).values(
         device_id=body.device_id,
         lampa_profile_id=body.profile_id,
@@ -483,6 +505,111 @@ async def api_set_profile_name(
     await db.execute(stmt)
     await db.commit()
     return {"ok": True}
+
+
+class _ProfileCreateBody(BaseModel):
+    device_id: int
+    name: str
+    profile_id: str | None = None  # если не указан — генерируем
+
+
+@router.post("/api/lampa-profile/create")
+async def api_create_lampa_profile(
+    body: _ProfileCreateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Создаёт LampaProfile запись. Проверяет лимит по роли пользователя."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(body.device_id, current_user, db)
+
+    # Считаем существующие профили устройства
+    count_result = await db.execute(
+        select(func.count()).select_from(LampaProfile)
+        .where(LampaProfile.device_id == body.device_id)
+    )
+    count = count_result.scalar() or 0
+
+    limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+    if limit is not None and count >= limit:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Достигнут лимит профилей ({limit}) для вашего тарифа",
+        )
+
+    name = body.name.strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Название профиля не может быть пустым")
+
+    profile_id = (body.profile_id or "").strip().lstrip("_")[:100] or secrets.token_hex(4)
+
+    # Проверяем уникальность profile_id для устройства
+    existing = await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == body.device_id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Профиль с таким ID уже существует")
+
+    lp = LampaProfile(device_id=body.device_id, lampa_profile_id=profile_id, name=name)
+    db.add(lp)
+    await db.commit()
+    await db.refresh(lp)
+
+    return {"ok": True, "profile_id": profile_id, "name": name}
+
+
+@router.delete("/api/lampa-profile")
+async def api_delete_lampa_profile(
+    device_id: int = Query(...),
+    profile_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Удаляет LampaProfile запись и все таймкоды профиля."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    result = await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device_id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )
+    lp = result.scalar_one_or_none()
+    if not lp:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    await db.execute(delete(Timecode).where(
+        Timecode.device_id == device_id,
+        Timecode.lampa_profile_id == profile_id,
+    ))
+    await db.delete(lp)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/api/lampa-profile/quota")
+async def api_lampa_profile_quota(
+    device_id: int = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    count_result = await db.execute(
+        select(func.count()).select_from(LampaProfile)
+        .where(LampaProfile.device_id == device_id)
+    )
+    count = count_result.scalar() or 0
+    limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+    return {"count": count, "limit": limit}
 
 
 # ---------------------------------------------------------------------------

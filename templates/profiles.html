@@ -138,6 +138,39 @@
   </details>
 
   <!-- ═══════════════════════════════════════════
+       ПРОФИЛИ LAMPA
+       ═══════════════════════════════════════════ -->
+  <details id="lampaProfilesDetails">
+    <summary><strong>Профили Lampa</strong> — управление профилями просмотра</summary>
+    <div class="details-body">
+      <p class="muted small">Профили позволяют вести отдельную историю для разных пользователей на одном устройстве. Профили создаются автоматически при получении таймкодов или вручную.</p>
+
+      {% if profiles %}
+      <label>Устройство
+        <select id="lpDeviceSelect">
+          {% for p in profiles %}
+          <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div id="lpProfilesList" style="margin: .75rem 0;"></div>
+
+      <form id="lpCreateForm" class="inline-form">
+        <input type="text" id="lpProfileName" placeholder="Название профиля" maxlength="100" required>
+        <input type="text" id="lpProfileIdInput" placeholder="ID профиля (авто если пусто)" maxlength="100"
+               style="font-family:var(--pico-font-family-monospace);font-size:.88rem;">
+        <button type="submit" id="lpCreateBtn">Добавить</button>
+      </form>
+      <small id="lpQuota" class="muted"></small>
+      <span id="lpCreateStatus" class="status-text"></span>
+      {% else %}
+      <p class="muted">Сначала создайте устройство.</p>
+      {% endif %}
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
        СИНХРОНИЗАЦИЯ MYSHOWS
        ═══════════════════════════════════════════ -->
   <details>
@@ -150,8 +183,14 @@
             Устройство
             <select id="syncProfileId" name="device_id" required>
               {% for p in profiles %}
-              <option value="{{ p.id }}">{{ p.name }}</option>
+              <option value="{{ p.id }}" data-device-id="{{ p.id }}">{{ p.name }}</option>
               {% endfor %}
+            </select>
+          </label>
+          <label>
+            Профиль Lampa
+            <select id="syncLampaProfile" name="profile_id">
+              <option value="">Основной (без профиля)</option>
             </select>
           </label>
           <label>
@@ -175,24 +214,28 @@
        ИМПОРТ ТАЙМКОДОВ
        ═══════════════════════════════════════════ -->
   <details>
-    <summary><strong>Импорт таймкодов</strong> — из Lampa или Lampac</summary>
+    <summary><strong>Импорт таймкодов</strong> — из Lampa или LampaC</summary>
     <div class="details-body">
       <div class="import-grid">
         <!-- Lampa (file_view) -->
         <div class="import-card">
           <header><strong>Из Lampa</strong></header>
           <div>
-            <p class="muted small">В консоли браузера Lampa выполните команду — она скопирует таймкоды в буфер обмена:</p>
-            <button id="copyLampaCmd" class="outline secondary" style="width:100%;font-family:monospace;font-size:.8rem;margin-bottom:.5rem;">
-              copy(localStorage.getItem('file_view'))
-            </button>
             <p class="muted small"><strong>Примечание:</strong> история для Lampa-формата недоступна — используйте синхронизацию MyShows.</p>
           </div>
           <form id="importLampaForm" style="display:contents;">
             <label>Устройство
               <select id="importLampaProfile">
-                {% for p in profiles %}<option value="{{ p.token }}">{{ p.name }}</option>{% endfor %}
+                {% for p in profiles %}<option value="{{ p.token }}" data-device-id="{{ p.id }}">{{ p.name }}</option>{% endfor %}
               </select>
+            </label>
+            <label>Профиль Lampa
+              <select id="importLampaProfilePid">
+                <option value="">Основной (без профиля)</option>
+              </select>
+              <button type="button" id="copyLampaCmd" class="outline secondary" style="width:100%;font-family:monospace;font-size:.8rem;margin-top:.4rem;">
+                copy(localStorage.getItem('file_view'))
+              </button>
             </label>
             <label>JSON
               <textarea id="importLampaData" rows="4" placeholder='{"572566331":{"percent":95,...}}'></textarea>
@@ -206,16 +249,21 @@
 
         <!-- Lampac (all_views) -->
         <div class="import-card">
-          <header><strong>Из Lampac</strong></header>
+          <header><strong>Из LampaC</strong></header>
           <div>
             <p class="muted small">Скопируйте JSON из эндпоинта вашего Lampac и вставьте ниже:</p>
-            <pre style="font-size:.8rem;overflow-x:auto;margin-bottom:.5rem;">/timecode/all_views?uid=…</pre>
+            <pre style="font-size:.8rem;overflow-x:auto;margin-bottom:.5rem;">/timecode/all_views?uid=…&profile_id=...</pre>
             <p class="muted small">После импорта карточки загрузятся автоматически и появятся в истории просмотров.</p>
           </div>
           <form id="importLampacForm" style="display:contents;">
             <label>Устройство
               <select id="importLampacProfile">
-                {% for p in profiles %}<option value="{{ p.token }}">{{ p.name }}</option>{% endfor %}
+                {% for p in profiles %}<option value="{{ p.token }}" data-device-id="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Профиль LampaC
+              <select id="importLampacProfilePid">
+                <option value="">Основной (без профиля)</option>
               </select>
             </label>
             <label>JSON
