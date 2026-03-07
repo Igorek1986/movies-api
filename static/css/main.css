@@ -360,11 +360,16 @@ button.danger-btn {
   align-items: center;
   margin-bottom: 1rem;
 }
-.history-controls select {
-  margin: 0;
-  padding: .3rem .6rem;
+.sort-select {
+  padding: .45rem .6rem;
   font-size: .88rem;
   height: auto;
+  width: auto;
+  border: 1px solid var(--pico-primary);
+  border-radius: var(--pico-border-radius);
+  color: var(--pico-primary);
+  background-color: transparent;
+  cursor: pointer;
 }
 
 .history-grid {

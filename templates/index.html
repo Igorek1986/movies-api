@@ -29,18 +29,18 @@
 
     <div id="historyProfileTabs"></div>
 
-    <select id="historySortSelect" style="width:auto;">
-      <option value="watched">По дате просмотра</option>
-      <option value="release">По дате выхода</option>
-      <option value="pct_asc">По прогрессу ↑</option>
-      <option value="pct_desc">По прогрессу ↓</option>
-    </select>
-
     <div class="stats-tabs">
       <button class="tab-btn active" id="historyFilterAll">Все</button>
       <button class="tab-btn" id="historyFilterMovie">Фильмы</button>
       <button class="tab-btn" id="historyFilterTv">Сериалы</button>
     </div>
+
+      <select id="historySortSelect" class="sort-select">
+      <option value="watched">По дате просмотра</option>
+      <option value="release">По дате выхода</option>
+      <option value="pct_asc">По прогрессу ↑</option>
+      <option value="pct_desc">По прогрессу ↓</option>
+    </select>
   </div>
 
   <div id="historyGrid" class="history-grid"></div>
