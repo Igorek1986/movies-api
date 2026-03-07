@@ -61,6 +61,8 @@
             <td class="actions-cell">
               <button class="btn-sm outline"
                       onclick="openLinkForm({{ p.id }})">Привязать</button>
+              <button class="btn-sm outline"
+                      onclick="renameDevice({{ p.id }}, '{{ p.name|e }}', this)">Переименовать</button>
               <form method="POST" action="/profiles/{{ p.id }}/regenerate"
                     onsubmit="return confirm('Старый токен перестанет работать в Lampa!')">
                 <button type="submit" class="btn-sm outline secondary">Новый токен</button>
@@ -365,6 +367,23 @@ function openLinkForm(deviceId) {
     codeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setTimeout(() => codeInput.focus(), 400);
   }
+}
+
+async function renameDevice(deviceId, currentName, btn) {
+  const newName = window.prompt('Новое название устройства:', currentName);
+  if (!newName || newName.trim() === currentName) return;
+  btn.disabled = true;
+  const fd = new FormData();
+  fd.append('name', newName.trim());
+  const res = await fetch(`/profiles/${deviceId}/rename`, { method: 'POST', body: fd });
+  if (res.ok || res.redirected) {
+    const td = btn.closest('tr').querySelector('td[data-label="Устройство"] strong');
+    if (td) td.textContent = newName.trim();
+  } else {
+    const data = await res.json().catch(() => ({}));
+    alert(data.detail || 'Ошибка переименования');
+  }
+  btn.disabled = false;
 }
 </script>
 <script>

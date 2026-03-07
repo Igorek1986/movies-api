@@ -440,6 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!confirm(`Удалить профиль «${btn.dataset.pid}» и все его таймкоды?`)) return;
             await fetch(`/api/lampa-profile?device_id=${deviceId}&profile_id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'DELETE' });
             _lpLoad();
+            _refreshAllProfileSelects();
           });
         });
       }
