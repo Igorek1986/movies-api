@@ -5,7 +5,7 @@
 <header class="container-fluid site-header">
   <nav>
     <ul>
-      <li><strong>NUMParser</strong></li>
+      <li><a href="/" class="outline btn-sm secondary" role="button">← История</a></li>
     </ul>
     <ul>
       <li><span class="username-badge">{{ user.username }}</span>
@@ -36,7 +36,7 @@
     </div>
 
     {% if profiles %}
-    <figure>
+    <figure class="mobile-cards">
       <table>
         <thead>
           <tr>
@@ -49,15 +49,15 @@
         <tbody>
         {% for p in profiles %}
           <tr>
-            <td><strong>{{ p.name }}</strong></td>
-            <td>
+            <td data-label="Устройство"><strong>{{ p.name }}</strong></td>
+            <td data-label="Токен">
               <code class="api-key-mono" title="{{ p.token }}">
                 {{ p.token[:4] }}-••••-••••-••••
               </code>
               <button class="btn-icon" title="Показать/скрыть"
                       onclick="toggleKey(this, '{{ p.token }}')">👁</button>
             </td>
-            <td>{{ p.timecodes_count }}</td>
+            <td data-label="Таймкодов">{{ p.timecodes_count }}</td>
             <td class="actions-cell">
               <button class="btn-sm outline"
                       onclick="openLinkForm({{ p.id }})">Привязать</button>
@@ -177,53 +177,56 @@
   <details>
     <summary><strong>Импорт таймкодов</strong> — из Lampa или Lampac</summary>
     <div class="details-body">
-      <div class="grid">
+      <div class="import-grid">
         <!-- Lampa (file_view) -->
-        <article class="import-card">
+        <div class="import-card">
           <header><strong>Из Lampa</strong></header>
-          <p class="muted small">
-            В консоли браузера Lampa выполните:<br>
-            <code>copy(localStorage.getItem('file_view'))</code><br>
-            Вставьте JSON ниже.
-          </p>
-          <form id="importLampaForm">
-            <label>
-              Устройство
+          <div>
+            <p class="muted small">В консоли браузера Lampa выполните команду — она скопирует таймкоды в буфер обмена:</p>
+            <button id="copyLampaCmd" class="outline secondary" style="width:100%;font-family:monospace;font-size:.8rem;margin-bottom:.5rem;">
+              copy(localStorage.getItem('file_view'))
+            </button>
+            <p class="muted small"><strong>Примечание:</strong> история для Lampa-формата недоступна — используйте синхронизацию MyShows.</p>
+          </div>
+          <form id="importLampaForm" style="display:contents;">
+            <label>Устройство
               <select id="importLampaProfile">
                 {% for p in profiles %}<option value="{{ p.token }}">{{ p.name }}</option>{% endfor %}
               </select>
             </label>
-            <label>
-              JSON
+            <label>JSON
               <textarea id="importLampaData" rows="4" placeholder='{"572566331":{"percent":95,...}}'></textarea>
             </label>
-            <button type="submit" id="importLampaBtn" class="secondary">Импортировать</button>
-            <span id="importLampaStatus" class="status-text"></span>
+            <div class="import-actions">
+              <button type="submit" id="importLampaBtn" class="secondary">Импортировать</button>
+              <span id="importLampaStatus" class="status-text"></span>
+            </div>
           </form>
-        </article>
+        </div>
 
         <!-- Lampac (all_views) -->
-        <article class="import-card">
+        <div class="import-card">
           <header><strong>Из Lampac</strong></header>
-          <p class="muted small">
-            Вставьте JSON из эндпоинта вашего Lampac:<br>
-            <code>/timecode/all_views?uid=…</code>
-          </p>
-          <form id="importLampacForm">
-            <label>
-              Устройство
+          <div>
+            <p class="muted small">Скопируйте JSON из эндпоинта вашего Lampac и вставьте ниже:</p>
+            <pre style="font-size:.8rem;overflow-x:auto;margin-bottom:.5rem;">/timecode/all_views?uid=…</pre>
+            <p class="muted small">После импорта карточки загрузятся автоматически и появятся в истории просмотров.</p>
+          </div>
+          <form id="importLampacForm" style="display:contents;">
+            <label>Устройство
               <select id="importLampacProfile">
                 {% for p in profiles %}<option value="{{ p.token }}">{{ p.name }}</option>{% endfor %}
               </select>
             </label>
-            <label>
-              JSON
+            <label>JSON
               <textarea id="importLampacData" rows="4" placeholder='{"123_movie":{"hash":"..."}}'></textarea>
             </label>
-            <button type="submit" id="importLampacBtn" class="secondary">Импортировать</button>
-            <span id="importLampacStatus" class="status-text"></span>
+            <div class="import-actions">
+              <button type="submit" id="importLampacBtn" class="secondary">Импортировать</button>
+              <span id="importLampacStatus" class="status-text"></span>
+            </div>
           </form>
-        </article>
+        </div>
       </div>
     </div>
   </details>

@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -644,6 +644,35 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/imgproxy/{path:path}")
+async def image_proxy(path: str):
+    """Проксирует изображения TMDB через настроенный прокси-сервер."""
+    if not settings.IMAGE_PROXY_URL:
+        raise HTTPException(status_code=404, detail="Image proxy not configured")
+
+    proxy_url = settings.IMAGE_PROXY_URL
+    if settings.IMAGE_PROXY_USER and settings.IMAGE_PROXY_PASS:
+        scheme, rest = proxy_url.split("://", 1)
+        proxy_url = f"{scheme}://{settings.IMAGE_PROXY_USER}:{settings.IMAGE_PROXY_PASS}@{rest}"
+
+    tmdb_url = f"https://image.tmdb.org/{path}"
+    try:
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=20, follow_redirects=True) as client:
+            resp = await client.get(tmdb_url)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code)
+        return Response(
+            content=resp.content,
+            media_type=resp.headers.get("content-type", "image/jpeg"),
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Image proxy error for {path}: {e}")
+        raise HTTPException(status_code=502, detail="Proxy error")
+
+
 @app.get("/{category}")
 async def get_category(
     category: str,
@@ -820,13 +849,20 @@ async def get_category(
 _templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, current_user: User = Depends(get_current_user)):
+async def index(request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    devices = []
+    if current_user:
+        from app.api.devices import _devices_with_stats
+        devices = await _devices_with_stats(current_user.id, db)
     return _templates.TemplateResponse("index.html", {
         "request": request,
         "user": current_user,
+        "devices": devices,
         "plugin_url": plugin_url,
         "bot_name": settings.TELEGRAM_BOT_NAME,
+        "image_base": image_base,
     })
 
 

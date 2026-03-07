@@ -1,26 +1,72 @@
 {% extends "base.html" %}
-{% block title %}NUMParser — медиасервер для Lampa{% endblock %}
+{% block title %}NUMParser{% endblock %}
 
 {% block body %}
-<main class="container" style="max-width: 860px; padding-top: 3rem;">
+{% if user %}
 
+<header class="container-fluid site-header">
+  <nav>
+    <ul><li><strong>NUMParser</strong></li></ul>
+    <ul>
+      <li><span class="username-badge">{{ user.username }}</span></li>
+      <li><a href="/profiles" role="button" class="outline btn-sm">Настройки</a></li>
+      <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main class="container" style="padding-top: 1.5rem;">
+  <div class="history-controls">
+    {% if devices|length > 1 %}
+    <select id="historyDeviceSelect">
+      {% for d in devices %}
+      <option value="{{ d.id }}">{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="hidden" id="historyDeviceSelect" value="{{ devices[0].id if devices else '' }}">
+    {% endif %}
+
+    <div id="historyProfileTabs"></div>
+
+    <select id="historySortSelect" style="width:auto;">
+      <option value="watched">По дате просмотра</option>
+      <option value="release">По дате выхода</option>
+      <option value="pct_asc">По прогрессу ↑</option>
+      <option value="pct_desc">По прогрессу ↓</option>
+    </select>
+
+    <div class="stats-tabs">
+      <button class="tab-btn active" id="historyFilterAll">Все</button>
+      <button class="tab-btn" id="historyFilterMovie">Фильмы</button>
+      <button class="tab-btn" id="historyFilterTv">Сериалы</button>
+    </div>
+  </div>
+
+  <div id="historyGrid" class="history-grid"></div>
+</main>
+
+<dialog id="cardModal">
+  <article id="cardModalArticle">
+    <button id="cardModalClose" aria-label="Закрыть">✕</button>
+    <div id="modalBody"></div>
+  </article>
+</dialog>
+
+{% else %}
+
+<main class="container" style="max-width: 860px; padding-top: 3rem;">
   <div style="text-align: center; margin-bottom: 3rem;">
     <h1 style="margin-bottom: .5rem;">NUMParser</h1>
     <p class="muted">Персональный медиасервер для плагина Lampa</p>
   </div>
 
-  {% if user %}
-  <div style="text-align: center; margin-bottom: 2.5rem;">
-    <a href="/profiles" role="button">Перейти в профиль</a>
-  </div>
-  {% else %}
   <div style="text-align: center; margin-bottom: 2.5rem; display: flex; gap: 1rem; justify-content: center;">
     <a href="/login" role="button">Войти</a>
     <a href="/register" role="button" class="outline">Регистрация</a>
   </div>
-  {% endif %}
 
-  <div class="grid">
+  <div class="landing-grid">
     <article>
       <header><strong>История просмотров</strong></header>
       <p>Прогресс просмотра сохраняется и отображается на сайте. Видно что и до какого момента смотрели на каждом устройстве.</p>
@@ -33,9 +79,6 @@
       <header><strong>Подключение к Lampa</strong></header>
       <p>Установите плагин NUMParser в Lampa, введите токен устройства — и всё готово.</p>
     </article>
-  </div>
-
-  <div class="grid">
     <article style="border: 1px solid var(--pico-muted-border-color);">
       <header><strong>Базовый</strong> <small class="muted">— бесплатно</small></header>
       <ul>
@@ -44,7 +87,7 @@
         <li>Привязка Telegram для восстановления пароля</li>
       </ul>
     </article>
-    <article style="border: 1px solid var(--pico-primary);;">
+    <article style="border: 1px solid var(--pico-primary);">
       <header><strong>Премиум</strong> <small class="muted">— по запросу</small></header>
       <ul>
         <li>До 8 устройств</li>
@@ -65,6 +108,15 @@
       {% if bot_name %} &nbsp;·&nbsp; <a href="https://t.me/{{ bot_name }}">@{{ bot_name }}</a>{% endif %}
     </small>
   </footer>
-
 </main>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if user and devices %}
+<script>window.TMDB_IMAGE_BASE = "{{ image_base }}";</script>
+<script src="/static/js/history.js"></script>
+<script>initHistory({{ devices[0].id }});</script>
+{% endif %}
 {% endblock %}

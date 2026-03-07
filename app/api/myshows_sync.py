@@ -72,7 +72,7 @@ async def _find_tmdb_data(
             imdb_clean = str(imdb_id).replace("tt", "")
             resp = await client.get(
                 f"https://api.themoviedb.org/3/find/tt{imdb_clean}",
-                params={"external_source": "imdb_id"},
+                params={"external_source": "imdb_id", "language": "ru-RU"},
                 headers=headers, timeout=10,
             )
             if resp.status_code == 200:
@@ -90,7 +90,7 @@ async def _find_tmdb_data(
     for query in list(dict.fromkeys(q for q in [original_title, title] if q)):
         for search_year in [year, None]:
             try:
-                params = {"query": query}
+                params = {"query": query, "language": "ru-RU"}
                 if search_year:
                     params["first_air_date_year" if is_tv else "year"] = search_year
                 resp = await client.get(endpoint, params=params, headers=headers, timeout=10)

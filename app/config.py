@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # True если сервер за NAT без публичного порта (polling вместо webhook)
     TELEGRAM_USE_POLLING: bool = False
 
+    # HTTP/SOCKS-прокси для загрузки картинок с TMDB (опционально)
+    # Формат: http://host:port или socks5://host:port
+    IMAGE_PROXY_URL: str = ""
+    IMAGE_PROXY_USER: str = ""
+    IMAGE_PROXY_PASS: str = ""
+
     @property
     def telegram_admin_id_list(self) -> list[int]:
         import json

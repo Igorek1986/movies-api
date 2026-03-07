@@ -12,6 +12,18 @@ function toggleKey(btn, fullKey) {
 
 document.addEventListener('DOMContentLoaded', () => {
 
+  // ── Copy Lampa console command ──────────────────────────────────────────────
+  const copyLampaCmd = document.getElementById('copyLampaCmd');
+  if (copyLampaCmd) {
+    const cmd = copyLampaCmd.textContent.trim();
+    copyLampaCmd.addEventListener('click', () => {
+      navigator.clipboard.writeText(cmd).then(() => {
+        copyLampaCmd.textContent = 'Скопировано ✓';
+        setTimeout(() => { copyLampaCmd.textContent = cmd; }, 2000);
+      });
+    });
+  }
+
   // ── Telegram link ───────────────────────────────────────────────────────────
   const tgLinkBtn = document.getElementById('tgLinkBtn');
   if (tgLinkBtn) {
@@ -195,7 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 break;
               case 'done':
-                status.textContent = evt.message;
+                status.textContent = evt.message + ' Обновление…';
+                setTimeout(() => location.reload(), 1500);
                 break;
               case 'error':
                 status.textContent = '❌ ' + evt.message;
@@ -240,16 +253,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (res.ok) {
-          statusEl.textContent = `Импортировано: ${data.saved}`;
+          statusEl.textContent = `Импортировано: ${data.saved}. Обновление…`;
           statusEl.className = 'status-text status-ok';
+          setTimeout(() => location.reload(), 1200);
         } else {
           statusEl.textContent = data.detail || 'Ошибка';
           statusEl.className = 'status-text status-err';
+          btn.disabled = false;
         }
       } catch {
         statusEl.textContent = 'Ошибка соединения';
         statusEl.className = 'status-text status-err';
-      } finally {
         btn.disabled = false;
       }
     });
@@ -284,16 +298,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (res.ok) {
-          statusEl.textContent = `Импортировано: ${data.saved}`;
+          statusEl.textContent = `Импортировано: ${data.saved}. Обновление…`;
           statusEl.className = 'status-text status-ok';
+          setTimeout(() => location.reload(), 1200);
         } else {
           statusEl.textContent = data.detail || 'Ошибка';
           statusEl.className = 'status-text status-err';
+          btn.disabled = false;
         }
       } catch {
         statusEl.textContent = 'Ошибка соединения';
         statusEl.className = 'status-text status-err';
-      } finally {
         btn.disabled = false;
       }
     });

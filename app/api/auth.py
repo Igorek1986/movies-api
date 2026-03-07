@@ -90,7 +90,7 @@ async def login_submit(
         })
 
     rate_limit.clear_login(ip)
-    response = RedirectResponse(url="/profiles", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, user.session_key)
     return response
 
@@ -152,7 +152,7 @@ async def register_submit(
     await db.commit()
     logger.info(f"New user registered: {username}")
 
-    response = RedirectResponse(url="/profiles?registered=1", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, session_key)
     return response
 

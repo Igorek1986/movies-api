@@ -1,15 +1,22 @@
+import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Form
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, distinct
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import Device, DeviceCode, Timecode, User, DEVICE_LIMITS, TelegramUser
+from app.db.models import Device, DeviceCode, Timecode, MediaCard, User, DEVICE_LIMITS, TelegramUser
+
+_CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name
 from app.api.dependencies import get_current_user
 
@@ -349,4 +356,211 @@ async def device_status(code: str, db: AsyncSession = Depends(get_db)):
         "linked": True,
         "token": device.token,
         "device_name": device.name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# API: история просмотров (веб-авторизация)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/history")
+async def api_history(
+    device_id: int = Query(...),
+    profile_id: str = Query(""),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    result = await db.execute(
+        select(Timecode)
+        .where(
+            Timecode.device_id == device_id,
+            Timecode.lampa_profile_id == profile_id,
+        )
+        .order_by(Timecode.updated_at.desc())
+    )
+    timecodes = result.scalars().all()
+
+    card_agg: dict[str, dict] = {}
+    for tc in timecodes:
+        if not _CARD_ID_RE.match(tc.card_id):
+            continue
+        try:
+            pct = json.loads(tc.data).get("percent", 0)
+        except Exception:
+            pct = 0
+        if tc.card_id not in card_agg:
+            card_agg[tc.card_id] = {"last_watched": tc.updated_at, "max_percent": pct}
+        else:
+            if pct > card_agg[tc.card_id]["max_percent"]:
+                card_agg[tc.card_id]["max_percent"] = pct
+
+    if not card_agg:
+        return []
+
+    mc_result = await db.execute(
+        select(MediaCard).where(MediaCard.card_id.in_(list(card_agg.keys())))
+    )
+    media_cards = {mc.card_id: mc for mc in mc_result.scalars().all()}
+
+    history = []
+    for card_id, agg in card_agg.items():
+        mc = media_cards.get(card_id)
+        m = _CARD_ID_RE.match(card_id)
+        history.append({
+            "card_id": card_id,
+            "media_type": mc.media_type if mc else (m.group(2) if m else None),
+            "title": mc.title if mc else None,
+            "poster_path": mc.poster_path if mc else None,
+            "year": mc.year if mc else None,
+            "release_date": mc.release_date if mc else None,
+            "last_watched": agg["last_watched"].isoformat() if agg["last_watched"] else None,
+            "max_percent": agg["max_percent"],
+        })
+
+    history.sort(key=lambda x: x["last_watched"] or "", reverse=True)
+    return history
+
+
+@router.get("/api/profile-ids")
+async def api_profile_ids(
+    device_id: int = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает список уникальных lampa_profile_id для устройства."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    result = await db.execute(
+        select(distinct(Timecode.lampa_profile_id))
+        .where(Timecode.device_id == device_id)
+    )
+    profiles = sorted([r[0] for r in result.all()])
+    return {"profiles": profiles}
+
+
+# ---------------------------------------------------------------------------
+# API: детали медиакарточки (TMDB)
+# ---------------------------------------------------------------------------
+
+def _mc_to_dict(mc: MediaCard) -> dict:
+    return {
+        "card_id": mc.card_id,
+        "tmdb_id": mc.tmdb_id,
+        "media_type": mc.media_type,
+        "title": mc.title,
+        "original_title": mc.original_title,
+        "poster_path": mc.poster_path,
+        "backdrop_path": mc.backdrop_path,
+        "overview": mc.overview,
+        "vote_average": mc.vote_average,
+        "year": mc.year,
+        "release_date": mc.release_date,
+        "last_air_date": mc.last_air_date,
+        "number_of_seasons": mc.number_of_seasons,
+    }
+
+
+@router.get("/api/media-card/{card_id}")
+async def api_media_card(
+    card_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    m = _CARD_ID_RE.match(card_id)
+    if not m:
+        raise HTTPException(status_code=400, detail="Неверный card_id")
+
+    tmdb_id, media_type = int(m.group(1)), m.group(2)
+
+    result = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
+    mc = result.scalar_one_or_none()
+
+    if mc and mc.overview:
+        return _mc_to_dict(mc)
+
+    # Запрашиваем свежие данные из TMDB
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        if mc:
+            return _mc_to_dict(mc)
+        raise HTTPException(status_code=404, detail="TMDB недоступен")
+
+    title_key = "name" if media_type == "tv" else "title"
+    orig_key = "original_name" if media_type == "tv" else "original_title"
+    date_key = "first_air_date" if media_type == "tv" else "release_date"
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}",
+                headers=headers,
+                params={"language": "ru-RU"},
+            )
+    except Exception as e:
+        logger.warning(f"TMDB request failed for {card_id}: {e}")
+        if mc:
+            return _mc_to_dict(mc)
+        raise HTTPException(status_code=502, detail="Ошибка TMDB")
+
+    if resp.status_code != 200:
+        if mc:
+            return _mc_to_dict(mc)
+        raise HTTPException(status_code=404, detail="Не найдено в TMDB")
+
+    data = resp.json()
+    date = data.get(date_key) or ""
+    values: dict = {
+        "card_id": card_id,
+        "tmdb_id": tmdb_id,
+        "media_type": media_type,
+        "title": data.get(title_key) or "",
+        "original_title": data.get(orig_key) or "",
+        "poster_path": data.get("poster_path") or "",
+        "backdrop_path": data.get("backdrop_path") or "",
+        "overview": data.get("overview") or "",
+        "vote_average": data.get("vote_average"),
+        "year": date[:4],
+        "release_date": date,
+    }
+    if media_type == "tv":
+        seasons = data.get("seasons")
+        values["last_air_date"] = data.get("last_air_date") or ""
+        values["number_of_seasons"] = data.get("number_of_seasons")
+        values["seasons_json"] = json.dumps(seasons, ensure_ascii=False) if seasons else None
+        last_ep = data.get("last_episode_to_air") or {}
+        values["last_ep_season"] = last_ep.get("season_number")
+        values["last_ep_number"] = last_ep.get("episode_number")
+
+    stmt = pg_insert(MediaCard).values([values])
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["card_id"],
+        set_={k: stmt.excluded[k] for k in values if k != "card_id"},
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+    return {
+        "card_id": values["card_id"],
+        "tmdb_id": values["tmdb_id"],
+        "media_type": values["media_type"],
+        "title": values.get("title"),
+        "original_title": values.get("original_title"),
+        "poster_path": values.get("poster_path"),
+        "backdrop_path": values.get("backdrop_path"),
+        "overview": values.get("overview"),
+        "vote_average": values.get("vote_average"),
+        "year": values.get("year"),
+        "release_date": values.get("release_date"),
+        "last_air_date": values.get("last_air_date"),
+        "number_of_seasons": values.get("number_of_seasons"),
     }

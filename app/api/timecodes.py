@@ -154,6 +154,7 @@ async def _fetch_and_store_media_card(card_id: str, tmdb_id: int, media_type: st
             resp = await client.get(
                 f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}",
                 headers=headers,
+                params={"language": "ru-RU"},
             )
             if resp.status_code != 200:
                 return
@@ -304,6 +305,13 @@ async def import_from_lampac(
 
     saved = await _upsert_timecodes(db, device.id, profile_id or "", rows)
     logger.info(f"Lampac import: device={device.id}, saved={saved}")
+
+    # Запускаем фоновую загрузку MediaCard для всех валидных card_id
+    for card_id in data.keys():
+        m = _CARD_ID_RE.match(card_id)
+        if m:
+            asyncio.create_task(_fetch_and_store_media_card(card_id, int(m.group(1)), m.group(2)))
+
     return {"success": True, "saved": saved}
 
 
