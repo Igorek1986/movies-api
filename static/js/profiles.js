@@ -170,12 +170,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Реестр пар [devSelect, pidSelect] для обновления при создании профиля
+  const _profileSelectPairs = [];
+  function _refreshAllProfileSelects() {
+    _profileSelectPairs.forEach(([devSel, pidSel]) => {
+      const did = devSel.options[devSel.selectedIndex]?.dataset?.deviceId
+               || devSel.value;
+      _loadLampaProfiles(did, pidSel);
+    });
+  }
+
   // ── MyShows sync (SSE streaming) ───────────────────────────
   const syncForm = document.getElementById('myshowsSyncForm');
   if (syncForm) {
     const syncDeviceSel  = document.getElementById('syncProfileId');
     const syncLampaSel   = document.getElementById('syncLampaProfile');
     if (syncDeviceSel && syncLampaSel) {
+      _profileSelectPairs.push([syncDeviceSel, syncLampaSel]);
       const initialDeviceId = syncDeviceSel.options[syncDeviceSel.selectedIndex]?.dataset.deviceId;
       _loadLampaProfiles(initialDeviceId, syncLampaSel);
       syncDeviceSel.addEventListener('change', () => {
@@ -268,6 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lampaDevSel = document.getElementById('importLampaProfile');
     const lampaPidSel = document.getElementById('importLampaProfilePid');
     if (lampaDevSel && lampaPidSel) {
+      _profileSelectPairs.push([lampaDevSel, lampaPidSel]);
       const _loadAndSyncCmd = async (deviceId) => {
         await _loadLampaProfiles(deviceId, lampaPidSel);
         _updateLampaCmd(lampaPidSel.value);
@@ -329,6 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lampacDevSel = document.getElementById('importLampacProfile');
     const lampacPidSel = document.getElementById('importLampacProfilePid');
     if (lampacDevSel && lampacPidSel) {
+      _profileSelectPairs.push([lampacDevSel, lampacPidSel]);
       _loadLampaProfiles(lampacDevSel.options[0]?.dataset?.deviceId, lampacPidSel);
       lampacDevSel.addEventListener('change', () =>
         _loadLampaProfiles(lampacDevSel.options[lampacDevSel.selectedIndex]?.dataset?.deviceId, lampacPidSel));
@@ -470,6 +483,7 @@ document.addEventListener('DOMContentLoaded', () => {
           statusEl.textContent = `Профиль создан: ${data.profile_id}`;
           statusEl.className = 'status-text status-ok';
           _lpLoad();
+          _refreshAllProfileSelects();
         } else {
           statusEl.textContent = data.detail || 'Ошибка';
           statusEl.className = 'status-text status-err';
