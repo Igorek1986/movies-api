@@ -30,7 +30,7 @@ from sqlalchemy import select, delete
 
 from app.config import get_settings
 from app.db.database import get_db, async_session_maker
-from app.db.models import Device, Timecode, MediaCard
+from app.db.models import Device, Timecode, MediaCard, LampaProfile
 from app.api.dependencies import get_device_by_token
 
 logger = logging.getLogger(__name__)
@@ -206,13 +206,15 @@ async def save_timecode(
     item: str = Body(...),
     data: str = Body(...),
     profile_id: str = Query(None),
+    profile_name: str = Query(None),
     device: Device = Depends(get_device_by_token),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Плагин отправляет прогресс просмотра при выходе из плеера.
     Body: {card_id, item, data}  где data — JSON-строка {time, duration, percent}.
-    ?profile_id=  — опциональный ID профиля Lampa для разделения таймкодов.
+    ?profile_id=   — опциональный ID профиля Lampa.
+    ?profile_name= — человеческое название профиля (из Lampa.Account.Permit).
     """
     _require_device(device)
 
@@ -226,6 +228,21 @@ async def save_timecode(
         db, device.id, lampa_profile_id,
         [{"card_id": card_id, "item": item, "data": data}]
     )
+
+    # Авто-сохраняем имя профиля если передано и профиль не дефолтный
+    if lampa_profile_id and profile_name:
+        name = profile_name.strip()[:100]
+        stmt = pg_insert(LampaProfile).values(
+            device_id=device.id,
+            lampa_profile_id=lampa_profile_id,
+            name=name,
+        ).on_conflict_do_update(
+            constraint="uq_lampa_profile",
+            set_={"name": name},
+        )
+        await db.execute(stmt)
+        await db.commit()
+
     logger.debug(f"Timecode saved: device={device.id}, profile={lampa_profile_id!r}, card={card_id}")
 
     m = _CARD_ID_RE.match(card_id)

@@ -616,6 +616,18 @@
         }
     }
 
+    function getProfileName() {
+        var profileName = '';
+        try {
+            if (Lampa.Account.Permit.account && Lampa.Account.Permit.account.profile && Lampa.Account.Permit.account.profile.name) {
+                profileName = Lampa.Account.Permit.account.profile.name;
+            }
+        } catch (e) {}
+        if (profileName) {
+            return profileName;
+        }
+    }
+
     function getProfileSetting(key, defaultValue) {
         return Lampa.Storage.get(getProfileKey(key), defaultValue);
     }
@@ -1224,7 +1236,9 @@
 
         var timecodeUrl = BASE_URL + '/timecode?token=' + encodeURIComponent(token);
         var profileId = getProfileId();
+        var profileName = getProfileName();
         if (profileId) timecodeUrl += '&profile_id=' + encodeURIComponent(profileId);
+        if (profileName) {timecodeUrl += '&profile_name=' + encodeURIComponent(profileName);}
 
         fetch(timecodeUrl, {
             method: 'POST',

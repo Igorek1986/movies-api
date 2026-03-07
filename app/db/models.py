@@ -133,6 +133,24 @@ class MediaCard(Base):
         return f"<MediaCard(card_id={self.card_id}, title={self.title})>"
 
 
+class LampaProfile(Base):
+    """Человеческое название для lampa_profile_id внутри устройства."""
+
+    __tablename__ = "lampa_profiles"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    device_id        = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    lampa_profile_id = Column(String(100), nullable=False)
+    name             = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("device_id", "lampa_profile_id", name="uq_lampa_profile"),
+    )
+
+    def __repr__(self):
+        return f"<LampaProfile(device_id={self.device_id}, profile_id={self.lampa_profile_id}, name={self.name})>"
+
+
 class MyShowsUser(Base):
     """Статистика обращений пользователей MyShows."""
 

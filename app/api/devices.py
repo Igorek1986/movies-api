@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import Device, DeviceCode, Timecode, MediaCard, User, DEVICE_LIMITS, TelegramUser
+from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, DEVICE_LIMITS, TelegramUser
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name
@@ -366,7 +366,7 @@ async def device_status(code: str, db: AsyncSession = Depends(get_db)):
 @router.get("/api/history")
 async def api_history(
     device_id: int = Query(...),
-    profile_id: str = Query(""),
+    profile_id: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -374,14 +374,10 @@ async def api_history(
         raise HTTPException(status_code=401)
     await _get_device_or_404(device_id, current_user, db)
 
-    result = await db.execute(
-        select(Timecode)
-        .where(
-            Timecode.device_id == device_id,
-            Timecode.lampa_profile_id == profile_id,
-        )
-        .order_by(Timecode.updated_at.desc())
-    )
+    q = select(Timecode).where(Timecode.device_id == device_id)
+    if profile_id is not None:
+        q = q.where(Timecode.lampa_profile_id == profile_id)
+    result = await db.execute(q.order_by(Timecode.updated_at.desc()))
     timecodes = result.scalars().all()
 
     card_agg: dict[str, dict] = {}
@@ -431,17 +427,62 @@ async def api_profile_ids(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Возвращает список уникальных lampa_profile_id для устройства."""
+    """Возвращает список уникальных lampa_profile_id с именами для устройства."""
     if not current_user:
         raise HTTPException(status_code=401)
     await _get_device_or_404(device_id, current_user, db)
 
-    result = await db.execute(
+    ids_result = await db.execute(
         select(distinct(Timecode.lampa_profile_id))
         .where(Timecode.device_id == device_id)
     )
-    profiles = sorted([r[0] for r in result.all()])
-    return {"profiles": profiles}
+    profile_ids = sorted([r[0] for r in ids_result.all()])
+
+    names_result = await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device_id,
+            LampaProfile.lampa_profile_id.in_(profile_ids),
+        )
+    )
+    names = {lp.lampa_profile_id: lp.name for lp in names_result.scalars().all()}
+
+    return {
+        "profiles": [
+            {"profile_id": pid, "name": names.get(pid, "")}
+            for pid in profile_ids
+        ]
+    }
+
+
+class _ProfileNameBody(BaseModel):
+    device_id: int
+    profile_id: str
+    name: str
+
+
+@router.post("/api/profile-name")
+async def api_set_profile_name(
+    body: _ProfileNameBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохраняет/обновляет человеческое название для lampa_profile_id."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(body.device_id, current_user, db)
+
+    name = body.name.strip()[:100]
+    stmt = pg_insert(LampaProfile).values(
+        device_id=body.device_id,
+        lampa_profile_id=body.profile_id,
+        name=name,
+    ).on_conflict_do_update(
+        constraint="uq_lampa_profile",
+        set_={"name": name},
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

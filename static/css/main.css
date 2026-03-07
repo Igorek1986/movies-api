@@ -510,6 +510,7 @@ button.danger-btn {
 .stats-tabs .tab-btn + .tab-btn {
   border-left: 1px solid var(--pico-primary);
 }
+.stats-tabs .tab-btn:not(.active):hover { background: var(--pico-primary-hover); color: #fff; }
 .stats-tabs .tab-btn.active {
   background: var(--pico-primary);
   color: #fff;
