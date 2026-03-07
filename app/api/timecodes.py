@@ -43,10 +43,51 @@ WATCHED_THRESHOLD = 90  # процент для пометки «просмот�
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 
+_PROFILE_LIMITS = {"simple": 3, "premium": 8, "super": None}
+
+
 def _require_device(device: Device | None) -> Device:
     if not device:
         raise HTTPException(status_code=401, detail="Неверный или отсутствующий token")
     return device
+
+
+async def _assert_profile_allowed(device: Device, profile_id: str, db: AsyncSession) -> None:
+    """Проверяет лимит профилей. Бросает 403 если профиль новый и лимит исчерпан."""
+    user = (await db.execute(select(User).where(User.id == device.user_id))).scalar_one_or_none()
+    role = user.role if user else "simple"
+    limit = _PROFILE_LIMITS.get(role, 3)
+    if limit is None:
+        return  # super — без лимита
+
+    if profile_id:
+        # Именованный профиль: если уже существует — всё ок
+        existing = (await db.execute(
+            select(LampaProfile).where(
+                LampaProfile.device_id == device.id,
+                LampaProfile.lampa_profile_id == profile_id,
+            )
+        )).scalar_one_or_none()
+        if existing:
+            return
+    else:
+        # Основной (profile_id=""): если уже есть таймкоды — всё ок
+        has_tc = (await db.execute(
+            select(func.count()).select_from(Timecode).where(
+                Timecode.device_id == device.id,
+                Timecode.lampa_profile_id == "",
+            )
+        )).scalar() or 0
+        if has_tc > 0:
+            return
+
+    # Новый слот — проверяем лимит
+    lp_count = (await db.execute(
+        select(func.count()).select_from(LampaProfile)
+        .where(LampaProfile.device_id == device.id)
+    )).scalar() or 0
+    if lp_count >= limit:
+        raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
 
 
 async def _upsert_timecodes(
@@ -224,28 +265,7 @@ async def save_timecode(
         raise HTTPException(status_code=400, detail="data должна быть JSON-строкой")
 
     lampa_profile_id = profile_id or ""
-
-    # Проверяем лимит профилей для неизвестного (нового) profile_id
-    if lampa_profile_id:
-        existing_lp = (await db.execute(
-            select(LampaProfile).where(
-                LampaProfile.device_id == device.id,
-                LampaProfile.lampa_profile_id == lampa_profile_id,
-            )
-        )).scalar_one_or_none()
-
-        if not existing_lp:
-            user = (await db.execute(select(User).where(User.id == device.user_id))).scalar_one_or_none()
-            role = user.role if user else "simple"
-            _LIMITS = {"simple": 3, "premium": 8, "super": None}
-            limit = _LIMITS.get(role, 3)
-            if limit is not None:
-                count = (await db.execute(
-                    select(func.count()).select_from(LampaProfile)
-                    .where(LampaProfile.device_id == device.id)
-                )).scalar() or 0
-                if count >= limit:
-                    raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
+    await _assert_profile_allowed(device, lampa_profile_id, db)
 
     await _upsert_timecodes(
         db, device.id, lampa_profile_id,
@@ -337,6 +357,7 @@ async def import_from_lampac(
     Body: {"123_movie": {"hash1": '{"percent":100,...}'}, ...}
     """
     _require_device(device)
+    await _assert_profile_allowed(device, profile_id or "", db)
 
     rows = []
     for card_id, items in data.items():
@@ -373,6 +394,7 @@ async def import_from_lampa(
     В Lampa формате нет card_id — хранится с card_id="lampa_import".
     """
     _require_device(device)
+    await _assert_profile_allowed(device, profile_id or "", db)
 
     rows = []
     for item_hash, tc_data in data.items():

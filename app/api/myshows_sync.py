@@ -1,14 +1,15 @@
 import json
 import logging
 import asyncio
+from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.db.database import get_db
-from app.db.models import User, Device, Timecode, MediaCard
+from app.db.models import User, Device, Timecode, MediaCard, LampaProfile
 from app.utils import lampa_hash
 from app.config import get_settings
 from app.api.dependencies import get_current_user
@@ -123,9 +124,18 @@ def _lampa_hash_for_episode(season: int, episode: int, show_title: str) -> str:
     return str(lampa_hash(f"{season_prefix}{episode}{show_title}"))
 
 
+def _parse_watch_date(date_str: str | None) -> datetime:
+    if date_str:
+        try:
+            return datetime.fromisoformat(date_str)
+        except (ValueError, TypeError):
+            pass
+    return datetime.now(timezone.utc)
+
+
 # ─── Sync stream generator ─────────────────────────────────────────────────────
 
-async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession):
+async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession, profile_id: str = ""):
     all_timecodes: list[dict] = []
     all_media_cards: list[dict] = []
     tmdb_cache: dict = {}
@@ -174,10 +184,14 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                     tmdb_id = tmdb_data["id"]
                     card_id = f"{tmdb_id}_movie"
                     duration = (movie.get("runtime") or 120) * 60
+                    watch_date = _parse_watch_date(
+                        (movie.get("userMovie") or {}).get("watchDate")
+                    )
                     all_timecodes.append({
                         "card_id": card_id,
                         "item": _lampa_hash_for_movie(movie),
                         "data": json.dumps({"duration": duration, "time": duration, "percent": 100}),
+                        "updated_at": watch_date,
                     })
                     all_media_cards.append({
                         "card_id": card_id,
@@ -269,10 +283,12 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         episode = ep_info.get("episodeNumber", 1)
                         runtime = ep_info.get("runtime") or default_runtime
                         duration = runtime * 60
+                        watch_date = _parse_watch_date(watched_ep.get("watchDate"))
                         all_timecodes.append({
                             "card_id": card_id_tv,
                             "item": _lampa_hash_for_episode(season, episode, show_title),
                             "data": json.dumps({"duration": duration, "time": duration, "percent": 100}),
+                            "updated_at": watch_date,
                         })
 
                     stats["shows_ok"] += 1
@@ -299,18 +315,22 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
 
                 values = [
                     {"device_id": device.id, "lampa_profile_id": profile_id, "card_id": tc["card_id"],
-                     "item": tc["item"], "data": tc["data"]}
+                     "item": tc["item"], "data": tc["data"], "updated_at": tc["updated_at"]}
                     for tc in cleaned
                 ]
-                stmt = insert(Timecode).values(values)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[
-                        Timecode.device_id, Timecode.lampa_profile_id,
-                        Timecode.card_id, Timecode.item,
-                    ],
-                    set_={"data": stmt.excluded.data},
-                )
-                await db.execute(stmt)
+                # asyncpg limit: 32767 params; 6 columns → max 5000 rows per batch
+                chunk_size = 5000
+                for i in range(0, len(values), chunk_size):
+                    chunk = values[i:i + chunk_size]
+                    stmt = insert(Timecode).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[
+                            Timecode.device_id, Timecode.lampa_profile_id,
+                            Timecode.card_id, Timecode.item,
+                        ],
+                        set_={"data": stmt.excluded.data, "updated_at": stmt.excluded.updated_at},
+                    )
+                    await db.execute(stmt)
 
             # ── Save MediaCards ──────────────────────────────────────────────
             if all_media_cards:
@@ -372,13 +392,9 @@ async def sync_myshows(
 
     allowed, wait_sec = rate_limit.check_sync(current_user.id)
     if not allowed:
-        if wait_sec >= 60:
-            wait_str = f"{wait_sec // 60} мин. {wait_sec % 60} сек."
-        else:
-            wait_str = f"{wait_sec} сек."
         raise HTTPException(
             status_code=429,
-            detail=f"Синхронизация недавно запускалась. Подождите ещё {wait_str}",
+            detail={"message": "Синхронизация недавно запускалась.", "wait_sec": wait_sec},
         )
 
     device_result = await db.execute(
@@ -388,10 +404,40 @@ async def sync_myshows(
     if not device:
         raise HTTPException(status_code=404, detail="Устройство не найдено")
 
+    # Проверяем лимит профилей
+    _limits = {"simple": 3, "premium": 8, "super": None}
+    limit = _limits.get(current_user.role, 3)
+    if limit is not None:
+        pid = profile_id or ""
+        if pid:
+            lp_exists = (await db.execute(
+                select(LampaProfile).where(
+                    LampaProfile.device_id == device_id,
+                    LampaProfile.lampa_profile_id == pid,
+                )
+            )).scalar_one_or_none()
+            is_new = not lp_exists
+        else:
+            has_tc = (await db.execute(
+                select(func.count()).select_from(Timecode).where(
+                    Timecode.device_id == device_id,
+                    Timecode.lampa_profile_id == "",
+                )
+            )).scalar() or 0
+            is_new = has_tc == 0
+
+        if is_new:
+            lp_count = (await db.execute(
+                select(func.count()).select_from(LampaProfile)
+                .where(LampaProfile.device_id == device_id)
+            )).scalar() or 0
+            if lp_count >= limit:
+                raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
+
     logger.info(f"MyShows sync: user={current_user.username}, device={device.name}")
 
     return StreamingResponse(
-        _sync_generator(device, login, password, db),
+        _sync_generator(device, login, password, db, profile_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

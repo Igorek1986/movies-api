@@ -12,11 +12,20 @@ function toggleKey(btn, fullKey) {
 
 // Загружает lampa-профили устройства и заполняет select
 async function _loadLampaProfiles(deviceId, selectEl) {
-  selectEl.innerHTML = '<option value="">Основной (без профиля)</option>';
-  if (!deviceId) return;
+  selectEl.innerHTML = '';
+  if (!deviceId) {
+    selectEl.innerHTML = '<option value="">Основной (без профиля)</option>';
+    return;
+  }
   try {
     const res  = await fetch(`/api/profile-ids?device_id=${deviceId}`);
     const data = await res.json();
+    if (data.основной_available !== false) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Основной (без профиля)';
+      selectEl.appendChild(opt);
+    }
     (data.profiles || []).forEach(p => {
       if (!p.profile_id) return;
       const opt   = document.createElement('option');
@@ -24,7 +33,9 @@ async function _loadLampaProfiles(deviceId, selectEl) {
       opt.textContent = p.name || p.profile_id;
       selectEl.appendChild(opt);
     });
-  } catch { /* молча игнорируем */ }
+  } catch {
+    selectEl.innerHTML = '<option value="">Основной (без профиля)</option>';
+  }
 }
 
 function _updateLampaCmd(profileId) {
@@ -220,7 +231,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          status.textContent = err.detail || 'Ошибка синхронизации';
+          const detail = err.detail || {};
+          if (res.status === 429 && detail.wait_sec) {
+            let left = detail.wait_sec;
+            const fmt = s => s >= 60 ? `${Math.floor(s/60)} мин. ${s%60} сек.` : `${s} сек.`;
+            status.textContent = `${detail.message} Подождите ещё ${fmt(left)}`;
+            const timer = setInterval(() => {
+              left--;
+              if (left <= 0) {
+                clearInterval(timer);
+                status.textContent = 'Можно повторить синхронизацию.';
+                btn.disabled = false;
+              } else {
+                status.textContent = `${detail.message} Подождите ещё ${fmt(left)}`;
+              }
+            }, 1000);
+          } else {
+            status.textContent = (typeof detail === 'string' ? detail : detail.message) || 'Ошибка синхронизации';
+            btn.disabled = false;
+          }
           return;
         }
 

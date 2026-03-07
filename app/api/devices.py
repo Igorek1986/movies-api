@@ -448,13 +448,21 @@ async def api_profile_ids(
     )
     tc_ids = {r[0] for r in tc_result.all()}
 
-    all_ids = sorted(lp_map.keys() | tc_ids)
+    all_ids = sorted((lp_map.keys() | tc_ids) - {""})
+
+    # "Основной" (пустой profile_id) доступен если у него есть таймкоды
+    # ИЛИ если лимит профилей не исчерпан
+    lp_count = len(lp_map)
+    limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+    основной_has_tc = "" in tc_ids
+    основной_available = основной_has_tc or (limit is None or lp_count < limit)
 
     return {
         "profiles": [
             {"profile_id": pid, "name": lp_map.get(pid, "")}
             for pid in all_ids
-        ]
+        ],
+        "основной_available": основной_available,
     }
 
 
