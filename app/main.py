@@ -27,12 +27,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import init_db, async_session_maker
-from app.db.models import MediaCard, User
+from app.db.models import MediaCard, User, Timecode
 from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app.api import auth, myshows_sync, timecodes as timecodes_router
 from app.api import devices
 from app.api import telegram as telegram_router
+from app.api import tg_miniapp as tg_miniapp_router
 from app.admin import router as admin_router
 from app.api.dependencies import get_device_by_token
 from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
@@ -100,6 +101,7 @@ async def lifespan(app: FastAPI):
     _polling_task = None
     if settings.TELEGRAM_BOT_TOKEN:
         from app.bot import init_bot
+
         bot, dp = init_bot(settings.TELEGRAM_BOT_TOKEN)
         if settings.TELEGRAM_USE_POLLING:
             await bot.delete_webhook(drop_pending_updates=True)
@@ -118,6 +120,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if settings.TELEGRAM_BOT_TOKEN:
         from app.bot import get_bot, get_dp
+
         b = get_bot()
         d = get_dp()
         if _polling_task:
@@ -155,6 +158,7 @@ app.include_router(stats.router)
 app.include_router(myshows_sync.router)
 app.include_router(admin_router)
 app.include_router(telegram_router.router)
+app.include_router(tg_miniapp_router.router)
 
 
 @app.middleware("http")
@@ -653,11 +657,15 @@ async def image_proxy(path: str):
     proxy_url = settings.IMAGE_PROXY_URL
     if settings.IMAGE_PROXY_USER and settings.IMAGE_PROXY_PASS:
         scheme, rest = proxy_url.split("://", 1)
-        proxy_url = f"{scheme}://{settings.IMAGE_PROXY_USER}:{settings.IMAGE_PROXY_PASS}@{rest}"
+        proxy_url = (
+            f"{scheme}://{settings.IMAGE_PROXY_USER}:{settings.IMAGE_PROXY_PASS}@{rest}"
+        )
 
     tmdb_url = f"https://image.tmdb.org/{path}"
     try:
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=20, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            proxy=proxy_url, timeout=20, follow_redirects=True
+        ) as client:
             resp = await client.get(tmdb_url)
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code)
@@ -704,6 +712,107 @@ async def get_category(
                     f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
                     f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах"
                 )
+
+        # ── "Продолжить просмотр" — незавершённые из таймкодов ──────────────────
+        if category == "continues" or category.startswith("continues_"):
+            if not token:
+                return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
+
+            media_filter = None
+            if category == "continues_movie":
+                media_filter = "movie"
+            elif category in ("continues_tv", "continues_anime"):
+                media_filter = "tv"
+            # continues — без фильтра, все типы
+
+            device = await get_device_by_token(token=token, db=db)
+            if not device:
+                return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
+
+            tc_where = [Timecode.device_id == device.id]
+            if profile_id is not None:
+                tc_where.append(Timecode.lampa_profile_id == profile_id)
+            tc_result = await db.execute(select(Timecode).where(*tc_where))
+            all_tc = tc_result.scalars().all()
+
+            # Группируем: card_id → {max_pct, last_watched}
+            agg: dict[str, dict] = {}
+            for tc in all_tc:
+                if not re.match(r"^\d+_(movie|tv)$", tc.card_id):
+                    continue
+                if media_filter and not tc.card_id.endswith(f"_{media_filter}"):
+                    continue
+                try:
+                    pct = float(json.loads(tc.data).get("percent", 0))
+                except Exception:
+                    pct = 0
+                if tc.card_id not in agg:
+                    agg[tc.card_id] = {"max_pct": pct, "last_watched": tc.updated_at}
+                else:
+                    if pct > agg[tc.card_id]["max_pct"]:
+                        agg[tc.card_id]["max_pct"] = pct
+                    if tc.updated_at and (
+                        not agg[tc.card_id]["last_watched"]
+                        or tc.updated_at > agg[tc.card_id]["last_watched"]
+                    ):
+                        agg[tc.card_id]["last_watched"] = tc.updated_at
+
+            unfinished = [
+                (cid, v["max_pct"], v["last_watched"])
+                for cid, v in agg.items()
+                if v["max_pct"] < 90
+            ]
+            unfinished.sort(key=lambda x: x[2] or datetime.min, reverse=True)
+
+            total = len(unfinished)
+            start = (page - 1) * per_page
+            page_items = unfinished[start : start + per_page]
+
+            if not page_items:
+                return {
+                    "results": [],
+                    "page": page,
+                    "total_pages": ceil(total / per_page) or 1,
+                    "total_results": total,
+                }
+
+            mc_result = await db.execute(
+                select(MediaCard).where(
+                    MediaCard.card_id.in_([x[0] for x in page_items])
+                )
+            )
+            mc_map = {mc.card_id: mc for mc in mc_result.scalars().all()}
+
+            results = []
+            for cid, pct, _ in page_items:
+                mc = mc_map.get(cid)
+                if not mc:
+                    continue
+                item: dict = {
+                    "id": mc.tmdb_id,
+                    "poster_path": mc.poster_path,
+                    "backdrop_path": mc.backdrop_path or "",
+                    "overview": mc.overview or "",
+                    "vote_average": mc.vote_average or 0,
+                }
+                if mc.media_type == "tv":
+                    item["name"] = mc.title
+                    item["original_name"] = mc.original_title
+                    item["first_air_date"] = mc.release_date or ""
+                    item["media_type"] = "tv"
+                else:
+                    item["title"] = mc.title
+                    item["original_title"] = mc.original_title
+                    item["release_date"] = mc.release_date or ""
+                    item["media_type"] = "movie"
+                results.append(item)
+
+            return {
+                "results": results,
+                "page": page,
+                "total_pages": ceil(total / per_page) or 1,
+                "total_results": total,
+            }
 
         # Загрузка данных из файла
         data = load_data(category)
@@ -848,22 +957,31 @@ async def get_category(
 
 _templates = Jinja2Templates(directory="templates")
 
+
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def index(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
     image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
     devices = []
     if current_user:
         from app.api.devices import _devices_with_stats
+
         devices = await _devices_with_stats(current_user.id, db)
-    return _templates.TemplateResponse("index.html", {
-        "request": request,
-        "user": current_user,
-        "devices": devices,
-        "plugin_url": plugin_url,
-        "bot_name": settings.TELEGRAM_BOT_NAME,
-        "image_base": image_base,
-    })
+    return _templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "user": current_user,
+            "devices": devices,
+            "plugin_url": plugin_url,
+            "bot_name": settings.TELEGRAM_BOT_NAME,
+            "image_base": image_base,
+        },
+    )
 
 
 @app.get("/cache/path")

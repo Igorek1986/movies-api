@@ -48,6 +48,7 @@
             { key: 'lampac_movies_new',         title: 'Новые фильмы' },
             { key: 'lampac_all_tv_shows',       title: 'Сериалы' },
             { key: 'lampac_all_tv_shows_ru',    title: 'Русские сериалы' },
+            { key: 'continues', title: "Продолжить просмотр NUMParser"},
             { key: 'continues_movie', title: "Продолжить просмотр (Фильмы)"},
             { key: 'continues_tv', title: "Продолжить просмотр (Сериалы)"},
             { key: 'continues_anime', title: "Продолжить просмотр (Аниме)"},
@@ -161,8 +162,10 @@
 
             var category = params.url;
             var page = params.page || 1;
-            if (Lampa.Storage.get('numparser_hide_watched')) {
-                var token = Lampa.Storage.get('numparser_api_key', '');
+            var isContinues = category === 'continues' || category.indexOf('continues_') === 0;
+            var token = '';
+            if (Lampa.Storage.get('numparser_hide_watched') || isContinues) {
+                token = Lampa.Storage.get('numparser_api_key', '');
             }
 
             var url = BASE_URL + '/' + category + '?page=' + page + '&language=' + Lampa.Storage.get('tmdb_lang', 'ru');
@@ -415,8 +418,10 @@
 
             function makeRequest(category, title, callback) {
                 var page = 1;
-                if (Lampa.Storage.get('numparser_hide_watched')) {
-                    var token = Lampa.Storage.get('numparser_api_key', '');
+                var isContinues = category === 'continues' || category.indexOf('continues_') === 0;
+                var token = '';
+                if (Lampa.Storage.get('numparser_hide_watched') || isContinues) {
+                    token = Lampa.Storage.get('numparser_api_key', '');
                 }
                 var url = BASE_URL + '/' + category + '?page=' + page + '&language=' + Lampa.Storage.get('tmdb_lang', 'ru');
                 if (token) {

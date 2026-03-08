@@ -42,7 +42,9 @@ function _renderCards(cards) {
 
   const filtered = _activeFilter === 'all'
     ? cards
-    : cards.filter(c => c.media_type === _activeFilter);
+    : _activeFilter === 'watching'
+      ? cards.filter(c => (c.max_percent || 0) < 90)
+      : cards.filter(c => c.media_type === _activeFilter);
   const sorted = _sortCards(filtered);
 
   if (!sorted.length) {
@@ -251,9 +253,10 @@ function _initModal() {
 function initHistory(defaultDeviceId) {
   const deviceSelect = document.getElementById('historyDeviceSelect');
   const filterBtns = {
-    all:   document.getElementById('historyFilterAll'),
-    movie: document.getElementById('historyFilterMovie'),
-    tv:    document.getElementById('historyFilterTv'),
+    all:      document.getElementById('historyFilterAll'),
+    movie:    document.getElementById('historyFilterMovie'),
+    tv:       document.getElementById('historyFilterTv'),
+    watching: document.getElementById('historyFilterWatching'),
   };
 
   // Сортировка

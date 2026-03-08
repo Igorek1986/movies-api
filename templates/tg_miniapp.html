@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>NUMParser</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root {
+  --bg:   var(--tg-theme-bg-color, #1c1c1e);
+  --bg2:  var(--tg-theme-secondary-bg-color, #2c2c2e);
+  --text: var(--tg-theme-text-color, #fff);
+  --hint: var(--tg-theme-hint-color, #8e8e93);
+  --btn:  var(--tg-theme-button-color, #0a84ff);
+  --btn-text: var(--tg-theme-button-text-color, #fff);
+  --accent: #30d158;
+  --danger: #ff453a;
+  --warning: #ffd60a;
+  --r: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 15px; min-height: 100vh; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+#loading, #err { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; gap:12px; padding:24px; text-align:center; }
+#err, #app { display:none; }
+.spin { width:36px;height:36px;border:3px solid var(--bg2);border-top-color:var(--btn);border-radius:50%;animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Tabs */
+.tabs { display:flex; background:var(--bg2); border-bottom:1px solid rgba(255,255,255,.08); position:sticky; top:0; z-index:10; }
+.tab { flex:1; padding:11px 4px 9px; border:none; background:none; color:var(--hint); font-size:11px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; transition:color .2s; position:relative; }
+.tab.active { color:var(--btn); }
+.tab .ic { font-size:19px; }
+.badge { position:absolute; top:4px; right:calc(50% - 18px); background:var(--danger); color:#fff; border-radius:8px; font-size:10px; font-weight:700; padding:1px 5px; min-width:16px; text-align:center; }
+.pane { display:none; padding:14px; }
+.pane.active { display:block; }
+
+/* Misc */
+.card { background:var(--bg2); border-radius:var(--r); padding:14px 16px; margin-bottom:10px; }
+.lbl { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--hint); font-weight:600; margin-bottom:6px; }
+.empty { text-align:center; color:var(--hint); padding:32px 0; }
+.role-badge { display:inline-block; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600; }
+.role-simple  { background:rgba(142,142,147,.2); color:var(--hint); }
+.role-premium { background:rgba(255,214,10,.2);  color:var(--warning); }
+.role-super   { background:rgba(48,209,88,.2);   color:var(--accent); }
+
+/* Stats */
+.sg { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.si { background:var(--bg2); border-radius:var(--r); padding:14px; text-align:center; }
+.sv { font-size:28px; font-weight:700; }
+.sl { font-size:12px; color:var(--hint); margin-top:2px; }
+.blue{color:var(--btn);} .green{color:var(--accent);} .yellow{color:var(--warning);} .red{color:var(--danger);}
+
+/* Search */
+.search { width:100%; padding:10px 14px; background:var(--bg2); border:1px solid rgba(255,255,255,.1); border-radius:var(--r); color:var(--text); font-size:15px; outline:none; margin-bottom:10px; }
+.search:focus { border-color:var(--btn); }
+.search::placeholder { color:var(--hint); }
+
+/* User list */
+.user-item { background:var(--bg2); border-radius:var(--r); padding:12px 14px; margin-bottom:8px; }
+.urow { display:flex; align-items:center; gap:10px; }
+.uav { width:38px;height:38px;border-radius:50%;background:var(--btn);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0; }
+.unm { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.umt { font-size:12px; color:var(--hint); margin-top:2px; }
+.rbtns { display:flex; gap:6px; margin-top:9px; flex-wrap:wrap; }
+.rbtn { padding:5px 12px; border-radius:8px; border:none; cursor:pointer; font-size:12px; font-weight:600; }
+.rbtn:active { opacity:.7; }
+.rbtn.simple  { background:rgba(142,142,147,.25); color:var(--hint); }
+.rbtn.premium { background:rgba(255,214,10,.25);  color:var(--warning); }
+.rbtn.super   { background:rgba(48,209,88,.25);   color:var(--accent); }
+.rbtn.current { opacity:.4; pointer-events:none; }
+
+/* Account card */
+.acc-card { background:var(--bg2); border-radius:var(--r); padding:16px; margin-bottom:12px; display:flex; align-items:center; gap:14px; }
+.acc-av { width:52px;height:52px;border-radius:50%;background:var(--btn);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex-shrink:0; }
+
+/* Device accordion */
+.dev { background:var(--bg2); border-radius:var(--r); margin-bottom:8px; overflow:hidden; }
+.dev-hdr { display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; user-select:none; -webkit-user-select:none; }
+.dev-hdr:active { opacity:.8; }
+.dev-ic { font-size:21px; flex-shrink:0; }
+.dev-inf { flex:1; min-width:0; }
+.dev-nm { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dev-mt { font-size:12px; color:var(--hint); margin-top:2px; }
+.chev { font-size:12px; color:var(--hint); transition:transform .2s; flex-shrink:0; }
+.dev.open .chev { transform:rotate(90deg); }
+
+/* Collapsed buttons */
+.dev-acts { display:flex; gap:8px; padding:0 14px 12px; }
+.dev.open .dev-acts { display:none; }
+.abtn { flex:1; padding:7px; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+.abtn:active { opacity:.7; }
+.a-ren { background:rgba(10,132,255,.18); color:var(--btn); }
+.a-del { background:rgba(255,69,58,.18);  color:var(--danger); }
+
+/* Rename form (collapsed) */
+.ren-form { display:none; padding:0 14px 12px; gap:8px; align-items:center; }
+.ren-form.open { display:flex; }
+.ren-inp { flex:1; padding:8px 12px; background:var(--bg); border:1px solid var(--btn); border-radius:8px; color:var(--text); font-size:14px; outline:none; }
+.ren-sv { padding:8px 14px; background:var(--btn); color:var(--btn-text); border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.ren-cl { padding:8px 10px; background:none; border:none; color:var(--hint); font-size:13px; cursor:pointer; }
+
+/* Expanded panel */
+.dev-panel { display:none; border-top:1px solid rgba(255,255,255,.07); }
+.dev.open .dev-panel { display:block; }
+
+/* Token section */
+.tok-sect { padding:10px 14px 0; }
+.tok-row { display:flex; align-items:center; gap:8px; background:var(--bg); border-radius:8px; padding:8px 10px; }
+.tok-lbl { font-size:11px; color:var(--hint); white-space:nowrap; font-weight:600; }
+.tok-val { flex:1; font-family:monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tok-cp  { background:none; border:none; cursor:pointer; font-size:18px; flex-shrink:0; padding:0 2px; }
+.tok-btns { display:flex; gap:8px; margin-top:8px; }
+.tok-btn { flex:1; padding:7px 6px; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; text-align:center; }
+.tok-btn:active { opacity:.7; }
+.t-regen  { background:rgba(255,214,10,.18); color:var(--warning); }
+.t-clear  { background:rgba(255,69,58,.18);  color:var(--danger); }
+
+/* Activate section */
+.act-sect { padding:10px 14px 0; }
+.act-row { display:flex; gap:8px; }
+.act-inp { flex:1; padding:8px 12px; background:var(--bg); border:1px solid rgba(255,255,255,.1); border-radius:8px; color:var(--text); font-size:14px; outline:none; font-family:monospace; letter-spacing:2px; text-transform:uppercase; }
+.act-inp:focus { border-color:var(--btn); }
+.act-inp::placeholder { font-family:inherit; letter-spacing:normal; text-transform:none; color:var(--hint); }
+.act-btn { padding:8px 14px; background:var(--btn); color:var(--btn-text); border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+
+/* Profiles section */
+.prof-sect { padding:10px 14px 14px; }
+.prof-row { display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.05); }
+.prof-row:last-of-type { border-bottom:none; }
+.prof-nm { flex:1; font-size:14px; }
+.prof-id { font-size:11px; color:var(--hint); font-family:monospace; }
+.prof-del { background:none; border:none; cursor:pointer; font-size:16px; color:var(--danger); padding:2px 4px; flex-shrink:0; }
+.add-prof { display:flex; gap:8px; margin-top:8px; }
+.add-prof-inp { flex:1; padding:7px 10px; background:var(--bg); border:1px solid rgba(255,255,255,.1); border-radius:8px; color:var(--text); font-size:13px; outline:none; }
+.add-prof-inp:focus { border-color:var(--btn); }
+.add-prof-btn { padding:7px 14px; background:var(--btn); color:var(--btn-text); border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+
+/* Token box (after create) */
+.tok-box { background:rgba(48,209,88,.1); border:1px solid rgba(48,209,88,.3); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; position:relative; }
+.tok-box-close { position:absolute; top:10px; right:12px; background:none; border:none; cursor:pointer; font-size:18px; color:var(--hint); line-height:1; }
+.tok-box-title { font-size:13px; font-weight:600; color:var(--accent); margin-bottom:8px; padding-right:24px; }
+.tok-box-val { font-family:monospace; font-size:13px; word-break:break-all; background:var(--bg); padding:8px 10px; border-radius:8px; }
+.tok-box-cp { margin-top:8px; width:100%; padding:9px; background:var(--btn); color:var(--btn-text); border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+.tok-box-warn { font-size:12px; color:var(--hint); margin-top:6px; }
+
+/* Form elements */
+.text-inp { width:100%; padding:10px 14px; background:var(--bg); border:1px solid rgba(255,255,255,.1); border-radius:var(--r); color:var(--text); font-size:15px; outline:none; }
+.text-inp:focus { border-color:var(--btn); }
+.text-inp::placeholder { color:var(--hint); }
+.prim-btn { width:100%; padding:12px; background:var(--btn); color:var(--btn-text); border:none; border-radius:var(--r); font-size:15px; font-weight:600; cursor:pointer; margin-top:10px; }
+.prim-btn:active { opacity:.85; }
+.prim-btn:disabled { opacity:.5; }
+.ref-btn { display:block; text-align:center; margin-top:8px; background:none; border:none; color:var(--btn); cursor:pointer; font-size:14px; }
+
+/* Support chat */
+.conv-item { background:var(--bg2); border-radius:var(--r); padding:12px 14px; margin-bottom:8px; cursor:pointer; display:flex; align-items:flex-start; gap:10px; border-left:3px solid transparent; }
+.conv-item.unread { border-left-color:var(--btn); }
+.conv-preview { font-size:13px; color:var(--hint); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.msg-bbl { max-width:85%; padding:9px 13px; border-radius:14px; font-size:14px; }
+.msg-in  { background:var(--bg2); align-self:flex-start; border-bottom-left-radius:4px; }
+.msg-out { background:var(--btn); color:var(--btn-text); align-self:flex-end; border-bottom-right-radius:4px; }
+.msg-tm { font-size:11px; opacity:.6; margin-top:3px; }
+.rep-inp { flex:1; padding:10px 14px; background:var(--bg2); border:1px solid rgba(255,255,255,.1); border-radius:var(--r); color:var(--text); font-size:15px; outline:none; resize:none; min-height:42px; max-height:120px; }
+.rep-inp:focus { border-color:var(--btn); }
+.rep-snd { padding:10px 16px; background:var(--btn); color:var(--btn-text); border:none; border-radius:var(--r); cursor:pointer; font-size:17px; flex-shrink:0; }
+
+/* Toast */
+.toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.85); color:#fff; padding:10px 20px; border-radius:20px; font-size:14px; z-index:1000; opacity:0; transition:opacity .3s; pointer-events:none; white-space:nowrap; max-width:90vw; }
+.toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spin"></div><div style="color:var(--hint)">Загрузка…</div></div>
+
+<div id="err">
+  <div style="font-size:48px" id="err-ic">🔗</div>
+  <div style="font-weight:700;font-size:18px" id="err-ttl">Аккаунт не привязан</div>
+  <div style="color:var(--hint);margin-top:8px;line-height:1.5" id="err-msg">Зайдите на сайт и привяжите Telegram в настройках</div>
+  <a id="err-link" href="#" style="display:none;margin-top:16px;padding:12px 24px;background:var(--btn);color:var(--btn-text);border-radius:12px;text-decoration:none;font-weight:600">Открыть сайт</a>
+</div>
+
+<div id="app">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('home')" id="t-home"><span class="ic">🏠</span><span>Главная</span></button>
+    <button class="tab" onclick="switchTab('devs')"    id="t-devs"><span class="ic">📺</span><span>Устройства</span></button>
+    <button class="tab" id="t-users"  style="display:none" onclick="switchTab('users')"><span class="ic">👥</span><span>Пользователи</span></button>
+    <button class="tab" id="t-supp"   style="display:none" onclick="switchTab('supp')">
+      <span class="ic">💬</span><span>Поддержка</span>
+      <span class="badge" id="unread-badge" style="display:none">!</span>
+    </button>
+  </div>
+
+  <div class="pane active" id="p-home"></div>
+  <div class="pane" id="p-devs">
+    <div id="new-tok-wrap"></div>
+    <div class="lbl">Мои устройства</div>
+    <div id="devs-list"></div>
+    <div class="card" id="create-card" style="margin-top:4px">
+      <div style="font-weight:600;margin-bottom:10px">➕ Новое устройство</div>
+      <input class="text-inp" id="new-dev-name" placeholder="Название, например «Гостиная ТВ»" maxlength="100">
+      <button class="prim-btn" id="create-btn" onclick="createDevice()">Создать</button>
+    </div>
+    <div id="dev-limit-msg" class="card" style="margin-top:4px;display:none;text-align:center;color:var(--hint);font-size:13px"></div>
+    <button class="ref-btn" onclick="loadDevices()">↻ Обновить</button>
+  </div>
+  <div class="pane" id="p-users">
+    <input class="search" type="text" id="search" placeholder="Поиск по логину…" oninput="filterUsers(this.value)">
+    <div id="users-list"></div>
+  </div>
+  <div class="pane" id="p-supp">
+    <div id="convs-list"></div>
+    <div id="chat-view" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <button onclick="closeChat()" style="background:none;border:none;color:var(--btn);font-size:15px;cursor:pointer;padding:4px 0">← Назад</button>
+        <div><div style="font-weight:600" id="chat-nm"></div><div style="font-size:12px;color:var(--hint)" id="chat-sub"></div></div>
+      </div>
+      <div id="chat-msgs" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:55vh;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px">
+        <textarea id="rep-inp" class="rep-inp" placeholder="Ответ…" rows="1"
+          oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+        <button class="rep-snd" onclick="sendReply()">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready(); tg.expand();
+let initData = tg.initData || '';
+let isAdmin = false, myTgId = null, allUsers = [], convs = [], curChat = null;
+
+// ── API ───────────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const o = { method, headers: { 'X-Telegram-Init-Data': initData, 'Content-Type': 'application/json' } };
+  if (body) o.body = JSON.stringify(body);
+  const r = await fetch('/tg-app' + path, o);
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.statusText); }
+  return r.json();
+}
+function toast(msg, d=2200) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), d);
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function haptic(t='success') { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(t); }
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.pane').forEach(c => c.classList.remove('active'));
+  document.getElementById('t-' + name).classList.add('active');
+  document.getElementById('p-' + name).classList.add('active');
+  if (name === 'home') isAdmin ? loadAdminStats() : loadUserHome();
+  if (name === 'devs') loadDevices();
+  if (name === 'users') loadUsers();
+  if (name === 'supp')  loadSupport();
+}
+
+// ── Admin: Stats ──────────────────────────────────────────────────────────────
+function renderAdminHome() {
+  document.getElementById('p-home').innerHTML = `
+    <div class="sg">
+      <div class="si"><div class="sv blue"   id="s-u">—</div><div class="sl">Пользователей</div></div>
+      <div class="si"><div class="sv"         id="s-d">—</div><div class="sl">Устройств</div></div>
+      <div class="si"><div class="sv yellow"  id="s-p">—</div><div class="sl">Premium</div></div>
+      <div class="si"><div class="sv green"   id="s-s">—</div><div class="sl">Super</div></div>
+      <div class="si"><div class="sv"         id="s-t">—</div><div class="sl">Telegram привязано</div></div>
+      <div class="si"><div class="sv red"     id="s-m">—</div><div class="sl">Новых сообщений</div></div>
+    </div>
+    <button class="ref-btn" onclick="loadAdminStats()">↻ Обновить</button>
+    <button onclick="unlinkTelegram()" style="display:block;width:100%;margin-top:8px;padding:11px;background:rgba(255,69,58,.12);color:var(--danger);border:none;border-radius:var(--r);font-size:14px;font-weight:600;cursor:pointer">
+      🔗 Отвязать Telegram
+    </button>`;
+  loadAdminStats();
+}
+async function loadAdminStats() {
+  try {
+    const d = await api('GET', '/api/stats');
+    document.getElementById('s-u').textContent = d.total_users;
+    document.getElementById('s-d').textContent = d.total_devices;
+    document.getElementById('s-p').textContent = d.role_counts.premium || 0;
+    document.getElementById('s-s').textContent = d.role_counts.super   || 0;
+    document.getElementById('s-t').textContent = d.tg_linked;
+    document.getElementById('s-m').textContent = d.unread_support || 0;
+    setUnreadBadge(d.unread_support || 0);
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+function setUnreadBadge(n) {
+  const b = document.getElementById('unread-badge');
+  if (!b) return;
+  b.style.display = n > 0 ? 'inline' : 'none';
+  b.textContent = n;
+}
+
+// ── User: Home ────────────────────────────────────────────────────────────────
+async function loadUserHome() {
+  try {
+    const d = await api('GET', '/api/me');
+    const lim = d.device_limit !== null ? d.device_limit : '∞';
+    document.getElementById('p-home').innerHTML = `
+      <div class="acc-card">
+        <div class="acc-av">${esc(d.username[0]).toUpperCase()}</div>
+        <div>
+          <div style="font-size:17px;font-weight:700">${esc(d.username)}</div>
+          <div style="font-size:13px;color:var(--hint);margin-top:4px">
+            <span class="role-badge role-${d.role}">${d.role_label}</span>
+            <span style="margin-left:6px">${d.device_count} / ${lim} устройств</span>
+          </div>
+        </div>
+      </div>
+      <div style="color:var(--hint);font-size:13px;text-align:center;padding:8px 0">
+        Перейдите на вкладку 📺 для управления устройствами
+      </div>
+      <button onclick="unlinkTelegram()" style="display:block;width:100%;margin-top:8px;padding:11px;background:rgba(255,69,58,.12);color:var(--danger);border:none;border-radius:var(--r);font-size:14px;font-weight:600;cursor:pointer">
+        🔗 Отвязать Telegram
+      </button>`;
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+// ── Devices (shared: user + admin) ───────────────────────────────────────────
+async function loadDevices() {
+  document.getElementById('devs-list').innerHTML = '<div style="color:var(--hint);text-align:center;padding:16px">Загрузка…</div>';
+  try {
+    const d = await api('GET', '/api/me');
+    renderDevices(d.devices);
+    const atLimit = d.device_limit !== null && d.device_count >= d.device_limit;
+    document.getElementById('create-card').style.display = atLimit ? 'none' : '';
+    const limMsg = document.getElementById('dev-limit-msg');
+    limMsg.style.display = atLimit ? '' : 'none';
+    if (atLimit) limMsg.textContent = `Достигнут лимит устройств (${d.device_limit})`;
+  } catch(e) { document.getElementById('devs-list').innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`; }
+}
+
+function renderDevices(devices) {
+  const list = document.getElementById('devs-list');
+  if (!devices.length) { list.innerHTML = '<div class="empty" style="padding:16px 0">Устройств нет</div>'; return; }
+  list.innerHTML = devices.map(d => `
+    <div class="dev" id="dev-${d.id}">
+      <div class="dev-hdr" onclick="toggleDev(${d.id})">
+        <div class="dev-ic">📺</div>
+        <div class="dev-inf">
+          <div class="dev-nm" id="dnm-${d.id}">${esc(d.name)}</div>
+          <div class="dev-mt">${d.timecodes_count} таймкодов · ${d.created_at||'—'}</div>
+        </div>
+        <div class="chev">▶</div>
+      </div>
+      <div class="dev-acts">
+        <button class="abtn a-ren" onclick="showRen(event,${d.id})">✏️ Переименовать</button>
+        <button class="abtn a-del" onclick="delDev(event,${d.id})">🗑 Удалить</button>
+      </div>
+      <div class="ren-form" id="ren-${d.id}">
+        <input class="ren-inp" id="ren-inp-${d.id}" value="${esc(d.name)}" maxlength="100">
+        <button class="ren-sv" onclick="saveRen(${d.id})">Сохранить</button>
+        <button class="ren-cl" onclick="hideRen(${d.id})">✕</button>
+      </div>
+      <div class="dev-panel" id="pan-${d.id}">
+        <!-- Token -->
+        <div class="tok-sect">
+          <div class="lbl">Токен для Lampa</div>
+          <div class="tok-row">
+            <span class="tok-lbl">API</span>
+            <span class="tok-val" id="tv-${d.id}">···</span>
+            <button class="tok-cp" onclick="cpToken(${d.id})" title="Скопировать">📋</button>
+          </div>
+          <div class="tok-btns">
+            <button class="tok-btn t-regen" onclick="regenToken(${d.id})">🔄 Новый токен</button>
+            <button class="tok-btn t-clear" onclick="clearTC(${d.id})">🗑 Очистить историю</button>
+          </div>
+        </div>
+        <!-- Link Lampa by code -->
+        <div class="act-sect">
+          <div class="lbl">Привязать Lampa по коду</div>
+          <div style="font-size:12px;color:var(--hint);margin-bottom:6px">Введите код, который показывает Lampa на экране</div>
+          <div class="act-row">
+            <input class="act-inp" id="act-inp-${d.id}" placeholder="Код из Lampa" maxlength="10">
+            <button class="act-btn" onclick="activateDev(${d.id})">Привязать</button>
+          </div>
+        </div>
+        <!-- Profiles -->
+        <div class="prof-sect" id="prof-${d.id}">
+          <div style="color:var(--hint);font-size:13px">Загрузка профилей…</div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+async function toggleDev(id) {
+  const el = document.getElementById(`dev-${id}`);
+  if (el.classList.contains('open')) { el.classList.remove('open'); return; }
+  el.classList.add('open');
+  if (document.getElementById(`tv-${id}`).textContent === '···') await loadDevPanel(id);
+}
+
+async function loadDevPanel(id) {
+  try {
+    const d = await api('GET', `/api/me/devices/${id}`);
+    setTokenDisplay(id, d.token);
+    renderProfiles(id, d.profiles, d.profile_limit);
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+function setTokenDisplay(id, token) {
+  const el = document.getElementById(`tv-${id}`);
+  el.dataset.token = token;
+  el.textContent = token.slice(0,8) + '···' + token.slice(-4);
+}
+
+async function cpToken(id) {
+  const el = document.getElementById(`tv-${id}`);
+  const tok = el?.dataset.token;
+  if (!tok) { toast('Сначала откройте устройство'); return; }
+  try { await navigator.clipboard.writeText(tok); toast('Токен скопирован'); haptic(); }
+  catch { toast('Не удалось скопировать'); }
+}
+
+async function regenToken(id) {
+  if (!confirm('Пересоздать токен?\nСтарый токен перестанет работать в Lampa — нужно будет заново ввести новый.')) return;
+  try {
+    const d = await api('POST', `/api/me/devices/${id}/regenerate`);
+    setTokenDisplay(id, d.token);
+    toast('Новый токен создан');
+    haptic();
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+async function clearTC(id) {
+  if (!confirm('Удалить всю историю просмотров этого устройства?')) return;
+  try {
+    await api('POST', `/api/me/devices/${id}/clear-timecodes`);
+    toast('История очищена');
+    haptic();
+    loadDevices();
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+async function activateDev(id) {
+  const inp = document.getElementById(`act-inp-${id}`);
+  const code = inp.value.trim();
+  if (!code) { inp.focus(); return; }
+  try {
+    await api('POST', `/api/me/devices/${id}/activate`, { code });
+    inp.value = '';
+    toast('Lampa привязана к устройству!');
+    haptic();
+  } catch(e) { toast('Ошибка: ' + e.message); haptic('error'); }
+}
+
+// Profiles
+function renderProfiles(deviceId, profiles, profileLimit) {
+  const wrap = document.getElementById(`prof-${deviceId}`);
+  const atLimit = profileLimit !== null && profileLimit !== undefined && profiles.length >= profileLimit;
+  const rows = profiles.length
+    ? profiles.map(p => `
+        <div class="prof-row" id="pr-${deviceId}-${CSS.escape(p.profile_id)}">
+          <div style="flex:1;min-width:0">
+            <div class="prof-nm">${esc(p.name||'—')}</div>
+            <div class="prof-id">${esc(p.profile_id)}</div>
+          </div>
+          <button class="prof-del" onclick="delProf(${deviceId},'${esc(p.profile_id)}',${profileLimit??'null'})">🗑</button>
+        </div>`).join('')
+    : '<div style="color:var(--hint);font-size:13px;padding:4px 0">Профилей нет</div>';
+  const addForm = atLimit
+    ? `<div style="text-align:center;color:var(--hint);font-size:13px;margin-top:8px">Достигнут лимит профилей (${profileLimit})</div>`
+    : `<div class="add-prof" style="flex-direction:column;gap:6px">
+        <input class="add-prof-inp" id="ap-${deviceId}" placeholder="Название профиля" maxlength="100" style="width:100%">
+        <div style="display:flex;gap:8px">
+          <input class="add-prof-inp" id="ap-id-${deviceId}" placeholder="ID профиля (необязательно)" maxlength="100" style="flex:1;font-family:monospace;font-size:12px">
+          <button class="add-prof-btn" onclick="addProf(${deviceId},${profileLimit??'null'})">+ Добавить</button>
+        </div>
+      </div>`;
+  wrap.innerHTML = `
+    <div class="lbl">Lampa-профили</div>
+    <div id="pr-rows-${deviceId}">${rows}</div>
+    ${addForm}`;
+}
+
+async function addProf(did, profileLimit) {
+  const inp = document.getElementById(`ap-${did}`);
+  const idInp = document.getElementById(`ap-id-${did}`);
+  const name = inp.value.trim();
+  if (!name) { inp.focus(); return; }
+  const profile_id = idInp ? idInp.value.trim().replace(/^_+|_+$/g, '') : '';
+  try {
+    await api('POST', `/api/me/devices/${did}/profiles/create`, { name, ...(profile_id ? { profile_id } : {}) });
+    toast('Профиль добавлен'); haptic();
+    await loadDevPanel(did);
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+async function delProf(did, pid, profileLimit) {
+  if (!confirm('Удалить профиль?\nВсе таймкоды профиля будут удалены.')) return;
+  try {
+    await api('POST', `/api/me/devices/${did}/profiles/${encodeURIComponent(pid)}/delete`);
+    toast('Профиль удалён'); haptic();
+    await loadDevPanel(did);
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+// Create device
+async function createDevice() {
+  const inp = document.getElementById('new-dev-name');
+  const btn = document.getElementById('create-btn');
+  const name = inp.value.trim();
+  if (!name) { inp.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Создание…';
+  try {
+    const d = await api('POST', '/api/me/devices/create', { name });
+    inp.value = '';
+    showTokenBox(d.id, d.name, d.token);
+    haptic();
+    await loadDevices();
+    // Auto-open the new device and preload token
+    const el = document.getElementById(`dev-${d.id}`);
+    if (el && !el.classList.contains('open')) {
+      el.classList.add('open');
+      setTokenDisplay(d.id, d.token);
+      await loadDevPanel(d.id); // also loads profiles
+      el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    }
+  } catch(e) { toast('Ошибка: ' + e.message); haptic('error'); }
+  finally { btn.disabled = false; btn.textContent = 'Создать'; }
+}
+
+function showTokenBox(id, name, token) {
+  document.getElementById('new-tok-wrap').innerHTML = `
+    <div class="tok-box">
+      <button class="tok-box-close" onclick="this.closest('.tok-box').remove()">✕</button>
+      <div class="tok-box-title">✅ Устройство «${esc(name)}» создано!</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Введите токен в настройках Lampa:</div>
+      <div class="tok-box-val">${esc(token)}</div>
+      <button class="tok-box-cp" onclick="cpRaw('${esc(token)}',this)">📋 Скопировать токен</button>
+      <div class="tok-box-warn">⚠️ Сохраните токен — он также виден при открытии устройства ниже.</div>
+    </div>`;
+}
+
+async function cpRaw(token, btn) {
+  try { await navigator.clipboard.writeText(token); btn.textContent = '✓ Скопировано!'; setTimeout(()=>btn.textContent='📋 Скопировать токен', 2000); haptic(); }
+  catch { toast('Не удалось скопировать'); }
+}
+
+// Rename / delete
+function showRen(e, id) { e.stopPropagation(); document.getElementById(`ren-${id}`).classList.add('open'); document.getElementById(`ren-inp-${id}`).focus(); }
+function hideRen(id) { document.getElementById(`ren-${id}`).classList.remove('open'); }
+async function saveRen(id) {
+  const inp = document.getElementById(`ren-inp-${id}`);
+  const name = inp.value.trim();
+  if (!name) { toast('Имя не может быть пустым'); return; }
+  try {
+    await api('POST', `/api/me/devices/${id}/rename`, { name });
+    document.getElementById(`dnm-${id}`).textContent = name;
+    hideRen(id);
+    toast('Переименовано'); haptic();
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+async function delDev(e, id) {
+  e.stopPropagation();
+  const name = document.getElementById(`dnm-${id}`)?.textContent || 'устройство';
+  if (!confirm(`Удалить «${name}»?\nВсе таймкоды будут удалены.`)) return;
+  try {
+    await api('POST', `/api/me/devices/${id}/delete`);
+    document.getElementById(`dev-${id}`)?.remove();
+    toast('Устройство удалено'); haptic();
+    loadDevices();
+  } catch(e) { toast('Ошибка: ' + e.message); }
+}
+
+// ── Admin: Users ──────────────────────────────────────────────────────────────
+async function loadUsers() {
+  const list = document.getElementById('users-list');
+  list.innerHTML = '<div style="color:var(--hint);text-align:center;padding:20px">Загрузка…</div>';
+  try { const d = await api('GET', '/api/users'); allUsers = d.users; renderUsers(allUsers); }
+  catch(e) { list.innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`; }
+}
+function filterUsers(q) { const ql = q.toLowerCase(); renderUsers(ql ? allUsers.filter(u => u.username.toLowerCase().includes(ql)) : allUsers); }
+const RL = { simple:'Базовый', premium:'Премиум', super:'Супер' };
+function renderUsers(users) {
+  const list = document.getElementById('users-list');
+  if (!users.length) { list.innerHTML = '<div class="empty">Не найдено</div>'; return; }
+  list.innerHTML = users.map(u => `
+    <div class="user-item" id="u-${u.id}">
+      <div class="urow">
+        <div class="uav">${esc(u.username[0]).toUpperCase()}</div>
+        <div style="flex:1;min-width:0">
+          <div class="unm">${esc(u.username)}${u.tg_username?` <span style="color:var(--hint);font-weight:400">@${esc(u.tg_username)}</span>`:''}</div>
+          <div class="umt"><span class="role-badge role-${u.role}">${RL[u.role]||u.role}</span> ${u.device_count}/${u.device_limit??'∞'} уст. · ${u.created_at||'—'}</div>
+        </div>
+      </div>
+      <div class="rbtns">
+        ${['simple','premium','super'].map(r=>`<button class="rbtn ${r}${u.role===r?' current':''}" onclick="setRole(${u.id},'${r}',this)">${RL[r]}</button>`).join('')}
+      </div>
+    </div>`).join('');
+}
+async function setRole(uid, role, btn) {
+  const item = btn.closest('.user-item');
+  const btns = item.querySelectorAll('.rbtn');
+  btns.forEach(b=>b.disabled=true);
+  try {
+    const d = await api('POST', `/api/users/${uid}/role`, { role });
+    const u = allUsers.find(x=>x.id===uid); if(u) u.role=role;
+    item.querySelector('.role-badge').className = `role-badge role-${role}`;
+    item.querySelector('.role-badge').textContent = RL[role];
+    btns.forEach(b=>{b.classList.toggle('current',b.classList.contains(role));b.disabled=false;});
+    toast(`${d.username}: роль → ${RL[role]}`); haptic();
+  } catch(e) { btns.forEach(b=>b.disabled=false); toast('Ошибка: '+e.message); haptic('error'); }
+}
+
+// ── Admin: Support ────────────────────────────────────────────────────────────
+async function loadSupport() {
+  document.getElementById('chat-view').style.display='none';
+  document.getElementById('convs-list').style.display='';
+  const list = document.getElementById('convs-list');
+  list.innerHTML='<div style="color:var(--hint);text-align:center;padding:20px">Загрузка…</div>';
+  try {
+    const d = await api('GET', '/api/messages');
+    convs = d.conversations;
+    renderConvs();
+    setUnreadBadge(convs.filter(c=>c.has_unread).length);
+  } catch(e) { list.innerHTML=`<div class="empty">Ошибка: ${esc(e.message)}</div>`; }
+}
+function renderConvs() {
+  const list = document.getElementById('convs-list');
+  if (!convs.length) { list.innerHTML='<div class="empty">Нет сообщений</div>'; return; }
+  list.innerHTML = convs.map(c=>{
+    const last = c.messages[c.messages.length-1];
+    const name = c.user_username ? `@${esc(c.user_username)}` : `#${c.user_telegram_id}`;
+    const prev = (last.direction==='out'?'→ ':'')+last.text;
+    return `<div class="conv-item${c.has_unread?' unread':''}" onclick="openChat(${c.user_telegram_id})">
+      <div style="font-size:20px">${c.has_unread?'🔵':'💬'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600">${name}</div>
+        <div class="conv-preview">${esc(prev.slice(0,60))}${prev.length>60?'…':''}</div>
+      </div></div>`;
+  }).join('');
+}
+function openChat(uid) {
+  const c = convs.find(x=>x.user_telegram_id===uid); if (!c) return;
+  curChat = uid;
+  document.getElementById('convs-list').style.display='none';
+  document.getElementById('chat-view').style.display='block';
+  document.getElementById('chat-nm').textContent = c.user_username ? `@${c.user_username}` : 'Пользователь';
+  document.getElementById('chat-sub').textContent = `Telegram ID: ${uid}`;
+  const wrap = document.getElementById('chat-msgs');
+  wrap.innerHTML = c.messages.map(m=>`<div class="msg-bbl msg-${m.direction}"><div>${esc(m.text)}</div><div class="msg-tm">${m.created_at||''}</div></div>`).join('');
+  wrap.scrollTop = wrap.scrollHeight;
+  if (c.has_unread) api('POST', `/api/messages/${uid}/read`).then(()=>{c.has_unread=false; setUnreadBadge(convs.filter(x=>x.has_unread).length);});
+}
+function closeChat() { curChat=null; document.getElementById('chat-view').style.display='none'; document.getElementById('convs-list').style.display=''; }
+async function sendReply() {
+  const inp = document.getElementById('rep-inp');
+  const text = inp.value.trim();
+  if (!text || !curChat) return;
+  inp.disabled=true;
+  try {
+    await api('POST', `/api/messages/${curChat}/reply`, { text });
+    const c = convs.find(x=>x.user_telegram_id===curChat);
+    if(c){ const now=new Date().toLocaleString('ru',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); c.messages.push({direction:'out',text,created_at:now,id:Date.now()}); }
+    inp.value=''; inp.style.height='auto';
+    openChat(curChat); haptic();
+  } catch(e) { toast('Ошибка: '+e.message); haptic('error'); }
+  finally { inp.disabled=false; inp.focus(); }
+}
+document.getElementById('rep-inp').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendReply();} });
+
+// ── Unlink ────────────────────────────────────────────────────────────────────
+async function unlinkTelegram() {
+  if (!confirm('Отвязать Telegram от аккаунта?\nВы потеряете доступ к управлению через бота.')) return;
+  try {
+    await api('POST', '/api/me/unlink');
+    toast('Telegram отвязан');
+    setTimeout(() => tg.close(), 1200);
+  } catch(e) { toast('Ошибка: ' + e.message); haptic('error'); }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function showErr(ic, ttl, msg, link) {
+  document.getElementById('err-ic').textContent=ic;
+  document.getElementById('err-ttl').textContent=ttl;
+  document.getElementById('err-msg').textContent=msg;
+  if(link){const a=document.getElementById('err-link');a.href=link;a.style.display='inline-block';}
+  document.getElementById('loading').style.display='none';
+  document.getElementById('err').style.display='flex';
+}
+async function init() {
+  if (!initData) { showErr('📱','Откройте в Telegram','Приложение работает только внутри Telegram.'); return; }
+  try {
+    const r = await fetch('/tg-app/api/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({initData}) });
+    const d = await r.json();
+    if (!r.ok || (!d.is_admin && !d.is_linked)) {
+      showErr('🔗','Аккаунт не привязан','Зайдите на сайт, войдите и привяжите Telegram в настройках.', window.location.origin+'/profiles');
+      return;
+    }
+    isAdmin = d.is_admin; myTgId = d.user.id;
+    if (isAdmin) { document.getElementById('t-users').style.display=''; document.getElementById('t-supp').style.display=''; }
+    document.getElementById('loading').style.display='none';
+    document.getElementById('app').style.display='block';
+    isAdmin ? renderAdminHome() : loadUserHome();
+  } catch(e) { showErr('🌐','Ошибка подключения','Не удалось связаться с сервером. Попробуйте позже.'); }
+}
+init();
+</script>
+</body>
+</html>

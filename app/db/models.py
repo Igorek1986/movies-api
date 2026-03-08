@@ -244,3 +244,25 @@ class TelegramLinkCode(Base):
 
     def __repr__(self):
         return f"<TelegramLinkCode(user_id={self.user_id}, code={self.code})>"
+
+
+class SupportMessage(Base):
+    """Сообщение в чате поддержки между пользователем и администратором."""
+
+    __tablename__ = "support_messages"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    # Telegram пользователя (не обязательно привязанного к аккаунту сайта)
+    user_telegram_id = Column(BigInteger, nullable=False, index=True)
+    user_username    = Column(String(100), nullable=True)
+    # direction: 'in' = user→admin, 'out' = admin→user
+    direction        = Column(String(3), nullable=False)
+    text             = Column(Text, nullable=False)
+    # ID уведомления в чате конкретного администратора (для маршрутизации ответов)
+    admin_telegram_id = Column(BigInteger, nullable=True, index=True)
+    admin_msg_id      = Column(Integer, nullable=True)
+    is_read           = Column(Boolean, nullable=False, default=False, server_default="false")
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<SupportMessage(id={self.id}, direction={self.direction}, from={self.user_telegram_id})>"

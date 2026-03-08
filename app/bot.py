@@ -20,13 +20,18 @@ Telegram-бот NUMParser (aiogram v3).
 import logging
 from datetime import datetime, timezone
 
-from aiogram import Bot, Dispatcher, Router, types
+from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.filters import Command, CommandObject
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import (
+    BotCommand,
+    MenuButtonWebApp, MenuButtonDefault,
+    WebAppInfo,
+)
 from sqlalchemy import select, func
 
 from app.db.database import async_session_maker
-from app.db.models import TelegramUser, TelegramLinkCode, User, Device, DEVICE_LIMITS
+from app.db.models import TelegramUser, TelegramLinkCode, User, Device, DEVICE_LIMITS, SupportMessage
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +60,21 @@ async def _on_startup(bot: Bot) -> None:
             allowed_updates=["message", "callback_query"],
         )
         logger.info(f"Telegram webhook set: {webhook_url}")
+
+    # Команды бота (видны в меню «/»)
+    await bot.set_my_commands([
+        BotCommand(command="start",  description="Главное меню"),
+        BotCommand(command="status", description="Статус аккаунта"),
+    ])
+
+    # Глобальная кнопка меню — открывает Mini App (для привязанных пользователей)
+    await bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(
+            text="📱 Управление",
+            web_app=WebAppInfo(url=f"{settings.BASE_URL}/tg-app"),
+        )
+    )
+    logger.info("Bot commands and menu button set")
 
 
 async def _on_shutdown(bot: Bot) -> None:
@@ -139,10 +159,7 @@ async def _process_link_code(message: types.Message, code: str):
         user_result = await db.execute(select(User).where(User.id == link_code.user_id))
         user = user_result.scalar_one_or_none()
 
-    await message.answer(
-        f"Telegram привязан к аккаунту <b>{user.username if user else '?'}</b>.\n"
-        "Теперь вы можете восстановить пароль через этот бот."
-    )
+    await _send_start_menu(message)
 
 
 # ─── Команды пользователя ─────────────────────────────────────────────────────
@@ -154,29 +171,7 @@ async def cmd_start(message: types.Message, command: CommandObject):
         await _process_link_code(message, command.args.strip())
         return
 
-    from app.config import get_settings
-    base_url = get_settings().BASE_URL
-
-    async with async_session_maker() as db:
-        tg = await _get_tg_user(db, message.from_user.id)
-
-    if tg:
-        text = (
-            "Ваш Telegram привязан к аккаунту NUMParser.\n\n"
-            "/status — статус аккаунта"
-        )
-    else:
-        text = (
-            f"Привет! Я бот <b>NUMParser</b>.\n\n"
-            f"Чтобы привязать Telegram — нажмите кнопку <b>«Привязать Telegram»</b> "
-            f"в настройках аккаунта на сайте:\n"
-            f"<a href=\"{base_url}/profiles\">{base_url}/profiles</a>"
-        )
-
-    if _is_admin(message.from_user.id):
-        text += "\n\n/admin — команды администратора"
-
-    await message.answer(text, disable_web_page_preview=True)
+    await _send_start_menu(message)
 
 
 @_router.message(Command("status"))
@@ -206,6 +201,52 @@ async def cmd_status(message: types.Message):
         f"<b>Роль:</b> {role_labels.get(user.role, user.role)}\n"
         f"<b>Устройств:</b> {device_count} / {limit_str}"
     )
+
+
+# ─── Хелпер: главное меню ────────────────────────────────────────────────────
+
+async def _send_start_menu(message: types.Message):
+    """Отправляет приветствие. Кнопка меню уже установлена глобально на боте."""
+    from app.config import get_settings
+    base_url = get_settings().BASE_URL
+    is_admin = _is_admin(message.from_user.id)
+
+    async with async_session_maker() as db:
+        tg = await _get_tg_user(db, message.from_user.id)
+        if tg:
+            user_result = await db.execute(select(User).where(User.id == tg.user_id))
+            user = user_result.scalar_one_or_none()
+        else:
+            user = None
+
+    if is_admin:
+        name = user.username if user else "—"
+        text = (
+            f"👋 Привет, <b>{name}</b>!\n\n"
+            f"Вы администратор NUMParser.\n\n"
+            f"<b>Команды:</b>\n"
+            f"/status — статус аккаунта\n"
+            f"/admin — управление пользователями\n\n"
+            f"Нажмите кнопку <b>«📱 Управление»</b> рядом с полем ввода, "
+            f"чтобы открыть панель администратора."
+        )
+    elif tg and user:
+        text = (
+            f"👋 Привет, <b>{user.username}</b>!\n\n"
+            f"Нажмите кнопку <b>«📱 Управление»</b> рядом с полем ввода, "
+            f"чтобы управлять устройствами.\n\n"
+            f"<b>Команды:</b>\n"
+            f"/status — статус аккаунта"
+        )
+    else:
+        text = (
+            f"👋 Привет! Я бот <b>NUMParser</b>.\n\n"
+            f"Чтобы управлять устройствами через Telegram — "
+            f"сначала привяжите аккаунт на сайте:\n"
+            f"<a href=\"{base_url}/profiles\">{base_url}/profiles</a>"
+        )
+
+    await message.answer(text, disable_web_page_preview=True)
 
 
 # ─── Команды администратора ───────────────────────────────────────────────────
@@ -338,6 +379,116 @@ async def cmd_broadcast(message: types.Message, command: CommandObject):
             failed += 1
 
     await message.answer(f"Отправлено: {sent}, ошибок: {failed}")
+
+
+# ─── Чат поддержки ────────────────────────────────────────────────────────────
+
+@_router.message(F.text & ~F.text.startswith("/"))
+async def handle_user_message(message: types.Message):
+    """Любое текстовое сообщение не от команды — пересылается администраторам."""
+    from app.config import get_settings
+    settings = get_settings()
+    admin_ids = settings.telegram_admin_id_list
+
+    # Если это сообщение от администратора — обрабатываем как ответ поддержки
+    if _is_admin(message.from_user.id):
+        # Ответ на уведомление о сообщении пользователя
+        if message.reply_to_message:
+            await _handle_admin_reply(message)
+        return
+
+    user_id = message.from_user.id
+    username = message.from_user.username
+    text = message.text
+
+    # Сохраняем входящее сообщение
+    async with async_session_maker() as db:
+        msg_obj = SupportMessage(
+            user_telegram_id=user_id,
+            user_username=username,
+            direction="in",
+            text=text,
+            is_read=False,
+        )
+        db.add(msg_obj)
+        await db.flush()
+        msg_id = msg_obj.id
+
+        # Пересылаем каждому администратору
+        if not admin_ids:
+            await db.commit()
+            await message.answer("Ваше сообщение получено. Администратор ответит вам здесь.")
+            return
+
+        name = f"@{username}" if username else f"#{user_id}"
+        forward_text = (
+            f"📩 <b>Сообщение от {name}</b> (ID: <code>{user_id}</code>)\n\n"
+            f"{text}\n\n"
+            f"<i>Ответьте на это сообщение, чтобы написать пользователю.</i>"
+        )
+
+        for admin_id in admin_ids:
+            try:
+                sent = await _bot.send_message(admin_id, forward_text, parse_mode="HTML")
+                # Сохраняем привязку msg_id → admin_msg_id для маршрутизации ответа
+                db.add(SupportMessage(
+                    user_telegram_id=user_id,
+                    user_username=username,
+                    direction="in",
+                    text=text,
+                    admin_telegram_id=admin_id,
+                    admin_msg_id=sent.message_id,
+                    is_read=False,
+                ))
+            except Exception as e:
+                logger.warning(f"Не удалось переслать сообщение поддержки admin {admin_id}: {e}")
+
+        # Удаляем первичную запись без admin_msg_id (заменена точными записями выше)
+        await db.delete(msg_obj)
+        await db.commit()
+
+    await message.answer("✅ Сообщение отправлено администратору. Ожидайте ответа.")
+
+
+async def _handle_admin_reply(message: types.Message):
+    """Обрабатывает ответ администратора на уведомление о сообщении пользователя."""
+    reply_msg_id = message.reply_to_message.message_id
+    admin_id = message.from_user.id
+
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(SupportMessage).where(
+                SupportMessage.admin_telegram_id == admin_id,
+                SupportMessage.admin_msg_id == reply_msg_id,
+                SupportMessage.direction == "in",
+            )
+        )
+        original = result.scalar_one_or_none()
+
+    if not original:
+        # Не найдено — обычное сообщение от администратора, игнорируем
+        return
+
+    user_tg_id = original.user_telegram_id
+    reply_text = message.text or message.caption or ""
+
+    ok = await send_message(user_tg_id, f"💬 <b>Ответ от поддержки:</b>\n\n{reply_text}")
+
+    if ok:
+        # Сохраняем ответ
+        async with async_session_maker() as db:
+            db.add(SupportMessage(
+                user_telegram_id=user_tg_id,
+                user_username=original.user_username,
+                direction="out",
+                text=reply_text,
+                admin_telegram_id=admin_id,
+                is_read=True,
+            ))
+            await db.commit()
+        await message.reply("✅ Ответ отправлен пользователю.")
+    else:
+        await message.reply("❌ Не удалось отправить сообщение пользователю.")
 
 
 # ─── Публичные функции отправки ───────────────────────────────────────────────
