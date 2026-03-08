@@ -328,7 +328,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                             Timecode.device_id, Timecode.lampa_profile_id,
                             Timecode.card_id, Timecode.item,
                         ],
-                        set_={"data": stmt.excluded.data, "updated_at": stmt.excluded.updated_at},
+                        set_={"updated_at": stmt.excluded.updated_at},
                     )
                     await db.execute(stmt)
 

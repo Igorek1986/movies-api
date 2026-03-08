@@ -408,14 +408,15 @@ async def api_history(
     history = []
     for card_id, agg in card_agg.items():
         mc = media_cards.get(card_id)
-        m = _CARD_ID_RE.match(card_id)
+        if not mc:
+            continue
         history.append({
             "card_id": card_id,
-            "media_type": mc.media_type if mc else (m.group(2) if m else None),
-            "title": mc.title if mc else None,
-            "poster_path": mc.poster_path if mc else None,
-            "year": mc.year if mc else None,
-            "release_date": mc.release_date if mc else None,
+            "media_type": mc.media_type,
+            "title": mc.title,
+            "poster_path": mc.poster_path,
+            "year": mc.year,
+            "release_date": mc.release_date,
             "last_watched": agg["last_watched"].isoformat() if agg["last_watched"] else None,
             "max_percent": agg["max_percent"],
         })

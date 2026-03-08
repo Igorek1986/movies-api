@@ -26,7 +26,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, update
 
 from app.config import get_settings
 from app.db.database import get_db, async_session_maker
@@ -181,8 +181,12 @@ def get_watched_movie_ids(
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 
 
-async def _fetch_and_store_media_card(card_id: str, tmdb_id: int, media_type: str) -> None:
-    """Фоновая задача: получает метаданные из TMDB и сохраняет/обновляет в media_cards."""
+async def _fetch_and_store_media_card(
+    card_id: str, tmdb_id: int, media_type: str,
+    device_id: int | None = None, lampa_profile_id: str | None = None,
+) -> None:
+    """Фоновая задача: получает метаданные из TMDB и сохраняет/обновляет в media_cards.
+    Если переданы device_id/lampa_profile_id — обновляет updated_at таймкодов датой выхода."""
     settings = get_settings()
     headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
     endpoint = "tv" if media_type == "tv" else "movie"
@@ -231,6 +235,29 @@ async def _fetch_and_store_media_card(card_id: str, tmdb_id: int, media_type: st
                 set_={k: mc_stmt.excluded[k] for k in values if k != "card_id"},
             )
             await db.execute(mc_stmt)
+
+            # Обновляем дату таймкодов при импорте (не при сохранении из плагина)
+            if device_id is not None:
+                date_str = (
+                    values.get("last_air_date") if media_type == "tv"
+                    else values.get("release_date")
+                ) or ""
+                if date_str:
+                    try:
+                        from datetime import datetime
+                        watch_date = datetime.fromisoformat(date_str)
+                        await db.execute(
+                            update(Timecode)
+                            .where(
+                                Timecode.device_id == device_id,
+                                Timecode.card_id == card_id,
+                                Timecode.lampa_profile_id == (lampa_profile_id or ""),
+                            )
+                            .values(updated_at=watch_date)
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
             await db.commit()
         logger.debug(f"MediaCard saved: {card_id}")
     except Exception as e:
@@ -367,11 +394,14 @@ async def import_from_lampac(
     saved = await _upsert_timecodes(db, device.id, profile_id or "", rows)
     logger.info(f"Lampac import: device={device.id}, saved={saved}")
 
-    # Запускаем фоновую загрузку MediaCard для всех валидных card_id
+    # Запускаем фоновую загрузку MediaCard + обновление даты таймкодов
+    lp = profile_id or ""
     for card_id in data.keys():
         m = _CARD_ID_RE.match(card_id)
         if m:
-            asyncio.create_task(_fetch_and_store_media_card(card_id, int(m.group(1)), m.group(2)))
+            asyncio.create_task(_fetch_and_store_media_card(
+                card_id, int(m.group(1)), m.group(2), device.id, lp,
+            ))
 
     return {"success": True, "saved": saved}
 
