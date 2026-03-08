@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     SUPERUSER_USERNAME: str = ""
     SUPERUSER_PASSWORD: str = ""
 
+    # Usernames пользователей с доступом к /admin и /stats без пароля (через session_key)
+    ADMIN_USERNAMES: str = ""
+
     TMDB_TOKEN: str
     MYSHOWS_API: str
     MYSHOWS_AUTH_URL: str
@@ -40,6 +43,10 @@ class Settings(BaseSettings):
     IMAGE_PROXY_URL: str = ""
     IMAGE_PROXY_USER: str = ""
     IMAGE_PROXY_PASS: str = ""
+
+    @property
+    def admin_username_list(self) -> list[str]:
+        return [u.strip() for u in self.ADMIN_USERNAMES.split(",") if u.strip()]
 
     @property
     def telegram_admin_id_list(self) -> list[int]:

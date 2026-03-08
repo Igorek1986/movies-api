@@ -5,14 +5,12 @@
 <header class="container-fluid site-header">
   <nav>
     <ul>
+      <li><a href="/" class="outline btn-sm secondary" role="button">← Главная</a></li>
       <li><strong>Статистика API</strong></li>
       <li><small class="muted" id="lastUpdate">{{ now.strftime('%H:%M:%S') }}</small></li>
     </ul>
     <ul>
-<li>
-        <button id="refreshBtn" class="outline secondary btn-sm" onclick="refreshData()">Обновить</button>
-      </li>
-      <li><a href="/stats" role="button" class="outline secondary btn-sm">Выйти</a></li>
+      <li><button id="refreshBtn" class="outline secondary btn-sm" onclick="refreshData()">Обновить</button></li>
     </ul>
   </nav>
 </header>

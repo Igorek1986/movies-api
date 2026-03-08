@@ -60,6 +60,24 @@ async def admin_logout():
     return response
 
 
+@router.get("/autologin")
+async def admin_autologin(sk: str = "", db: AsyncSession = Depends(get_db)):
+    """Автологин для администраторов сайта: проверяет session_key → ставит cookie → редирект."""
+    from sqlalchemy import select as sa_select
+    settings = get_settings()
+    if not sk or not settings.ADMIN_PASSWORD:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    result = await db.execute(sa_select(User).where(User.session_key == sk))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_admin:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    response = RedirectResponse(url="/admin", status_code=302)
+    response.set_cookie(_COOKIE, _session_token(settings.ADMIN_PASSWORD), httponly=True, samesite="lax")
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Dashboard — список пользователей
 # ---------------------------------------------------------------------------
@@ -84,6 +102,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             "id": u.id,
             "username": u.username,
             "role": u.role,
+            "is_admin": u.is_admin,
             "device_count": device_count,
             "device_limit": limit if limit is not None else "∞",
             "created_at": u.created_at,
@@ -124,4 +143,25 @@ async def change_user_role(
     await db.commit()
 
     logger.info(f"Admin: user {user.username} role changed {old_role} → {role}")
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@router.post("/user/{user_id}/toggle-admin")
+async def toggle_user_admin(
+    request: Request,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if not _check_admin(request):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.is_admin = not user.is_admin
+    await db.commit()
+
+    logger.info(f"Admin: user {user.username} is_admin → {user.is_admin}")
     return RedirectResponse(url="/admin", status_code=302)

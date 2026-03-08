@@ -8,6 +8,83 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/static/css/main.css">
   <title>{% block title %}NUMParser{% endblock %}</title>
+  <style>
+    .burger {
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 6px;
+      transition: background .2s;
+      position: relative;
+      z-index: 301;
+    }
+    .burger:hover { background: var(--pico-muted-border-color); }
+    .burger span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      background: var(--pico-color);
+      border-radius: 2px;
+      transition: transform .3s ease, opacity .3s ease;
+    }
+    .burger.active span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .burger.active span:nth-child(2) { opacity: 0; }
+    .burger.active span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    .nav-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 299;
+      opacity: 0;
+      transition: opacity .3s;
+    }
+    .nav-overlay.open { display: block; }
+    .nav-overlay.visible { opacity: 1; }
+
+    @media (max-width: 768px) {
+      .burger { display: flex; }
+
+      .nav-right {
+        position: fixed;
+        top: 0;
+        right: 0;
+        height: 100dvh;
+        width: 260px;
+        transform: translateX(100%);
+        transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+        background: var(--pico-card-background-color);
+        border-left: 1px solid var(--pico-muted-border-color);
+        box-shadow: -6px 0 32px rgba(0,0,0,.35);
+        z-index: 300;
+        flex-direction: column;
+        padding: 20px 12px;
+        gap: 2px;
+        margin: 0;
+      }
+      .nav-right.open { transform: translateX(0); }
+
+      .nav-right li { width: 100%; }
+      .nav-right li a,
+      .nav-right li button,
+      .nav-right li span {
+        display: block;
+        width: 100%;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 15px;
+        box-sizing: border-box;
+      }
+      .nav-right li a:hover,
+      .nav-right li button:hover { background: var(--pico-muted-border-color); }
+    }
+  </style>
 </head>
 <body>
   <button class="theme-toggle" id="themeToggle" title="Переключить тему" onclick="toggleTheme()"></button>
@@ -26,6 +103,42 @@
       if (btn) btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙';
     }
     updateThemeIcon();
+
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.site-header nav').forEach(function (nav) {
+        const ul = nav.querySelector('ul:last-child');
+        if (!ul || ul.children.length <= 3) return;
+
+        ul.classList.add('nav-right');
+
+        const overlay = document.createElement('div');
+        overlay.className = 'nav-overlay';
+        document.body.appendChild(overlay);
+
+        const burger = document.createElement('button');
+        burger.className = 'burger';
+        burger.setAttribute('aria-label', 'Открыть меню');
+        burger.innerHTML = '<span></span><span></span><span></span>';
+        burger.onclick = function (e) { e.stopPropagation(); ul.classList.contains('open') ? closeMenu() : openMenu(); };
+        nav.appendChild(burger);
+
+        function openMenu() {
+          ul.classList.add('open');
+          overlay.classList.add('open');
+          burger.classList.add('active');
+          document.body.style.overflow = 'hidden';
+          requestAnimationFrame(() => overlay.classList.add('visible'));
+        }
+        function closeMenu() {
+          ul.classList.remove('open');
+          overlay.classList.remove('visible');
+          burger.classList.remove('active');
+          document.body.style.overflow = '';
+          setTimeout(() => overlay.classList.remove('open'), 300);
+        }
+        overlay.onclick = closeMenu;
+      });
+    });
   </script>
 </body>
 </html>

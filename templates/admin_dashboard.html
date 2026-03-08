@@ -5,6 +5,7 @@
 <header class="container-fluid site-header">
   <nav>
     <ul>
+      <li><a href="/" class="outline btn-sm secondary" role="button">← Главная</a></li>
       <li><strong>NUMParser Admin</strong></li>
     </ul>
     <ul>
@@ -23,6 +24,7 @@
           <th>ID</th>
           <th>Имя</th>
           <th>Роль</th>
+          <th>Админ</th>
           <th>Устройств</th>
           <th>Зарегистрирован</th>
           <th>Действия</th>
@@ -35,6 +37,13 @@
           <td><strong>{{ u.username }}</strong></td>
           <td>
             <span class="role-badge role-{{ u.role }}">{{ u.role }}</span>
+          </td>
+          <td>
+            <form method="POST" action="/admin/user/{{ u.id }}/toggle-admin" style="margin:0">
+              <button type="submit" class="admin-toggle {% if u.is_admin %}is-admin{% endif %}">
+                {% if u.is_admin %}✅ Да{% else %}—{% endif %}
+              </button>
+            </form>
           </td>
           <td>{{ u.device_count }} / {{ u.device_limit }}</td>
           <td>{{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}</td>
@@ -68,5 +77,7 @@
   .role-premium { background: #2563eb22; color: #2563eb; }
   .role-super   { background: #d97706222; color: #d97706; }
   .role-form select { padding: .2rem .4rem; font-size: .85rem; }
+  .admin-toggle { padding: .15rem .5rem; font-size: .85rem; border: 1px solid var(--pico-muted-border-color); border-radius: .25rem; background: none; cursor: pointer; color: var(--pico-muted-color); }
+  .admin-toggle.is-admin { background: #16a34a22; color: #16a34a; border-color: #16a34a55; }
 </style>
 {% endblock %}

@@ -340,27 +340,66 @@ async def get_stats_data() -> dict:
 # AUTH
 # -------------------------------------------------------------------
 
+import hashlib as _hashlib
+from fastapi.responses import RedirectResponse as _RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+from fastapi import Depends as _Depends
+from app.db.database import get_db as _get_db
+from app.db.models import User as _User
+
+_STATS_COOKIE = "stats_session"
+
+
+def _stats_cookie_val() -> str:
+    return _hashlib.sha256(STATS_PASSWORD.encode()).hexdigest()
+
+
 def verify_password(password: str) -> bool:
     return password == STATS_PASSWORD
+
+
+def _check_stats_auth(request: Request) -> bool:
+    """Авторизован, если верный cookie или пароль в query."""
+    return request.cookies.get(_STATS_COOKIE) == _stats_cookie_val()
 
 
 # -------------------------------------------------------------------
 # WEB INTERFACE
 # -------------------------------------------------------------------
 
+@router.get("/stats/autologin")
+async def stats_autologin(sk: str = "", db: _AsyncSession = _Depends(_get_db)):
+    """Автологин для админов сайта: проверяет session_key → ставит cookie → редирект."""
+    from sqlalchemy import select as _select
+    from app.config import get_settings as _get_settings
+    if not sk:
+        return _RedirectResponse(url="/stats", status_code=302)
+    result = await db.execute(_select(_User).where(_User.session_key == sk))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_admin:
+        return _RedirectResponse(url="/stats", status_code=302)
+    response = _RedirectResponse(url="/stats", status_code=302)
+    response.set_cookie(_STATS_COOKIE, _stats_cookie_val(), httponly=True, samesite="lax")
+    return response
+
+
 @router.get("/stats", response_class=HTMLResponse)
 async def stats_page(request: Request, password: str = None):
-    if not password or not verify_password(password):
+    authed = _check_stats_auth(request) or (password and verify_password(password))
+    if not authed:
         return templates.TemplateResponse(
             "stats_login.html",
             {"request": request, "error": "Неверный пароль" if password else None},
         )
 
     stats_data = await get_stats_data()
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "stats_dashboard.html",
-        {"request": request, "stats": stats_data, "password": password, "now": datetime.now()},
+        {"request": request, "stats": stats_data, "password": password or STATS_PASSWORD, "now": datetime.now()},
     )
+    if password and verify_password(password):
+        response.set_cookie(_STATS_COOKIE, _stats_cookie_val(), httponly=True, samesite="lax")
+    return response
 
 
 @router.post("/stats", response_class=HTMLResponse)

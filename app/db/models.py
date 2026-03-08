@@ -36,6 +36,8 @@ class User(Base):
     session_key = Column(String(64), unique=True, nullable=True, index=True)
     # Роль: "simple" (3 уст.), "premium" (8 уст.), "super" (без лимита)
     role = Column(String(20), nullable=False, default="simple", server_default="simple")
+    # Флаг администратора сайта: доступ к /admin и /stats без пароля
+    is_admin = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
