@@ -142,7 +142,7 @@ async function _loadProfileTabs(deviceId, currentProfileId) {
     profiles.forEach(p => {
       const active = p.profile_id === currentProfileId ? ' active' : '';
       const label  = _profileLabel(p);
-      tabs.push(`<button class="tab-btn${active}" data-profile="${p.profile_id}" data-label="${label}">${label}</button>`);
+      tabs.push(`<button class="tab-btn${active}" data-profile="${p.profile_id}" data-label="${label}" title="Двойной клик — переименовать">${label}</button>`);
     });
 
     container.innerHTML = tabs.join('');
