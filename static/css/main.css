@@ -268,10 +268,17 @@ button.danger-btn {
 
 #cardModal > article {
   padding: 0;
-  overflow: visible;
+  overflow: hidden;
   max-width: min(820px, 95vw);
+  max-height: 90vh;
   width: 100%;
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+#modalBody {
+  overflow-y: auto;
+  flex: 1;
 }
 #cardModalClose {
   position: absolute;
@@ -347,6 +354,67 @@ button.danger-btn {
   height: 100%;
   background: var(--pico-primary);
   border-radius: 2px;
+}
+
+/* Серии в модальном окне */
+.modal-episodes-section {
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+.modal-ep-hdr-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--pico-card-background-color, var(--pico-background-color));
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .5rem;
+  padding: .5rem var(--pico-spacing) .3rem;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.modal-ep-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .5rem;
+  padding: .4rem var(--pico-spacing) .6rem;
+}
+.modal-ep-col {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.modal-ep-item {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.modal-ep-label {
+  font-size: .8rem;
+  font-family: monospace;
+  color: var(--pico-color);
+  flex: 1;
+}
+.modal-ep-btn {
+  padding: .1rem .4rem;
+  font-size: .72rem;
+  border-radius: var(--pico-border-radius);
+  cursor: pointer;
+  border: 1px solid var(--pico-muted-border-color);
+  background: transparent;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.modal-ep-btn:hover:not(:disabled) {
+  border-color: var(--pico-primary);
+  color: var(--pico-primary);
+}
+.modal-ep-empty { font-size: .75rem; color: var(--pico-muted-color); }
+.modal-ep-btn.unmark:hover:not(:disabled) {
+  border-color: var(--pico-del-color, #c00);
+  color: var(--pico-del-color, #c00);
 }
 
 /* ============================================================
@@ -502,7 +570,8 @@ button.danger-btn {
   display: flex;
   border: 1px solid var(--pico-primary);
   border-radius: var(--pico-border-radius);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   margin-bottom: var(--pico-spacing);
   gap: 0;
 }

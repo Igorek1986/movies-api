@@ -20,7 +20,7 @@ from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile,
 LAMPA_PROFILE_LIMITS: dict[str, int | None] = {"simple": 3, "premium": 8, "super": None}
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
-from app.utils import generate_profile_api_key, generate_device_code, validate_name
+from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string
 from app.api.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -800,3 +800,159 @@ async def api_media_card(
         "last_air_date": values.get("last_air_date"),
         "number_of_seasons": values.get("number_of_seasons"),
     }
+
+
+# ---------------------------------------------------------------------------
+# API: список серий с хэшами и статусом просмотра
+# ---------------------------------------------------------------------------
+
+@router.get("/api/episodes")
+async def api_episodes(
+    device_id: int = Query(...),
+    card_id: str = Query(...),
+    profile_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Возвращает список вышедших серий сериала с хэшами и флагом watched.
+    Используется для отображения непросмотренных серий в модальном окне.
+    """
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    m = _CARD_ID_RE.match(card_id)
+    if not m or m.group(2) != "tv":
+        raise HTTPException(status_code=400, detail="Только для сериалов")
+
+    mc_result = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
+    mc = mc_result.scalar_one_or_none()
+    if not mc or not mc.seasons_json or not mc.original_title:
+        return {"episodes": []}
+
+    # Загружаем таймкоды (item + data) для определения watched и special
+    tc_where = [Timecode.device_id == device_id, Timecode.card_id == card_id]
+    if profile_id is not None:
+        tc_where.append(Timecode.lampa_profile_id == profile_id)
+    tc_result = await db.execute(select(Timecode.item, Timecode.data).where(*tc_where))
+    watched_items: set[str] = set()
+    special_items: set[str] = set()
+    for item, data_raw in tc_result.all():
+        try:
+            d = json.loads(data_raw)
+            pct = d.get("percent", 0)
+            if pct >= 90:
+                watched_items.add(item)
+            if d.get("special"):
+                special_items.add(item)
+        except Exception:
+            pass
+
+    try:
+        seasons = json.loads(mc.seasons_json)
+    except Exception:
+        return {"episodes": []}
+
+    last_s = mc.last_ep_season or 0
+    last_e = mc.last_ep_number or 0
+    today_str = _date.today().isoformat()
+    orig_title = mc.original_title
+
+    episodes = []
+    for s in seasons:
+        snum = s.get("season_number") or 0
+        if snum == 0:
+            continue
+        ep_count = s.get("episode_count") or 0
+
+        # Определяем сколько серий вышло в этом сезоне
+        if last_s > 0:
+            if snum < last_s:
+                aired_to = ep_count
+            elif snum == last_s:
+                aired_to = last_e
+            else:
+                continue  # сезон ещё не вышел
+        else:
+            s_air = s.get("air_date") or ""
+            if s_air and s_air <= today_str:
+                aired_to = ep_count
+            else:
+                continue
+
+        for ep in range(1, aired_to + 1):
+            h = lampa_hash(build_episode_hash_string(snum, ep, orig_title))
+            episodes.append({
+                "season": snum,
+                "episode": ep,
+                "hash": h,
+                "watched": h in watched_items,
+                "special": h in special_items,
+            })
+
+    return {"episodes": episodes, "original_title": orig_title}
+
+
+# ---------------------------------------------------------------------------
+# API: отметить эпизод просмотренным (percent=100)
+# ---------------------------------------------------------------------------
+
+class _MarkWatchedBody(BaseModel):
+    device_id: int
+    card_id: str
+    item: str       # lampa_hash эпизода
+    profile_id: str = ""
+
+
+@router.post("/api/mark-watched")
+async def api_mark_watched(
+    body: _MarkWatchedBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(body.device_id, current_user, db)
+
+    data = json.dumps({"time": 0, "duration": 0, "percent": 100, "special": True})
+    stmt = pg_insert(Timecode).values(
+        device_id=body.device_id,
+        lampa_profile_id=body.profile_id,
+        card_id=body.card_id,
+        item=body.item,
+        data=data,
+    ).on_conflict_do_update(
+        constraint="uq_timecode_unique",
+        set_={"data": data},
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/unmark-special")
+async def api_unmark_special(
+    body: _MarkWatchedBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сбрасывает отметку спецэпизода: устанавливает percent=0."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(body.device_id, current_user, db)
+
+    data = json.dumps({"time": 0, "duration": 0, "percent": 0})
+    stmt = pg_insert(Timecode).values(
+        device_id=body.device_id,
+        lampa_profile_id=body.profile_id,
+        card_id=body.card_id,
+        item=body.item,
+        data=data,
+    ).on_conflict_do_update(
+        constraint="uq_timecode_unique",
+        set_={"data": data},
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return {"ok": True}

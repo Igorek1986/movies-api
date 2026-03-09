@@ -268,14 +268,143 @@ async function openCardModal(cardId) {
   _fillModalContent(modal, card, null);
   modal.showModal();
 
-  // Догружаем полные данные из TMDB
+  // Догружаем полные данные из TMDB + список серий (параллельно)
   try {
-    const res = await fetch(`/api/media-card/${encodeURIComponent(cardId)}`);
-    if (res.ok) {
-      const full = await res.json();
-      _fillModalContent(modal, card, full);
+    const fetches = [fetch(`/api/media-card/${encodeURIComponent(cardId)}`)];
+    const isTV = card.media_type === 'tv' && _currentDevice;
+    if (isTV) {
+      const epUrl = `/api/episodes?device_id=${_currentDevice}&card_id=${encodeURIComponent(cardId)}`
+        + (_currentProfile != null ? `&profile_id=${encodeURIComponent(_currentProfile)}` : '');
+      fetches.push(fetch(epUrl));
     }
+
+    const [mcRes, epRes] = await Promise.all(fetches);
+    const full = mcRes.ok ? await mcRes.json() : null;
+    const epData = (epRes && epRes.ok) ? await epRes.json() : null;
+
+    _fillModalContent(modal, card, full);
+    if (epData) _renderUnwatchedEpisodes(modal, card, epData);
   } catch { /* показываем то что есть */ }
+}
+
+function _renderUnwatchedEpisodes(modal, card, epData) {
+  const body = document.getElementById('modalBody');
+  if (!body) return;
+
+  body.querySelector('.modal-episodes-section')?.remove();
+
+  const allEps = epData.episodes || [];
+  const unwatched = allEps.filter(e => !e.watched);
+  const special   = allEps.filter(e => e.special);
+
+  if (!unwatched.length && !special.length) return;
+
+  const deviceId  = _currentDevice;
+  const profileId = _currentProfile || '';
+
+  function epLabel(e) {
+    return `S${String(e.season).padStart(2,'0')}E${String(e.episode).padStart(2,'0')}`;
+  }
+
+  const leftHtml = unwatched.map(e =>
+    `<div class="modal-ep-item" data-hash="${e.hash}">
+      <span class="modal-ep-label">${epLabel(e)}</span>
+      <button class="modal-ep-btn mark-btn">Спецэпизод</button>
+    </div>`
+  ).join('') || '<span class="modal-ep-empty">—</span>';
+
+  const rightHtml = special.map(e =>
+    `<div class="modal-ep-item" data-hash="${e.hash}">
+      <span class="modal-ep-label">${epLabel(e)}</span>
+      <button class="modal-ep-btn unmark unmark-btn">Отменить</button>
+    </div>`
+  ).join('') || '<span class="modal-ep-empty">—</span>';
+
+  const section = document.createElement('div');
+  section.className = 'modal-episodes-section';
+  section.innerHTML = `
+    <div class="modal-ep-hdr-row">
+      <span>Непросмотрено (${unwatched.length})</span>
+      <span>Спецсерии (${special.length})</span>
+    </div>
+    <div class="modal-ep-cols">
+      <div class="modal-ep-col" id="modalEpLeft">${leftHtml}</div>
+      <div class="modal-ep-col" id="modalEpRight">${rightHtml}</div>
+    </div>`;
+  body.appendChild(section);
+
+  function _updateHeaders() {
+    const hdrs = section.querySelectorAll('.modal-ep-hdr-row span');
+    const lCount = section.querySelectorAll('#modalEpLeft .modal-ep-item').length;
+    const rCount = section.querySelectorAll('#modalEpRight .modal-ep-item').length;
+    if (hdrs[0]) hdrs[0].textContent = `Непросмотрено (${lCount})`;
+    if (hdrs[1]) hdrs[1].textContent = `Спецсерии (${rCount})`;
+    if (!lCount && !rCount) section.remove();
+  }
+
+  function _addMarkBtn(item, hash, label) {
+    const btn = item.querySelector('.mark-btn');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '…';
+      try {
+        const res = await fetch('/api/mark-watched', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: deviceId, card_id: card.card_id, item: hash, profile_id: profileId }),
+        });
+        if (res.ok) {
+          item.remove();
+          const right = section.querySelector('#modalEpRight');
+          right.querySelector('.modal-ep-empty')?.remove();
+          const newItem = document.createElement('div');
+          newItem.className = 'modal-ep-item';
+          newItem.dataset.hash = hash;
+          newItem.innerHTML = `<span class="modal-ep-label">${label}</span><button class="modal-ep-btn unmark unmark-btn">Отменить</button>`;
+          right.appendChild(newItem);
+          _addUnmarkBtn(newItem, hash, label);
+          _updateHeaders();
+          loadHistory(deviceId, _currentProfile);
+        } else { btn.disabled = false; btn.textContent = 'Спецэпизод'; }
+      } catch { btn.disabled = false; btn.textContent = 'Спецэпизод'; }
+    });
+  }
+
+  function _addUnmarkBtn(item, hash, label) {
+    const btn = item.querySelector('.unmark-btn');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '…';
+      try {
+        const res = await fetch('/api/unmark-special', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: deviceId, card_id: card.card_id, item: hash, profile_id: profileId }),
+        });
+        if (res.ok) {
+          item.remove();
+          const left = section.querySelector('#modalEpLeft');
+          left.querySelector('.modal-ep-empty')?.remove();
+          const newItem = document.createElement('div');
+          newItem.className = 'modal-ep-item';
+          newItem.dataset.hash = hash;
+          newItem.innerHTML = `<span class="modal-ep-label">${label}</span><button class="modal-ep-btn mark-btn">Спецэпизод</button>`;
+          left.appendChild(newItem);
+          _addMarkBtn(newItem, hash, label);
+          _updateHeaders();
+          loadHistory(deviceId, _currentProfile);
+        } else { btn.disabled = false; btn.textContent = 'Отменить'; }
+      } catch { btn.disabled = false; btn.textContent = 'Отменить'; }
+    });
+  }
+
+  section.querySelectorAll('.mark-btn').forEach(btn => {
+    const item = btn.closest('.modal-ep-item');
+    _addMarkBtn(item, item.dataset.hash, item.querySelector('.modal-ep-label').textContent);
+  });
+
+  section.querySelectorAll('.unmark-btn').forEach(btn => {
+    const item = btn.closest('.modal-ep-item');
+    _addUnmarkBtn(item, item.dataset.hash, item.querySelector('.modal-ep-label').textContent);
+  });
 }
 
 function _initModal() {
