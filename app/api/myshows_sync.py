@@ -115,15 +115,16 @@ async def _find_tmdb_data(
                     continue
                 results = resp.json().get("results", [])
                 if results:
-                    for item in results:
-                        if item.get(title_key, "").lower() == query.lower():
-                            data = _extract(item)
-                            logger.debug(f"Found by title exact '{query}': '{title}' → tmdb={data['id']}")
-                            if cache is not None:
-                                cache[cache_key] = data
-                            return data
-                    data = _extract(results[0])
-                    logger.debug(f"Found by title first '{query}': '{title}' → tmdb={data['id']} '{data['title']}'")
+                    exact = [r for r in results if r.get(orig_key, "").lower() == query.lower()]
+                    if exact:
+                        # Среди точных совпадений берём самый популярный
+                        best = max(exact, key=lambda r: r.get("popularity", 0))
+                        data = _extract(best)
+                        logger.debug(f"Found by title exact '{query}': '{title}' → tmdb={data['id']} (popularity={best.get('popularity', 0):.1f})")
+                    else:
+                        best = results[0]
+                        data = _extract(best)
+                        logger.debug(f"Found by title first '{query}': '{title}' → tmdb={data['id']} '{data['title']}'")
                     if cache is not None:
                         cache[cache_key] = data
                     return data

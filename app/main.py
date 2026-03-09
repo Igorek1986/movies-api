@@ -350,9 +350,15 @@ async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
     try:
         async with async_session_maker() as db:
             stmt = pg_insert(MediaCard).values([values])
+            # Не затираем непустые поля пустыми значениями
+            update_set = {
+                k: stmt.excluded[k] for k in values
+                if k != "card_id"
+                and not (k in ("poster_path", "overview", "title") and not values[k])
+            }
             stmt = stmt.on_conflict_do_update(
                 index_elements=["card_id"],
-                set_={k: stmt.excluded[k] for k in values if k != "card_id"},
+                set_=update_set,
             )
             await db.execute(stmt)
             await db.commit()
@@ -427,7 +433,7 @@ async def fetch_tmdb_batch(requests_list: list) -> dict:
         try:
             url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}"
             headers = {"Authorization": TMDB_TOKEN}
-            params = {"language": "ru"}
+            params = {"language": "ru-RU"}
             response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             return (media_type, tmdb_id), response.json()

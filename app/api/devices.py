@@ -717,7 +717,8 @@ async def api_media_card(
     result = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
     mc = result.scalar_one_or_none()
 
-    if mc and mc.overview and mc.next_ep_air_date is not None:
+    # Для фильмов кэшируем если есть overview; для сериалов ещё нужен next_ep_air_date
+    if mc and mc.overview and (media_type == "movie" or mc.next_ep_air_date is not None):
         return _mc_to_dict(mc)
 
     # Запрашиваем свежие данные из TMDB
