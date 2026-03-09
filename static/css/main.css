@@ -455,6 +455,21 @@ button.danger-btn {
   cursor: pointer;
 }
 
+.history-search {
+  padding: .45rem .6rem;
+  font-size: 16px;
+  height: auto;
+  width: 180px;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  background: transparent;
+  color: var(--pico-color);
+}
+.history-search:focus {
+  border-color: var(--pico-primary);
+  outline: none;
+}
+
 .history-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

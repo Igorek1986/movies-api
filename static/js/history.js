@@ -21,6 +21,7 @@ let _allCards      = [];
 let _cardMap       = {};
 let _activeFilter  = 'all';
 let _activeSort    = 'watched';
+let _searchQuery   = '';
 let _currentDevice = null;
 let _currentProfile = '';
 
@@ -68,11 +69,20 @@ function _renderCards(cards) {
   const grid = document.getElementById('historyGrid');
   if (!grid) return;
 
-  const filtered = _activeFilter === 'all'
+  let filtered = _activeFilter === 'all'
     ? cards
     : _activeFilter === 'watching'
       ? cards.filter(c => !c.is_complete)
       : cards.filter(c => c.media_type === _activeFilter);
+
+  if (_searchQuery) {
+    const q = _searchQuery.toLowerCase();
+    filtered = filtered.filter(c =>
+      (c.title || '').toLowerCase().includes(q) ||
+      (c.original_title || '').toLowerCase().includes(q)
+    );
+  }
+
   const sorted = _sortCards(filtered);
 
   if (!sorted.length) {
@@ -497,6 +507,15 @@ function initHistory(defaultDeviceId) {
       _savePrefs({ device_id: did, profile_id: null });
       _loadProfileTabs(did, null);
       loadHistory(did, null);
+    });
+  }
+
+  // Поиск
+  const searchInput = document.getElementById('historySearch');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      _searchQuery = searchInput.value.trim();
+      _renderCards(_allCards);
     });
   }
 
