@@ -746,7 +746,7 @@ async def get_category(
             tc_result = await db.execute(select(Timecode).where(*tc_where))
             all_tc = tc_result.scalars().all()
 
-            # Группируем: card_id → {max_pct, last_watched}
+            # Группируем: card_id → {max_pct, last_watched, items}
             agg: dict[str, dict] = {}
             for tc in all_tc:
                 if not re.match(r"^\d+_(movie|tv)$", tc.card_id):
@@ -758,7 +758,7 @@ async def get_category(
                 except Exception:
                     pct = 0
                 if tc.card_id not in agg:
-                    agg[tc.card_id] = {"max_pct": pct, "last_watched": tc.updated_at}
+                    agg[tc.card_id] = {"max_pct": pct, "last_watched": tc.updated_at, "items": {}}
                 else:
                     if pct > agg[tc.card_id]["max_pct"]:
                         agg[tc.card_id]["max_pct"] = pct
@@ -767,11 +767,50 @@ async def get_category(
                         or tc.updated_at > agg[tc.card_id]["last_watched"]
                     ):
                         agg[tc.card_id]["last_watched"] = tc.updated_at
+                agg[tc.card_id]["items"][tc.item] = max(
+                    agg[tc.card_id]["items"].get(tc.item, 0), pct
+                )
+
+            # Загружаем MediaCard для всех card_id (нужны seasons_json для сериалов)
+            mc_all_result = await db.execute(
+                select(MediaCard).where(MediaCard.card_id.in_(list(agg.keys())))
+            )
+            mc_map = {mc.card_id: mc for mc in mc_all_result.scalars().all()}
+
+            today_str = _date.today().isoformat()
+
+            def _is_unfinished(cid: str, v: dict) -> bool:
+                mc = mc_map.get(cid)
+                if cid.endswith("_tv") and mc and mc.seasons_json:
+                    try:
+                        seasons = json.loads(mc.seasons_json)
+                        last_s = mc.last_ep_season or 0
+                        last_e = mc.last_ep_number or 0
+                        total_aired = 0
+                        for s in seasons:
+                            snum = s.get("season_number") or 0
+                            if snum == 0:
+                                continue
+                            ep_count = s.get("episode_count") or 0
+                            if last_s > 0:
+                                if snum < last_s:
+                                    total_aired += ep_count
+                                elif snum == last_s:
+                                    total_aired += last_e
+                            else:
+                                s_air = s.get("air_date") or ""
+                                if s_air and s_air <= today_str:
+                                    total_aired += ep_count
+                        watched = sum(1 for p in v["items"].values() if p >= 90)
+                        return watched < total_aired
+                    except Exception:
+                        pass
+                return v["max_pct"] < 90
 
             unfinished = [
                 (cid, v["max_pct"], v["last_watched"])
                 for cid, v in agg.items()
-                if v["max_pct"] < 90
+                if _is_unfinished(cid, v)
             ]
             unfinished.sort(key=lambda x: x[2] or datetime.min, reverse=True)
 
@@ -787,12 +826,7 @@ async def get_category(
                     "total_results": total,
                 }
 
-            mc_result = await db.execute(
-                select(MediaCard).where(
-                    MediaCard.card_id.in_([x[0] for x in page_items])
-                )
-            )
-            mc_map = {mc.card_id: mc for mc in mc_result.scalars().all()}
+            # mc_map уже загружен выше
 
             results = []
             for cid, pct, _ in page_items:
