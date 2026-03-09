@@ -30,8 +30,8 @@ function _sortCards(cards) {
       const bd = b.release_date || b.year || '0000';
       return bd.localeCompare(ad);
     }
-    if (_activeSort === 'pct_asc')  return (a.max_percent || 0) - (b.max_percent || 0);
-    if (_activeSort === 'pct_desc') return (b.max_percent || 0) - (a.max_percent || 0);
+    if (_activeSort === 'pct_asc')  return (a.progress || 0) - (b.progress || 0);
+    if (_activeSort === 'pct_desc') return (b.progress || 0) - (a.progress || 0);
     return (b.last_watched || '').localeCompare(a.last_watched || '');
   });
 }
@@ -43,7 +43,7 @@ function _renderCards(cards) {
   const filtered = _activeFilter === 'all'
     ? cards
     : _activeFilter === 'watching'
-      ? cards.filter(c => (c.max_percent || 0) < 90)
+      ? cards.filter(c => !c.is_complete)
       : cards.filter(c => c.media_type === _activeFilter);
   const sorted = _sortCards(filtered);
 
@@ -54,17 +54,24 @@ function _renderCards(cards) {
 
   grid.innerHTML = sorted.map(card => {
     _cardMap[card.card_id] = card;
-    const pct = Math.min(100, Math.max(0, card.max_percent || 0));
-    const watched = pct >= WATCHED_THRESHOLD;
+    const pct = Math.min(100, Math.max(0, card.progress ?? card.max_percent ?? 0));
     const poster = card.poster_path
       ? `<img src="${POSTER_BASE}${card.poster_path}" alt="" loading="lazy">`
       : `<div class="card-no-poster">${card.title || '—'}</div>`;
 
+    // Прогресс сериала: "12 / 24 эп."
+    let episodeInfo = '';
+    if (card.media_type === 'tv' && card.watched_episodes != null && card.total_episodes != null) {
+      const ongoing = card.is_ongoing ? ' (онгоинг)' : '';
+      episodeInfo = `<p class="card-eps">${card.watched_episodes} / ${card.total_episodes} эп.${ongoing}</p>`;
+    }
+
     return `
       <div class="media-card" role="button" tabindex="0" data-card-id="${card.card_id}" style="cursor:pointer;">
         ${poster}
-        ${watched ? '<div class="watched-badge">✓</div>' : ''}
+        ${card.is_complete ? '<div class="watched-badge">✓</div>' : ''}
         <div class="card-info">
+          ${episodeInfo}
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
           <p class="card-title">${card.title || card.card_id}</p>
           ${card.year ? `<p class="card-year">${card.year}</p>` : ''}

@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import date
 from typing import Any
 
 import httpx
@@ -503,6 +504,9 @@ async def get_watch_history(
     )
     timecodes = result.scalars().all()
 
+    _WATCHED_PCT = 90
+
+    # Агрегируем по card_id: last_watched + max percent по каждому item (эпизоду)
     card_agg: dict[str, dict] = {}
     for tc in timecodes:
         if not _CARD_ID_RE.match(tc.card_id):
@@ -512,10 +516,10 @@ async def get_watch_history(
         except Exception:
             pct = 0
         if tc.card_id not in card_agg:
-            card_agg[tc.card_id] = {"last_watched": tc.updated_at, "max_percent": pct}
-        else:
-            if pct > card_agg[tc.card_id]["max_percent"]:
-                card_agg[tc.card_id]["max_percent"] = pct
+            card_agg[tc.card_id] = {"last_watched": tc.updated_at, "items": {}}
+        agg = card_agg[tc.card_id]
+        # Для каждого item (эпизода) храним максимальный процент
+        agg["items"][tc.item] = max(agg["items"].get(tc.item, 0), pct)
 
     if not card_agg:
         return []
@@ -525,10 +529,60 @@ async def get_watch_history(
     )
     media_cards = {mc.card_id: mc for mc in mc_result.scalars().all()}
 
+    today_str = date.today().isoformat()
     history = []
     for card_id, agg in card_agg.items():
         mc = media_cards.get(card_id)
         m = _CARD_ID_RE.match(card_id)
+        items = agg["items"]
+        max_pct = max(items.values(), default=0)
+
+        watched_episodes = total_episodes = None
+        is_ongoing = False
+        progress = max_pct
+
+        if card_id.endswith("_tv") and mc and mc.seasons_json:
+            try:
+                seasons = json.loads(mc.seasons_json)
+                last_ep_s = mc.last_ep_season or 0
+                last_ep_e = mc.last_ep_number or 0
+                total_aired = 0
+                total_all = 0
+                for s in seasons:
+                    snum = s.get("season_number") or 0
+                    if snum == 0:
+                        continue  # пропускаем спешлы
+                    ep_count = s.get("episode_count") or 0
+                    total_all += ep_count
+                    if last_ep_s > 0:
+                        if snum < last_ep_s:
+                            total_aired += ep_count
+                        elif snum == last_ep_s:
+                            total_aired += last_ep_e
+                    else:
+                        # Нет данных о последней серии — используем дату сезона
+                        s_air = s.get("air_date") or ""
+                        if s_air and s_air <= today_str:
+                            total_aired += ep_count
+
+                watched_episodes = sum(1 for p in items.values() if p >= _WATCHED_PCT)
+                total_episodes = total_aired
+
+                # Онгоинг: есть невышедшие серии или сериал ещё идёт
+                is_ongoing = (total_all > total_aired) or bool(
+                    mc.last_air_date and mc.last_air_date > today_str
+                )
+                progress = min(round(watched_episodes / total_aired * 100), 100) if total_aired > 0 else 0
+            except Exception:
+                pass
+
+        is_complete = (
+            (watched_episodes is not None and total_episodes is not None
+             and watched_episodes >= total_episodes > 0 and not is_ongoing)
+            if card_id.endswith("_tv")
+            else progress >= _WATCHED_PCT
+        )
+
         entry = {
             "card_id": card_id,
             "tmdb_id": mc.tmdb_id if mc else (int(m.group(1)) if m else None),
@@ -538,7 +592,14 @@ async def get_watch_history(
             "poster_path": mc.poster_path if mc else None,
             "year": mc.year if mc else None,
             "last_watched": agg["last_watched"].isoformat() if agg["last_watched"] else None,
-            "max_percent": agg["max_percent"],
+            "max_percent": max_pct,
+            "progress": progress,
+            "watched_episodes": watched_episodes,
+            "total_episodes": total_episodes,
+            "is_complete": is_complete,
+            "is_ongoing": is_ongoing,
+            "last_ep_season": mc.last_ep_season if mc else None,
+            "last_ep_number": mc.last_ep_number if mc else None,
         }
         history.append(entry)
 

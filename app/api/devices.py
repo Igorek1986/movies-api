@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date as _date
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form
@@ -383,6 +383,8 @@ async def api_history(
     result = await db.execute(q.order_by(Timecode.updated_at.desc()))
     timecodes = result.scalars().all()
 
+    _WATCHED_PCT = 90
+
     card_agg: dict[str, dict] = {}
     for tc in timecodes:
         if not _CARD_ID_RE.match(tc.card_id):
@@ -392,10 +394,9 @@ async def api_history(
         except Exception:
             pct = 0
         if tc.card_id not in card_agg:
-            card_agg[tc.card_id] = {"last_watched": tc.updated_at, "max_percent": pct}
-        else:
-            if pct > card_agg[tc.card_id]["max_percent"]:
-                card_agg[tc.card_id]["max_percent"] = pct
+            card_agg[tc.card_id] = {"last_watched": tc.updated_at, "items": {}}
+        agg = card_agg[tc.card_id]
+        agg["items"][tc.item] = max(agg["items"].get(tc.item, 0), pct)
 
     if not card_agg:
         return []
@@ -405,11 +406,60 @@ async def api_history(
     )
     media_cards = {mc.card_id: mc for mc in mc_result.scalars().all()}
 
+    today_str = _date.today().isoformat()
     history = []
     for card_id, agg in card_agg.items():
         mc = media_cards.get(card_id)
         if not mc:
             continue
+
+        items = agg["items"]
+        max_pct = max(items.values(), default=0)
+
+        watched_episodes = total_episodes = None
+        is_ongoing = False
+        progress = max_pct
+
+        if card_id.endswith("_tv") and mc.seasons_json:
+            try:
+                seasons = json.loads(mc.seasons_json)
+                last_ep_s = mc.last_ep_season or 0
+                last_ep_e = mc.last_ep_number or 0
+                total_aired = 0
+                total_all = 0
+                for s in seasons:
+                    snum = s.get("season_number") or 0
+                    if snum == 0:
+                        continue
+                    ep_count = s.get("episode_count") or 0
+                    total_all += ep_count
+                    if last_ep_s > 0:
+                        if snum < last_ep_s:
+                            total_aired += ep_count
+                        elif snum == last_ep_s:
+                            total_aired += last_ep_e
+                    else:
+                        # Нет данных о последней серии — используем дату сезона
+                        s_air = s.get("air_date") or ""
+                        if s_air and s_air <= today_str:
+                            total_aired += ep_count
+
+                watched_episodes = sum(1 for p in items.values() if p >= _WATCHED_PCT)
+                total_episodes = total_aired
+                is_ongoing = (total_all > total_aired) or bool(
+                    mc.last_air_date and mc.last_air_date > today_str
+                )
+                progress = min(round(watched_episodes / total_aired * 100), 100) if total_aired > 0 else 0
+            except Exception:
+                pass
+
+        is_complete = (
+            (watched_episodes is not None and total_episodes is not None
+             and watched_episodes >= total_episodes > 0 and not is_ongoing)
+            if card_id.endswith("_tv")
+            else progress >= _WATCHED_PCT
+        )
+
         history.append({
             "card_id": card_id,
             "media_type": mc.media_type,
@@ -418,7 +468,12 @@ async def api_history(
             "year": mc.year,
             "release_date": mc.release_date,
             "last_watched": agg["last_watched"].isoformat() if agg["last_watched"] else None,
-            "max_percent": agg["max_percent"],
+            "max_percent": max_pct,
+            "progress": progress,
+            "watched_episodes": watched_episodes,
+            "total_episodes": total_episodes,
+            "is_complete": is_complete,
+            "is_ongoing": is_ongoing,
         })
 
     history.sort(key=lambda x: x["last_watched"] or "", reverse=True)
