@@ -15,6 +15,7 @@ const _IMG_BASE      = (window.TMDB_IMAGE_BASE || 'https://image.tmdb.org');
 const POSTER_BASE    = _IMG_BASE + '/t/p/w300';
 const BACKDROP_BASE  = _IMG_BASE + '/t/p/w780';
 const WATCHED_THRESHOLD = 90;
+const _PREFS_KEY = 'history_prefs';
 
 let _allCards      = [];
 let _cardMap       = {};
@@ -22,6 +23,15 @@ let _activeFilter  = 'all';
 let _activeSort    = 'watched';
 let _currentDevice = null;
 let _currentProfile = '';
+
+function _loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(_PREFS_KEY) || '{}'); } catch { return {}; }
+}
+
+function _savePrefs(patch) {
+  const prefs = Object.assign(_loadPrefs(), patch);
+  try { localStorage.setItem(_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
 
 function _sortCards(cards) {
   return [...cards].sort((a, b) => {
@@ -125,6 +135,7 @@ async function _loadProfileTabs(deviceId, currentProfileId) {
         btn.classList.add('active');
         const pid = btn.dataset.profileNull ? null : btn.dataset.profile;
         _currentProfile = pid;
+        _savePrefs({ profile_id: pid });
         loadHistory(deviceId, pid);
       });
 
@@ -266,12 +277,25 @@ function initHistory(defaultDeviceId) {
     watching: document.getElementById('historyFilterWatching'),
   };
 
+  // Восстановить сохранённые настройки
+  const prefs = _loadPrefs();
+  if (prefs.filter) _activeFilter = prefs.filter;
+  if (prefs.sort)   _activeSort   = prefs.sort;
+
+  // Активировать нужную кнопку фильтра
+  Object.entries(filterBtns).forEach(([type, btn]) => {
+    if (!btn) return;
+    if (type === _activeFilter) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+
   // Сортировка
   const sortSelect = document.getElementById('historySortSelect');
   if (sortSelect) {
     sortSelect.value = _activeSort;
     sortSelect.addEventListener('change', () => {
       _activeSort = sortSelect.value;
+      _savePrefs({ sort: _activeSort });
       _renderCards(_allCards);
     });
   }
@@ -283,15 +307,21 @@ function initHistory(defaultDeviceId) {
       Object.values(filterBtns).forEach(b => b && b.classList.remove('active'));
       btn.classList.add('active');
       _activeFilter = type;
+      _savePrefs({ filter: _activeFilter });
       _renderCards(_allCards);
     });
   });
 
   // Смена устройства
   if (deviceSelect && deviceSelect.tagName === 'SELECT') {
+    // Восстановить сохранённое устройство
+    if (prefs.device_id && deviceSelect.querySelector(`option[value="${prefs.device_id}"]`)) {
+      deviceSelect.value = prefs.device_id;
+    }
     deviceSelect.addEventListener('change', () => {
       const did = parseInt(deviceSelect.value);
       _currentProfile = null;
+      _savePrefs({ device_id: did, profile_id: null });
       _loadProfileTabs(did, null);
       loadHistory(did, null);
     });
@@ -299,10 +329,25 @@ function initHistory(defaultDeviceId) {
 
   _initModal();
 
-  const startId = defaultDeviceId
+  const savedDevice = prefs.device_id
+    && deviceSelect?.querySelector(`option[value="${prefs.device_id}"]`)
+    ? prefs.device_id : null;
+
+  // savedDevice имеет приоритет над defaultDeviceId (который всегда devices[0])
+  const startId = savedDevice
+    || defaultDeviceId
     || (deviceSelect ? parseInt(deviceSelect.value) : null);
+
   if (startId) {
-    _loadProfileTabs(startId, null);
-    loadHistory(startId, null);
+    // Синхронизируем select с реальным стартовым устройством
+    if (deviceSelect && deviceSelect.tagName === 'SELECT') {
+      deviceSelect.value = startId;
+    }
+    _savePrefs({ device_id: startId });
+
+    // profile_id: null = «все профили»; undefined = «не было сохранено» → null
+    const savedProfile = prefs.hasOwnProperty('profile_id') ? prefs.profile_id : null;
+    _loadProfileTabs(startId, savedProfile);
+    loadHistory(startId, savedProfile);
   }
 }
