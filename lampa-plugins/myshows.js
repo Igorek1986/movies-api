@@ -868,7 +868,7 @@
         });
 
         // 1. Пробуем найти по IMDB
-        getShowIdByImdbId(imdbId, function(imdbResult) {
+        getShowIdByImdbId(imdbId, originalTitle || title, function(imdbResult) {
             if (imdbResult) {
                 Log.info('Found by IMDB ID:', imdbResult);
                 return callback(imdbResult);
@@ -1262,15 +1262,32 @@
         });
     }
 
-    function getShowIdByImdbId(id, callback) {
+    function getShowIdByImdbId(id, expectedTitle, callback) {
         if (!id) {
             callback(null);
-            return
+            return;
         }
         var cleanImdbId = id.indexOf('tt') === 0 ? id.slice(2) : id;
-        getShowIdBySource(cleanImdbId, 'imdb', function(myshows_id) {
-            callback(myshows_id);
-        })
+        makeMyShowsJSONRPCRequest('shows.GetByExternalId', {
+            id: parseInt(cleanImdbId),
+            source: 'imdb'
+        }, function(success, data) {
+            if (success && data && data.result) {
+                var found = data.result;
+                if (expectedTitle) {
+                    var foundTitle = (found.titleOriginal || found.title || '').toLowerCase();
+                    var exp = expectedTitle.toLowerCase();
+                    if (foundTitle.indexOf(exp) === -1 && exp.indexOf(foundTitle) === -1) {
+                        Log.warn('IMDB mismatch: expected "' + expectedTitle + '" got "' + (found.titleOriginal || found.title) + '" — skip');
+                        callback(null);
+                        return;
+                    }
+                }
+                callback(found.id);
+            } else {
+                callback(null);
+            }
+        });
     }
 
     function getShowIdByKinopiskId(id, callback) {
