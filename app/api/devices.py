@@ -931,6 +931,27 @@ async def api_mark_watched(
     return {"ok": True}
 
 
+@router.delete("/api/card-timecodes")
+async def api_delete_card_timecodes(
+    device_id: int = Query(...),
+    card_id: str = Query(...),
+    profile_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Удаляет все таймкоды карточки для устройства (и опционально профиля)."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    where = [Timecode.device_id == device_id, Timecode.card_id == card_id]
+    if profile_id is not None:
+        where.append(Timecode.lampa_profile_id == profile_id)
+    await db.execute(delete(Timecode).where(*where))
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/api/unmark-special")
 async def api_unmark_special(
     body: _MarkWatchedBody,

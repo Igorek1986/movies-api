@@ -252,9 +252,34 @@ function _fillModalContent(modal, card, full) {
     </div>
     ${overview}
     <div class="modal-progress-row">
-      ${watched ? '✓ Просмотрено' : `Просмотрено ${pct}%`}${lastWatched ? ` · ${lastWatched}` : ''}
+      <div class="modal-progress-top">
+        <span>${watched ? '✓ Просмотрено' : `Просмотрено ${pct}%`}${lastWatched ? ` · ${lastWatched}` : ''}</span>
+        ${_currentDevice ? `<button class="modal-delete-btn" id="modalDeleteBtn" title="Удалить историю просмотра">🗑</button>` : ''}
+      </div>
       <div class="modal-progress-bar"><div class="modal-progress-fill" style="width:${pct}%"></div></div>
     </div>`;
+
+  // Кнопка удаления таймкодов
+  const deleteBtn = document.getElementById('modalDeleteBtn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('Удалить историю просмотра этой карточки?')) return;
+      deleteBtn.disabled = true;
+      const profileParam = _currentProfile != null ? `&profile_id=${encodeURIComponent(_currentProfile)}` : '';
+      try {
+        const res = await fetch(
+          `/api/card-timecodes?device_id=${_currentDevice}&card_id=${encodeURIComponent(card.card_id)}${profileParam}`,
+          { method: 'DELETE' }
+        );
+        if (res.ok) {
+          document.getElementById('cardModal')?.close();
+          await loadHistory(_currentDevice, _currentProfile);
+        } else {
+          deleteBtn.disabled = false;
+        }
+      } catch { deleteBtn.disabled = false; }
+    });
+  }
 }
 
 async function openCardModal(cardId) {
