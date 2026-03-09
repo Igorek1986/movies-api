@@ -46,6 +46,24 @@ function _sortCards(cards) {
   });
 }
 
+function _updateFilterCounts(cards) {
+  const counts = {
+    all:      cards.length,
+    movie:    cards.filter(c => c.media_type === 'movie').length,
+    tv:       cards.filter(c => c.media_type === 'tv').length,
+    watching: cards.filter(c => !c.is_complete).length,
+  };
+  const labels = { all: 'Все', movie: 'Фильмы', tv: 'Сериалы', watching: 'В&nbspпроцессе' };
+  const ids = {
+    all: 'historyFilterAll', movie: 'historyFilterMovie',
+    tv: 'historyFilterTv', watching: 'historyFilterWatching',
+  };
+  Object.entries(ids).forEach(([type, id]) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.innerHTML = `${labels[type]}&nbsp;(${counts[type]})`;
+  });
+}
+
 function _renderCards(cards) {
   const grid = document.getElementById('historyGrid');
   if (!grid) return;
@@ -184,6 +202,7 @@ async function loadHistory(deviceId, profileId = null) {
     const res = await fetch(url);
     if (!res.ok) { grid.innerHTML = '<p class="history-empty">Ошибка загрузки</p>'; return; }
     _allCards = await res.json();
+    _updateFilterCounts(_allCards);
     _renderCards(_allCards);
   } catch {
     grid.innerHTML = '<p class="history-empty">Ошибка соединения</p>';

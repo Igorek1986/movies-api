@@ -90,7 +90,7 @@ def lampa_hash(s: str) -> str:
 
 def build_episode_hash_string(season: int, episode: int, original_title: str) -> str:
     """Формирует строку для хэширования эпизода"""
-    if season >= 10:
+    if season > 10:
         return f"{season}:{episode}{original_title}"
     else:
         return f"{season}{episode}{original_title}"

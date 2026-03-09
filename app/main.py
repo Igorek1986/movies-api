@@ -7,7 +7,7 @@ import re
 import httpx
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, date as _date
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -77,6 +77,10 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Отключаем verbose DEBUG-логи httpx/httpcore
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -340,6 +344,7 @@ async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
             "last_ep_number": (data.get("last_episode_to_air") or {}).get(
                 "episode_number"
             ),
+            "next_ep_air_date": (data.get("next_episode_to_air") or {}).get("air_date") or "",
         }
 
     try:

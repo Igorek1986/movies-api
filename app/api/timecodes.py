@@ -206,7 +206,7 @@ async def _fetch_and_store_media_card(
                 return
             data = resp.json()
 
-        date = data.get(date_key) or ""
+        date_val = data.get(date_key) or ""
         values: dict = {
             "card_id": card_id,
             "tmdb_id": tmdb_id,
@@ -214,11 +214,11 @@ async def _fetch_and_store_media_card(
             "title": data.get(title_key) or "",
             "original_title": data.get(orig_key) or "",
             "poster_path": data.get("poster_path") or "",
-            "year": date[:4],
+            "year": date_val[:4],
             "backdrop_path": data.get("backdrop_path") or "",
             "overview": data.get("overview") or "",
             "vote_average": data.get("vote_average"),
-            "release_date": date,
+            "release_date": date_val,
         }
         if media_type == "tv":
             seasons = data.get("seasons")
@@ -228,6 +228,7 @@ async def _fetch_and_store_media_card(
             last_ep = data.get("last_episode_to_air") or {}
             values["last_ep_season"] = last_ep.get("season_number")
             values["last_ep_number"] = last_ep.get("episode_number")
+            values["next_ep_air_date"] = (data.get("next_episode_to_air") or {}).get("air_date") or ""
 
         async with async_session_maker() as db:
             mc_stmt = pg_insert(MediaCard).values([values])
@@ -568,10 +569,11 @@ async def get_watch_history(
                 watched_episodes = sum(1 for p in items.values() if p >= _WATCHED_PCT)
                 total_episodes = total_aired
 
-                # Онгоинг: есть невышедшие серии или сериал ещё идёт
-                is_ongoing = (total_all > total_aired) or bool(
-                    mc.last_air_date and mc.last_air_date > today_str
-                )
+                # Онгоинг: next_ep_air_date если данные свежие, иначе старая логика
+                if mc.next_ep_air_date is not None:
+                    is_ongoing = bool(mc.next_ep_air_date) or bool(mc.last_air_date and mc.last_air_date > today_str)
+                else:
+                    is_ongoing = (total_all > total_aired) or bool(mc.last_air_date and mc.last_air_date > today_str)
                 progress = min(round(watched_episodes / total_aired * 100), 100) if total_aired > 0 else 0
             except Exception:
                 pass

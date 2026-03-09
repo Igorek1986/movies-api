@@ -67,7 +67,7 @@ async def _find_tmdb_data(
             "year": date[:4],
         }
 
-    # 1. By IMDB ID
+    # 1. By IMDB ID (с валидацией названия — у MyShows бывают неверные IMDB ID)
     if imdb_id:
         try:
             imdb_clean = str(imdb_id).replace("tt", "")
@@ -80,9 +80,24 @@ async def _find_tmdb_data(
                 results = resp.json().get("tv_results" if is_tv else "movie_results", [])
                 if results:
                     data = _extract(results[0])
-                    if cache is not None:
-                        cache[cache_key] = data
-                    return data
+                    # Проверяем, что найденный сериал хоть как-то совпадает с ожидаемым
+                    found_title = (results[0].get(title_key) or "").lower()
+                    found_orig = (results[0].get(orig_key) or "").lower()
+                    expect_titles = {t.lower() for t in [title, original_title] if t}
+                    title_ok = any(
+                        et in found_title or found_title in et or
+                        et in found_orig or found_orig in et
+                        for et in expect_titles
+                    )
+                    if title_ok:
+                        logger.debug(f"Found by IMDB {imdb_id}: '{title}' → tmdb={data['id']} '{data['title']}'")
+                        if cache is not None:
+                            cache[cache_key] = data
+                        return data
+                    logger.warning(
+                        f"IMDB {imdb_id} вернул '{results[0].get(title_key)}' "
+                        f"вместо '{title}' — пропускаю, ищу по названию"
+                    )
         except Exception as e:
             logger.warning(f"IMDB lookup error for '{title}': {e}")
 
@@ -95,19 +110,25 @@ async def _find_tmdb_data(
                 if search_year:
                     params["first_air_date_year" if is_tv else "year"] = search_year
                 resp = await client.get(endpoint, params=params, headers=headers, timeout=10)
-                if resp.status_code == 200:
-                    results = resp.json().get("results", [])
-                    if results:
-                        for item in results:
-                            if item.get(title_key, "").lower() == query.lower():
-                                data = _extract(item)
-                                if cache is not None:
-                                    cache[cache_key] = data
-                                return data
-                        data = _extract(results[0])
-                        if cache is not None:
-                            cache[cache_key] = data
-                        return data
+                if resp.status_code != 200:
+                    logger.warning(f"TMDB search {resp.status_code} for '{query}' year={search_year}")
+                    continue
+                results = resp.json().get("results", [])
+                if results:
+                    for item in results:
+                        if item.get(title_key, "").lower() == query.lower():
+                            data = _extract(item)
+                            logger.debug(f"Found by title exact '{query}': '{title}' → tmdb={data['id']}")
+                            if cache is not None:
+                                cache[cache_key] = data
+                            return data
+                    data = _extract(results[0])
+                    logger.debug(f"Found by title first '{query}': '{title}' → tmdb={data['id']} '{data['title']}'")
+                    if cache is not None:
+                        cache[cache_key] = data
+                    return data
+                else:
+                    logger.debug(f"TMDB search empty: query='{query}' year={search_year}")
             except Exception as e:
                 logger.warning(f"Title search error for '{query}': {e}")
 
@@ -120,7 +141,7 @@ def _lampa_hash_for_movie(movie: dict) -> str:
 
 
 def _lampa_hash_for_episode(season: int, episode: int, show_title: str) -> str:
-    season_prefix = f"{season}:" if season >= 10 else str(season)
+    season_prefix = f"{season}:" if season > 10 else str(season)
     return str(lampa_hash(f"{season_prefix}{episode}{show_title}"))
 
 
@@ -140,6 +161,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
     all_media_cards: list[dict] = []
     tmdb_cache: dict = {}
     stats = {"movies_ok": 0, "movies_err": 0, "shows_ok": 0, "shows_err": 0}
+    not_found: list[str] = []
 
     try:
         yield _sse({"type": "status", "message": "Авторизация в MyShows…"})
@@ -204,7 +226,9 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                     })
                     stats["movies_ok"] += 1
                 else:
-                    logger.info(f"Not found in TMDB: movie '{title}' ({movie.get('year', '')})")
+                    label = f"{title} ({movie.get('year', '')})"
+                    logger.warning(f"Not found in TMDB: movie '{label}'")
+                    not_found.append(f"🎬 {label}")
                     stats["movies_err"] += 1
 
                 if (idx + 1) % 10 == 0 or idx + 1 == len(movies):
@@ -244,7 +268,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         stats["shows_ok"] += 1
                         continue
 
-                    show_title = show_details.get("titleOriginal") or show_details.get("title", "")
+                    show_title_myshows = show_details.get("titleOriginal") or show_details.get("title", "")
                     show_tmdb_data = await _find_tmdb_data(
                         client,
                         title=show_details.get("title", ""),
@@ -254,7 +278,9 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         is_tv=True, cache=tmdb_cache,
                     )
                     if not show_tmdb_data:
-                        logger.info(f"Not found in TMDB: show '{show_details.get('title', '')}' ({show_details.get('year', '')})")
+                        label = f"{show_details.get('title', '')} ({show_details.get('year', '')})"
+                        logger.warning(f"Not found in TMDB: show '{label}'")
+                        not_found.append(f"📺 {label}")
                         stats["shows_err"] += 1
                         continue
                     tmdb_id = show_tmdb_data["id"]
@@ -286,7 +312,8 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         watch_date = _parse_watch_date(watched_ep.get("watchDate"))
                         all_timecodes.append({
                             "card_id": card_id_tv,
-                            "item": _lampa_hash_for_episode(season, episode, show_title),
+                            "item": _lampa_hash_for_episode(season, episode,
+                                    show_tmdb_data["original_title"] or show_title_myshows),
                             "data": json.dumps({"duration": duration, "time": duration, "percent": 100}),
                             "updated_at": watch_date,
                         })
@@ -357,6 +384,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
             "type": "done",
             "added": len(all_timecodes),
             "stats": stats,
+            "not_found": not_found,
             "message": (
                 f"Готово! Таймкодов: {len(all_timecodes)}. "
                 f"Обработано: {total_ok}, не найдено в TMDB: {total_err}."

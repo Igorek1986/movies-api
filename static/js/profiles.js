@@ -284,10 +284,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     + (evt.name ? ` — ${evt.name}` : '');
                 }
                 break;
-              case 'done':
-                status.textContent = evt.message + ' Обновление…';
-                setTimeout(() => location.reload(), 1500);
+              case 'done': {
+                const notFound = evt.not_found || [];
+                if (notFound.length) {
+                  const list = notFound.map(s => `<li>${s}</li>`).join('');
+                  status.innerHTML = evt.message
+                    + `<br><b>Не найдено в TMDB (${notFound.length}):</b><ul style="margin:.4em 0 0 1em;text-align:left">${list}</ul>`;
+                  setTimeout(() => location.reload(), 6000);
+                } else {
+                  status.textContent = evt.message + ' Обновление…';
+                  setTimeout(() => location.reload(), 1500);
+                }
                 break;
+              }
               case 'error':
                 status.textContent = '❌ ' + evt.message;
                 break;

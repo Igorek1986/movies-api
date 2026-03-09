@@ -446,9 +446,10 @@ async def api_history(
 
                 watched_episodes = sum(1 for p in items.values() if p >= _WATCHED_PCT)
                 total_episodes = total_aired
-                is_ongoing = (total_all > total_aired) or bool(
-                    mc.last_air_date and mc.last_air_date > today_str
-                )
+                if mc.next_ep_air_date is not None:
+                    is_ongoing = bool(mc.next_ep_air_date) or bool(mc.last_air_date and mc.last_air_date > today_str)
+                else:
+                    is_ongoing = (total_all > total_aired) or bool(mc.last_air_date and mc.last_air_date > today_str)
                 progress = min(round(watched_episodes / total_aired * 100), 100) if total_aired > 0 else 0
             except Exception:
                 pass
@@ -716,7 +717,7 @@ async def api_media_card(
     result = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
     mc = result.scalar_one_or_none()
 
-    if mc and mc.overview:
+    if mc and mc.overview and mc.next_ep_air_date is not None:
         return _mc_to_dict(mc)
 
     # Запрашиваем свежие данные из TMDB
@@ -732,7 +733,7 @@ async def api_media_card(
     headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}",
                 headers=headers,
@@ -750,7 +751,8 @@ async def api_media_card(
         raise HTTPException(status_code=404, detail="Не найдено в TMDB")
 
     data = resp.json()
-    date = data.get(date_key) or ""
+
+    date_val = data.get(date_key) or ""
     values: dict = {
         "card_id": card_id,
         "tmdb_id": tmdb_id,
@@ -761,8 +763,8 @@ async def api_media_card(
         "backdrop_path": data.get("backdrop_path") or "",
         "overview": data.get("overview") or "",
         "vote_average": data.get("vote_average"),
-        "year": date[:4],
-        "release_date": date,
+        "year": date_val[:4],
+        "release_date": date_val,
     }
     if media_type == "tv":
         seasons = data.get("seasons")
@@ -772,6 +774,7 @@ async def api_media_card(
         last_ep = data.get("last_episode_to_air") or {}
         values["last_ep_season"] = last_ep.get("season_number")
         values["last_ep_number"] = last_ep.get("episode_number")
+        values["next_ep_air_date"] = (data.get("next_episode_to_air") or {}).get("air_date") or ""
 
     stmt = pg_insert(MediaCard).values([values])
     stmt = stmt.on_conflict_do_update(
