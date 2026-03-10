@@ -115,6 +115,7 @@ async def profiles_page(
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": current_user.totp_enabled,
         "backup_codes_count": backup_codes_count(current_user.backup_codes),
+        "success": request.query_params.get("success"),
         **_import_ctx(current_user),
     })
 
@@ -244,12 +245,13 @@ async def clear_device_timecodes(
     if not current_user:
         raise HTTPException(status_code=401)
 
-    await _get_device_or_404(device_id, current_user, db)
+    device = await _get_device_or_404(device_id, current_user, db)
     await db.execute(delete(Timecode).where(Timecode.device_id == device_id))
     await db.commit()
 
     logger.info(f"Timecodes cleared: device_id={device_id}, user={current_user.username}")
-    return RedirectResponse(url="/profiles", status_code=302)
+    from urllib.parse import quote
+    return RedirectResponse(url=f"/profiles?success={quote(f'Таймкоды устройства «{device.name}» удалены')}", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +522,17 @@ async def api_profile_ids(
 
     all_ids = sorted((lp_map.keys() | tc_ids) - {""})
 
+    # Кол-во таймкодов для каждого профиля (включая основной "")
+    tc_counts: dict[str, int] = {}
+    for pid in list(all_ids) + [""]:
+        cnt = await db.execute(
+            select(func.count()).select_from(Timecode).where(
+                Timecode.device_id == device_id,
+                Timecode.lampa_profile_id == pid,
+            )
+        )
+        tc_counts[pid] = cnt.scalar() or 0
+
     # "Основной" (пустой profile_id) доступен если у него есть таймкоды
     # ИЛИ если лимит профилей не исчерпан
     lp_count = len(lp_map)
@@ -527,13 +540,11 @@ async def api_profile_ids(
     основной_has_tc = "" in tc_ids
     основной_available = основной_has_tc or (limit is None or lp_count < limit)
 
-    return {
-        "profiles": [
-            {"profile_id": pid, "name": lp_map.get(pid, "")}
-            for pid in all_ids
-        ],
-        "основной_available": основной_available,
-    }
+    profiles = [{"profile_id": pid, "name": lp_map.get(pid, ""), "timecodes_count": tc_counts.get(pid, 0)} for pid in all_ids]
+    if основной_has_tc:
+        profiles.insert(0, {"profile_id": "", "name": "Основной", "timecodes_count": tc_counts.get("", 0)})
+
+    return {"profiles": profiles, "основной_available": основной_available}
 
 
 class _ProfileNameBody(BaseModel):
@@ -638,6 +649,27 @@ async def api_create_lampa_profile(
     await db.refresh(lp)
 
     return {"ok": True, "profile_id": profile_id, "name": name}
+
+
+@router.post("/api/lampa-profile/clear")
+async def api_clear_lampa_profile(
+    device_id: int = Query(...),
+    profile_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Удаляет таймкоды профиля, сам профиль не трогает."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+    result = await db.execute(
+        delete(Timecode).where(
+            Timecode.device_id == device_id,
+            Timecode.lampa_profile_id == profile_id,
+        )
+    )
+    await db.commit()
+    return {"ok": True, "deleted": result.rowcount}
 
 
 @router.delete("/api/lampa-profile")

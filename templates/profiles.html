@@ -50,7 +50,7 @@
         </thead>
         <tbody>
         {% for p in profiles %}
-          <tr>
+          <tr data-device-id="{{ p.id }}">
             <td data-label="Устройство"><strong>{{ p.name }}</strong></td>
             <td data-label="Токен">
               <code class="api-key-mono" title="Нажмите, чтобы скопировать"

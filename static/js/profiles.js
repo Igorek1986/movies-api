@@ -457,23 +457,28 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!profiles.length) {
         lpList.innerHTML = '<p class="muted small">Профилей нет. Они появятся автоматически при первом использовании или после создания вручную.</p>';
       } else {
-        lpList.innerHTML = `<table style="margin:0;"><tbody>${
+        lpList.innerHTML = `<div style="display:flex;flex-direction:column;gap:.4rem">${
           profiles.map(p => `
-            <tr data-pid="${p.profile_id}">
-              <td style="font-family:var(--pico-font-family-monospace);font-size:.8rem;color:var(--pico-muted-color);width:30%">${p.profile_id || '(основной)'}</td>
-              <td><span class="lp-name">${p.name || '—'}</span></td>
-              <td style="white-space:nowrap;text-align:right;" class="actions-cell">
-                <button class="btn-sm outline lp-rename-btn" data-pid="${p.profile_id}" data-name="${p.name || ''}">✎</button>
-                ${p.profile_id ? `<form method="POST" style="margin:0"><button type="button" class="btn-sm outline danger-btn lp-delete-btn" data-pid="${p.profile_id}">Удалить</button></form>` : ''}
-              </td>
-            </tr>`
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.5rem .75rem;
+                        border:1px solid var(--pico-table-border-color);border-radius:var(--pico-border-radius)">
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:500">${p.name || p.profile_id || 'Основной'}</div>
+                <div style="font-size:.8rem;color:var(--pico-muted-color)">
+                  ${p.profile_id ? `ID: <code>${p.profile_id}</code> · ` : ''}таймкодов: <strong>${p.timecodes_count}</strong>
+                </div>
+              </div>
+              <div style="display:flex;gap:.35rem;flex-shrink:0">
+                ${p.profile_id ? `<button class="btn-sm outline lp-rename-btn" data-pid="${p.profile_id}" data-name="${p.name || ''}" title="Переименовать">✎</button>` : ''}
+                <button class="btn-sm outline secondary lp-clear-btn" data-pid="${p.profile_id}" data-name="${p.name || p.profile_id || 'Основной'}" ${p.timecodes_count === 0 ? 'disabled' : ''}>Очистить</button>
+                ${p.profile_id ? `<button class="btn-sm outline danger-btn lp-delete-btn" data-pid="${p.profile_id}" data-name="${p.name || p.profile_id}">Удалить</button>` : ''}
+              </div>
+            </div>`
           ).join('')
-        }</tbody></table>`;
+        }</div>`;
 
         lpList.querySelectorAll('.lp-rename-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
-            const current = btn.dataset.name || '';
-            const name = window.prompt('Новое название:', current);
+            const name = window.prompt('Новое название:', btn.dataset.name || '');
             if (name === null) return;
             await fetch('/api/profile-name', {
               method: 'POST',
@@ -484,14 +489,31 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         });
 
+        lpList.querySelectorAll('.lp-clear-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            if (!confirm(`Очистить таймкоды профиля «${btn.dataset.name}»? Профиль останется.`)) return;
+            btn.disabled = true;
+            await fetch(`/api/lampa-profile/clear?device_id=${deviceId}&profile_id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'POST' });
+            _lpLoad();
+          });
+        });
+
         lpList.querySelectorAll('.lp-delete-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
-            if (!confirm(`Удалить профиль «${btn.dataset.pid}» и все его таймкоды?`)) return;
+            if (!confirm(`Удалить профиль «${btn.dataset.name}» и все его таймкоды?`)) return;
             await fetch(`/api/lampa-profile?device_id=${deviceId}&profile_id=${encodeURIComponent(btn.dataset.pid)}`, { method: 'DELETE' });
             _lpLoad();
             _refreshAllProfileSelects();
           });
         });
+      }
+
+      // Обновляем счётчик таймкодов в строке таблицы устройств
+      const total = profiles.reduce((s, p) => s + (p.timecodes_count || 0), 0);
+      const row = document.querySelector(`tr[data-device-id="${deviceId}"]`);
+      if (row) {
+        const cell = row.querySelector('td[data-label="Таймкодов"]');
+        if (cell) cell.textContent = total;
       }
 
       // Обновляем квоту
