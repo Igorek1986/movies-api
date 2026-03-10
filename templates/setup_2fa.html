@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Настройка 2FA — NUMParser{% endblock %}
+
+{% block body %}
+<main class="container" style="max-width:560px">
+  <article>
+    <hgroup>
+      <h2>Настройка двухфакторной аутентификации</h2>
+      <p>Отсканируйте QR-код в Google Authenticator, Aegis или другом TOTP-приложении</p>
+    </hgroup>
+
+    {% if error %}
+    <p role="alert" class="alert-error">{{ error }}</p>
+    {% endif %}
+
+    <div style="text-align:center;margin:1rem 0">
+      <img src="{{ qr_data_uri }}" alt="QR-код 2FA" style="width:200px;height:200px;border-radius:var(--pico-border-radius)">
+    </div>
+
+    <details style="margin-bottom:1rem">
+      <summary class="muted small" style="cursor:pointer">Ввести ключ вручную</summary>
+      <code style="word-break:break-all;display:block;margin-top:.5rem;padding:.5rem;background:var(--pico-code-background)">{{ secret }}</code>
+    </details>
+
+    <hr>
+
+    <form method="POST" action="/profile/2fa/enable">
+      <label for="code">
+        Код подтверждения (6 цифр из приложения)
+        <input type="text" id="code" name="code" required autofocus
+               autocomplete="off" inputmode="numeric" maxlength="6" pattern="[0-9]{6}">
+      </label>
+      <button type="submit">Включить 2FA</button>
+    </form>
+
+    <p class="auth-link"><a href="/profiles">← Отмена</a></p>
+  </article>
+</main>
+{% endblock %}

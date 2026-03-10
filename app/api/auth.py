@@ -11,9 +11,14 @@ from sqlalchemy import select, delete
 
 from app.db.database import get_db
 import string
-from app.db.models import User, PasswordResetToken, TelegramUser
+import json as _json
+from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending
 from app.api.devices import _devices_with_stats, DEVICE_LIMITS
-from app.utils import hash_password, verify_password, generate_api_key, validate_password, validate_name
+from app.utils import (
+    hash_password, verify_password, generate_api_key, validate_password, validate_name,
+    generate_totp_secret, get_totp_uri, verify_totp, make_totp_qr_base64,
+    generate_backup_codes, verify_backup_code, backup_codes_count,
+)
 from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app import rate_limit
@@ -26,6 +31,8 @@ settings = get_settings()
 COOKIE_NAME = "session_key"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 дней
 RESET_CODE_TTL_MINUTES = 15
+PENDING_2FA_COOKIE = "2fa_pending"
+PENDING_2FA_TTL = 600  # 10 мин
 
 
 def _set_session_cookie(response, session_key: str):
@@ -50,6 +57,8 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "device_limit": DEVICE_LIMITS.get(user.role, 3),
         "tg_linked": tg is not None,
         "tg_username": tg.username if (tg and tg.username) else None,
+        "totp_enabled": user.totp_enabled,
+        "backup_codes_count": backup_codes_count(user.backup_codes),
         **extra,
     }
 
@@ -90,6 +99,20 @@ async def login_submit(
         })
 
     rate_limit.clear_login(ip)
+
+    # Если включена 2FA — перенаправляем на страницу проверки кода
+    if user.totp_enabled:
+        pending_token = generate_api_key()
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=PENDING_2FA_TTL)
+        db.add(Totp2faPending(user_id=user.id, token=pending_token, expires_at=expires_at))
+        await db.commit()
+        response = RedirectResponse(url="/verify-2fa", status_code=status.HTTP_302_FOUND)
+        response.set_cookie(
+            key=PENDING_2FA_COOKIE, value=pending_token,
+            httponly=True, max_age=PENDING_2FA_TTL, samesite="lax",
+        )
+        return response
+
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, user.session_key)
     return response
@@ -174,6 +197,7 @@ async def change_password(
     current_password: str = Form(...),
     new_password: str = Form(...),
     new_password_confirm: str = Form(...),
+    totp_code: str = Form(""),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -187,6 +211,10 @@ async def change_password(
 
     if not verify_password(current_password, current_user.password_hash):
         return await _err("Неверный текущий пароль")
+
+    if current_user.totp_enabled:
+        if not verify_totp(current_user.totp_secret, totp_code.strip()):
+            return await _err("Неверный код 2FA")
 
     if verify_password(new_password, current_user.password_hash):
         return await _err("Новый пароль не должен совпадать с текущим")
@@ -214,6 +242,7 @@ async def change_password(
 async def delete_account(
     request: Request,
     password: str = Form(...),
+    totp_code: str = Form(""),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -224,6 +253,12 @@ async def delete_account(
         return templates.TemplateResponse(
             "profiles.html",
             await _profiles_ctx(request, current_user, db, error="Неверный пароль"),
+        )
+
+    if current_user.totp_enabled and not verify_totp(current_user.totp_secret, totp_code.strip()):
+        return templates.TemplateResponse(
+            "profiles.html",
+            await _profiles_ctx(request, current_user, db, error="Неверный код 2FA"),
         )
 
     await db.delete(current_user)
@@ -332,8 +367,187 @@ async def reset_password_submit(
         return _err(error_msg)
 
     user.password_hash = hash_password(new_password)
+    if user.totp_enabled:
+        user.totp_enabled = False
+        user.totp_secret = None
+        user.backup_codes = None
+        logger.info(f"2FA disabled during password reset for user: {user.username}")
     await db.delete(token_obj)
     await db.commit()
 
     logger.info(f"Password reset via Telegram for user: {user.username}")
     return RedirectResponse(url="/login?reset=1", status_code=status.HTTP_302_FOUND)
+
+
+# ─── 2FA Verify (при входе) ───────────────────────────────────────────────────
+
+@router.get("/verify-2fa", response_class=HTMLResponse)
+async def verify_2fa_page(request: Request, db: AsyncSession = Depends(get_db)):
+    pending_token = request.cookies.get(PENDING_2FA_COOKIE)
+    if not pending_token:
+        return RedirectResponse("/login", status_code=302)
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Totp2faPending).where(
+            Totp2faPending.token == pending_token,
+            Totp2faPending.expires_at > now,
+        )
+    )
+    if not result.scalar_one_or_none():
+        response = RedirectResponse("/login?error=expired", status_code=302)
+        response.delete_cookie(PENDING_2FA_COOKIE)
+        return response
+    return templates.TemplateResponse("verify_2fa.html", {"request": request})
+
+
+@router.post("/verify-2fa", response_class=HTMLResponse)
+async def verify_2fa_submit(
+    request: Request,
+    code: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    ip = request.client.host
+
+    if not rate_limit.check_2fa(ip):
+        return templates.TemplateResponse("verify_2fa.html", {
+            "request": request,
+            "error": "Слишком много попыток. Подождите 15 минут.",
+        })
+
+    pending_token = request.cookies.get(PENDING_2FA_COOKIE)
+    if not pending_token:
+        return RedirectResponse("/login", status_code=302)
+
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Totp2faPending).where(
+            Totp2faPending.token == pending_token,
+            Totp2faPending.expires_at > now,
+        )
+    )
+    pending = result.scalar_one_or_none()
+    if not pending:
+        response = RedirectResponse("/login?error=expired", status_code=302)
+        response.delete_cookie(PENDING_2FA_COOKIE)
+        return response
+
+    user = await db.get(User, pending.user_id)
+    code_clean = code.strip().replace(" ", "")
+    verified = verify_totp(user.totp_secret, code_clean)
+
+    if not verified and user.backup_codes:
+        stored = _json.loads(user.backup_codes)
+        matched, updated = verify_backup_code(code_clean, stored)
+        if matched:
+            user.backup_codes = _json.dumps(updated)
+            verified = True
+
+    if not verified:
+        return templates.TemplateResponse("verify_2fa.html", {
+            "request": request,
+            "error": "Неверный код. Попробуйте ещё раз.",
+        })
+
+    await db.delete(pending)
+    await db.commit()
+    rate_limit.clear_2fa(ip)
+
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(PENDING_2FA_COOKIE)
+    _set_session_cookie(response, user.session_key)
+    return response
+
+
+# ─── 2FA Setup ────────────────────────────────────────────────────────────────
+
+@router.get("/profile/2fa/setup", response_class=HTMLResponse)
+async def setup_2fa_page(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse("/login", status_code=302)
+    if current_user.totp_enabled:
+        return RedirectResponse("/profiles", status_code=302)
+
+    # Генерируем (или переиспользуем уже сгенерированный) секрет
+    if not current_user.totp_secret:
+        current_user.totp_secret = generate_totp_secret()
+        await db.commit()
+        await db.refresh(current_user)
+
+    uri = get_totp_uri(current_user.totp_secret, current_user.username)
+    qr = make_totp_qr_base64(uri)
+    return templates.TemplateResponse("setup_2fa.html", {
+        "request": request,
+        "secret": current_user.totp_secret,
+        "qr_data_uri": qr,
+    })
+
+
+@router.post("/profile/2fa/enable", response_class=HTMLResponse)
+async def enable_2fa(
+    request: Request,
+    code: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse("/login", status_code=302)
+
+    if not current_user.totp_secret or not verify_totp(current_user.totp_secret, code.strip()):
+        uri = get_totp_uri(current_user.totp_secret or "", current_user.username)
+        qr = make_totp_qr_base64(uri)
+        return templates.TemplateResponse("setup_2fa.html", {
+            "request": request,
+            "secret": current_user.totp_secret,
+            "qr_data_uri": qr,
+            "error": "Неверный код. Проверьте время на устройстве и попробуйте ещё раз.",
+        })
+
+    plain_codes, hashed_codes = generate_backup_codes()
+    current_user.totp_enabled = True
+    current_user.backup_codes = _json.dumps(hashed_codes)
+    await db.commit()
+    logger.info(f"2FA enabled for user: {current_user.username}")
+
+    return templates.TemplateResponse("backup_codes.html", {
+        "request": request,
+        "codes": plain_codes,
+    })
+
+
+@router.post("/profile/2fa/disable", response_class=HTMLResponse)
+async def disable_2fa(
+    request: Request,
+    password: str = Form(""),
+    totp_code: str = Form(""),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse("/login", status_code=302)
+
+    async def _err(msg):
+        return templates.TemplateResponse(
+            "profiles.html", await _profiles_ctx(request, current_user, db, error=msg)
+        )
+
+    if not verify_password(password, current_user.password_hash):
+        return await _err("Неверный пароль")
+
+    totp_ok = current_user.totp_secret and verify_totp(current_user.totp_secret, totp_code.strip())
+    if not totp_ok:
+        return await _err("Неверный код из приложения 2FA")
+
+    current_user.totp_enabled = False
+    current_user.totp_secret = None
+    current_user.backup_codes = None
+    await db.commit()
+    logger.info(f"2FA disabled for user: {current_user.username}")
+
+    return templates.TemplateResponse(
+        "profiles.html",
+        await _profiles_ctx(request, current_user, db, success="Двухфакторная аутентификация отключена"),
+    )

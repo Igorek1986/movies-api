@@ -3,6 +3,7 @@ import hashlib
 import string
 import bcrypt
 import re
+import json as _json
 
 
 def hash_password(password: str) -> str:
@@ -86,6 +87,56 @@ def lampa_hash(s: str) -> str:
         hash_val -= 0x100000000
 
     return str(abs(hash_val))
+
+
+# ─── TOTP 2FA ─────────────────────────────────────────────────────────────────
+
+def generate_totp_secret() -> str:
+    import pyotp
+    return pyotp.random_base32()
+
+
+def get_totp_uri(secret: str, username: str, issuer: str = "NUMParser") -> str:
+    import pyotp
+    return pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer)
+
+
+def verify_totp(secret: str, code: str) -> bool:
+    import pyotp
+    return pyotp.TOTP(secret).verify(code.strip(), valid_window=1)
+
+
+def generate_backup_codes() -> tuple[list[str], list[str]]:
+    """Возвращает (plaintext_list, hashed_list). Хранить hashed, показать plain один раз."""
+    plain  = [secrets.token_hex(4) for _ in range(8)]   # 8 символов hex
+    hashed = [hashlib.sha256(c.encode()).hexdigest() for c in plain]
+    return plain, hashed
+
+
+def verify_backup_code(code: str, hashed_list: list[str]) -> tuple[bool, list[str]]:
+    """Проверяет резервный код, при совпадении удаляет его из списка."""
+    digest = hashlib.sha256(code.strip().lower().encode()).hexdigest()
+    if digest in hashed_list:
+        return True, [h for h in hashed_list if h != digest]
+    return False, hashed_list
+
+
+def make_totp_qr_base64(uri: str) -> str:
+    """Генерирует QR-код в виде base64 data URI."""
+    import qrcode, io, base64
+    img = qrcode.make(uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def backup_codes_count(backup_codes_json: str | None) -> int:
+    if not backup_codes_json:
+        return 0
+    try:
+        return len(_json.loads(backup_codes_json))
+    except Exception:
+        return 0
 
 
 def build_episode_hash_string(season: int, episode: int, original_title: str) -> str:

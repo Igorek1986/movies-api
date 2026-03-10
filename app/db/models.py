@@ -38,6 +38,10 @@ class User(Base):
     role = Column(String(20), nullable=False, default="simple", server_default="simple")
     # Флаг администратора сайта: доступ к /admin и /stats без пароля
     is_admin = Column(Boolean, nullable=False, default=False, server_default="false")
+    # TOTP 2FA
+    totp_secret  = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    backup_codes = Column(Text, nullable=True)   # JSON list of SHA-256 hex digests
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -247,6 +251,21 @@ class TelegramLinkCode(Base):
 
     def __repr__(self):
         return f"<TelegramLinkCode(user_id={self.user_id}, code={self.code})>"
+
+
+class Totp2faPending(Base):
+    """Временный токен ожидающего 2FA-подтверждения входа (TTL 10 мин)."""
+
+    __tablename__ = "totp_2fa_pending"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token      = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<Totp2faPending(user_id={self.user_id})>"
 
 
 class SupportMessage(Base):

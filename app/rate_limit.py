@@ -46,6 +46,15 @@ def check_forgot(ip: str) -> bool:
     return _allowed(f"forgot:{ip}", max_calls=3, window_sec=3600)
 
 
+def check_2fa(ip: str) -> bool:
+    """5 попыток TOTP-верификации за 15 минут с IP."""
+    return _allowed(f"2fa:{ip}", max_calls=5, window_sec=900)
+
+
+def clear_2fa(ip: str):
+    _reset(f"2fa:{ip}")
+
+
 def check_sync(user_id: int) -> tuple[bool, int]:
     """
     MyShows sync cooldown: 1 sync per 5 minutes per user.

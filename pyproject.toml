@@ -25,6 +25,8 @@ dependencies = [
     "bcrypt (>=5.0.0,<6.0.0)",
     "aiogram (>=3.0,<4.0)",
     "httpx[socks] (>=0.28.1,<0.29.0)",
+    "pyotp (>=2.9.0,<3.0.0)",
+    "qrcode[pil] (>=8.0,<9.0)",
 ]
 
 

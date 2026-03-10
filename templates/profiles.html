@@ -307,6 +307,24 @@
 
       <hr>
 
+      <h4>Двухфакторная аутентификация (2FA)</h4>
+      {% if totp_enabled %}
+      <p class="muted small">2FA включена. Резервных кодов осталось: <strong>{{ backup_codes_count }}</strong></p>
+      <form method="POST" action="/profile/2fa/disable">
+        <div class="grid">
+          <input type="password" name="password" placeholder="Текущий пароль" required>
+          <input type="text" name="totp_code" placeholder="Код из приложения" autocomplete="off" inputmode="numeric" maxlength="6" required>
+        </div>
+        <small class="muted">Необходимо ввести оба поля.</small>
+        <button type="submit" class="outline secondary btn-sm" style="margin-top:.5rem">Отключить 2FA</button>
+      </form>
+      {% else %}
+      <p class="muted small">Защитите аккаунт кодом из приложения-аутентификатора (Google Authenticator, Aegis и др.).</p>
+      <a href="/profile/2fa/setup" role="button" class="outline btn-sm">Включить 2FA</a>
+      {% endif %}
+
+      <hr>
+
       <h4>Сменить пароль</h4>
       <form method="POST" action="/profile/reset-password" id="changePasswordForm">
         <label>
@@ -329,6 +347,13 @@
           <input type="password" id="new_password_confirm" name="new_password_confirm" required>
         </label>
         <div id="newPasswordMatch" class="pwd-feedback"></div>
+        {% if totp_enabled %}
+        <label>
+          Код 2FA
+          <input type="text" name="totp_code" placeholder="6 цифр из приложения"
+                 autocomplete="off" inputmode="numeric" maxlength="6" required>
+        </label>
+        {% endif %}
         <button type="submit" id="changePasswordBtn" disabled>Сменить пароль</button>
       </form>
 
@@ -340,6 +365,10 @@
             onsubmit="return confirm('Удалить аккаунт и все данные? Это необратимо!')">
         <div class="grid">
           <input type="password" name="password" placeholder="Введите пароль" required>
+          {% if totp_enabled %}
+          <input type="text" name="totp_code" placeholder="Код 2FA"
+                 autocomplete="off" inputmode="numeric" maxlength="6" required>
+          {% endif %}
           <button type="submit" class="outline danger-btn">Удалить аккаунт</button>
         </div>
       </form>

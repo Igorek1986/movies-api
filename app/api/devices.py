@@ -20,7 +20,7 @@ from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile,
 LAMPA_PROFILE_LIMITS: dict[str, int | None] = {"simple": 3, "premium": 8, "super": None}
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
-from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string
+from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string, backup_codes_count
 from app.api.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,8 @@ async def profiles_page(
         "device_limit": limit,
         "tg_linked": tg is not None,
         "tg_username": tg.username if (tg and tg.username) else None,
+        "totp_enabled": current_user.totp_enabled,
+        "backup_codes_count": backup_codes_count(current_user.backup_codes),
     })
 
 
