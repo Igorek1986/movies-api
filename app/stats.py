@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.db.database import async_session_maker
 from app.db.models import MyShowsUser, ApiUser, CategoryRequest, User
 from app.api.dependencies import get_current_user
+from app.utils import get_real_ip
 
 # -------------------------------------------------------------------
 # CONFIG
@@ -132,7 +133,7 @@ def track_myshows_user(login: str):
 
 
 def track_api_user(request: Request):
-    ip = request.client.host if request.client else "unknown"
+    ip = get_real_ip(request)
     if ip in ("127.0.0.1", "localhost", "::1"):
         return
     asyncio.create_task(_do_track_api_user(ip))
@@ -143,7 +144,7 @@ def track_category_request(request: Request, category: str):
         return
     if category.lower() in EXCLUDED_CATEGORIES:
         return
-    ip = request.client.host if request.client else "unknown"
+    ip = get_real_ip(request)
     asyncio.create_task(_do_track_category(ip, category))
 
 

@@ -18,7 +18,7 @@ from app.api.devices import _devices_with_stats, DEVICE_LIMITS
 from app.utils import (
     hash_password, verify_password, generate_api_key, validate_password, validate_name,
     generate_totp_secret, get_totp_uri, verify_totp, make_totp_qr_base64,
-    generate_backup_codes, verify_backup_code, backup_codes_count,
+    generate_backup_codes, verify_backup_code, backup_codes_count, get_real_ip,
 )
 from app.api.dependencies import get_current_user
 from app.config import get_settings
@@ -60,7 +60,7 @@ async def _create_session(db: AsyncSession, user_id: int, request: Request) -> s
     """Создаёт запись Session и возвращает ключ для cookie."""
     key = generate_api_key()
     expires_at = datetime.now(timezone.utc) + SESSION_TTL
-    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    ip = get_real_ip(request)
     ua = request.headers.get("User-Agent", "")[:500]
     db.add(Session(user_id=user_id, key=key, expires_at=expires_at, ip=ip, user_agent=ua))
     await db.commit()
@@ -130,7 +130,7 @@ async def login_submit(
     password: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    ip = request.client.host
+    ip = get_real_ip(request)
 
     if not rate_limit.check_login(ip):
         return templates.TemplateResponse("login.html", {
@@ -205,7 +205,7 @@ async def register_submit(
         return _err("Регистрация не разрешена")
 
     # Rate limit
-    if not rate_limit.check_register(request.client.host):
+    if not rate_limit.check_register(get_real_ip(request)):
         return _err("Слишком много регистраций с этого IP. Попробуйте позже.")
 
     is_valid, error_msg = validate_name(username)
@@ -341,7 +341,7 @@ async def forgot_password_submit(
     username: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    if not rate_limit.check_forgot(request.client.host):
+    if not rate_limit.check_forgot(get_real_ip(request)):
         return templates.TemplateResponse("forgot_password.html", _forgot_ctx(
             request, error="Слишком много запросов. Попробуйте через час."
         ))
@@ -461,7 +461,7 @@ async def verify_2fa_submit(
     code: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    ip = request.client.host
+    ip = get_real_ip(request)
 
     if not rate_limit.check_2fa(ip):
         return templates.TemplateResponse("verify_2fa.html", {

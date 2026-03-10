@@ -4,6 +4,20 @@ import string
 import bcrypt
 import re
 import json as _json
+from fastapi import Request
+
+
+def get_real_ip(request: Request) -> str:
+    """
+    Возвращает реальный IP клиента.
+    Порядок проверки: X-Real-IP → X-Forwarded-For (первый) → request.client.host
+    """
+    ip = (
+        request.headers.get("X-Real-IP")
+        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
+    return ip or "unknown"
 
 
 def hash_password(password: str) -> str:
