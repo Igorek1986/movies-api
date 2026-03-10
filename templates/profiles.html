@@ -52,7 +52,8 @@
           <tr>
             <td data-label="Устройство"><strong>{{ p.name }}</strong></td>
             <td data-label="Токен">
-              <code class="api-key-mono" title="{{ p.token }}">
+              <code class="api-key-mono" title="Нажмите, чтобы скопировать"
+                    style="cursor:pointer" onclick="copyKey(this, '{{ p.token }}')">
                 {{ p.token[:4] }}-••••-••••-••••
               </code>
               <button class="btn-icon" title="Показать/скрыть"

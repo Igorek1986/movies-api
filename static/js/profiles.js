@@ -1,3 +1,14 @@
+// Copy token to clipboard on click
+async function copyKey(el, fullKey) {
+  try {
+    await navigator.clipboard.writeText(fullKey);
+    const prev = el.textContent;
+    el.textContent = '✓ Скопировано!';
+    el.style.color = 'var(--pico-color-green-500, #2e7d32)';
+    setTimeout(() => { el.textContent = prev; el.style.color = ''; }, 1500);
+  } catch (e) {}
+}
+
 // Toggle API key visibility in profiles table
 function toggleKey(btn, fullKey) {
   const code = btn.previousElementSibling;
