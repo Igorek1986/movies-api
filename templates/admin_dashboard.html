@@ -15,6 +15,12 @@
 </header>
 
 <main class="container" style="padding-top:1.5rem;max-width:860px">
+  {% if success %}
+  <div role="alert" class="alert-success" id="adminAlert" style="display:flex;align-items:center;justify-content:space-between;gap:1rem">
+    <span>{{ success }}</span>
+    <button onclick="document.getElementById('adminAlert').remove()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;line-height:1;color:inherit;padding:0">×</button>
+  </div>
+  {% endif %}
   <h2>Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
 
   <div style="display:flex;flex-direction:column;gap:.6rem">

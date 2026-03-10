@@ -113,6 +113,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "request": request,
         "users": users_data,
         "roles": USER_ROLES,
+        "success": request.query_params.get("success"),
         "device_limits": DEVICE_LIMITS,
     })
 
@@ -172,9 +173,16 @@ async def toggle_user_admin(
 async def reset_user_import(
     request: Request,
     user_id: int,
+    db: AsyncSession = Depends(get_db),
 ):
     if not _check_admin(request):
         raise HTTPException(status_code=403)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     rate_limit.reset_import(user_id)
-    logger.info(f"Admin: import limit reset for user_id={user_id}")
-    return RedirectResponse(url="/admin", status_code=302)
+    logger.info(f"Admin: import limit reset for user_id={user_id} ({user.username})")
+    from urllib.parse import quote
+    msg = quote(f"Лимит импорта сброшен для {user.username}")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
