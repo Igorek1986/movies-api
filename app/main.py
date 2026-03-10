@@ -32,6 +32,7 @@ from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app.api import auth, myshows_sync, timecodes as timecodes_router
 from app.api import devices
+from app.api import sessions as sessions_router
 from app.api import telegram as telegram_router
 from app.api import tg_miniapp as tg_miniapp_router
 from app.admin import router as admin_router
@@ -156,6 +157,7 @@ async def favicon():
 
 app.include_router(auth.router)
 app.include_router(devices.router)
+app.include_router(sessions_router.router)
 app.include_router(timecodes_router.router)
 app.include_router(myshows.router)
 app.include_router(stats.router)

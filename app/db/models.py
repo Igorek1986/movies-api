@@ -253,6 +253,23 @@ class TelegramLinkCode(Base):
         return f"<TelegramLinkCode(user_id={self.user_id}, code={self.code})>"
 
 
+class Session(Base):
+    """Веб-сессия пользователя (cookie session_key → Session.key)."""
+
+    __tablename__ = "sessions"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    key        = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    ip         = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+
+    def __repr__(self):
+        return f"<Session(user_id={self.user_id}, ip={self.ip})>"
+
+
 class Totp2faPending(Base):
     """Временный токен ожидающего 2FA-подтверждения входа (TTL 10 мин)."""
 

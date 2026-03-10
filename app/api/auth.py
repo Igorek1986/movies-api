@@ -12,7 +12,7 @@ from sqlalchemy import select, delete
 from app.db.database import get_db
 import string
 import json as _json
-from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending
+from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending, Session
 from app.api.devices import _devices_with_stats, DEVICE_LIMITS
 from app.utils import (
     hash_password, verify_password, generate_api_key, validate_password, validate_name,
@@ -30,9 +30,27 @@ settings = get_settings()
 
 COOKIE_NAME = "session_key"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 дней
+SESSION_TTL = timedelta(days=30)
 RESET_CODE_TTL_MINUTES = 15
 PENDING_2FA_COOKIE = "2fa_pending"
 PENDING_2FA_TTL = 600  # 10 мин
+
+
+async def _create_session(db: AsyncSession, user_id: int, request: Request) -> str:
+    """Создаёт запись Session и возвращает ключ для cookie."""
+    key = generate_api_key()
+    expires_at = datetime.now(timezone.utc) + SESSION_TTL
+    ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    ua = request.headers.get("User-Agent", "")[:500]
+    db.add(Session(user_id=user_id, key=key, expires_at=expires_at, ip=ip, user_agent=ua))
+    await db.commit()
+    return key
+
+
+async def _delete_all_sessions(db: AsyncSession, user_id: int):
+    """Удаляет все сессии пользователя."""
+    await db.execute(delete(Session).where(Session.user_id == user_id))
+    await db.commit()
 
 
 def _set_session_cookie(response, session_key: str):
@@ -113,15 +131,20 @@ async def login_submit(
         )
         return response
 
+    session_key = await _create_session(db, user.id, request)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
-    _set_session_cookie(response, user.session_key)
+    _set_session_cookie(response, session_key)
     return response
 
 
 # ─── Logout ───────────────────────────────────────────────────────────────────
 
 @router.get("/logout")
-async def logout():
+async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+    key = request.cookies.get(COOKIE_NAME)
+    if key:
+        await db.execute(delete(Session).where(Session.key == key))
+        await db.commit()
     response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
     response.delete_cookie(key=COOKIE_NAME)
     return response
@@ -169,12 +192,13 @@ async def register_submit(
     if result.scalar_one_or_none():
         return _err("Имя пользователя уже занято")
 
-    session_key = generate_api_key()
-    user = User(username=username, password_hash=hash_password(password), session_key=session_key)
+    user = User(username=username, password_hash=hash_password(password))
     db.add(user)
     await db.commit()
+    await db.refresh(user)
     logger.info(f"New user registered: {username}")
 
+    session_key = await _create_session(db, user.id, request)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, session_key)
     return response
@@ -228,12 +252,12 @@ async def change_password(
 
     current_user.password_hash = hash_password(new_password)
     await db.commit()
+    await _delete_all_sessions(db, current_user.id)
     logger.info(f"Password changed: {current_user.username}")
 
-    return templates.TemplateResponse(
-        "profiles.html",
-        await _profiles_ctx(request, current_user, db, success="Пароль успешно изменён"),
-    )
+    response = RedirectResponse(url="/login?reset=1", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(key=COOKIE_NAME)
+    return response
 
 
 # ─── Delete account ───────────────────────────────────────────────────────────
@@ -452,9 +476,10 @@ async def verify_2fa_submit(
     await db.commit()
     rate_limit.clear_2fa(ip)
 
+    session_key = await _create_session(db, user.id, request)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     response.delete_cookie(PENDING_2FA_COOKIE)
-    _set_session_cookie(response, user.session_key)
+    _set_session_cookie(response, session_key)
     return response
 
 

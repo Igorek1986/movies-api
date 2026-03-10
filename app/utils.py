@@ -89,6 +89,43 @@ def lampa_hash(s: str) -> str:
     return str(abs(hash_val))
 
 
+# ─── User-Agent parsing ───────────────────────────────────────────────────────
+
+def parse_user_agent(ua: str | None) -> str:
+    """Возвращает читаемое описание браузера и ОС."""
+    if not ua:
+        return "Неизвестный браузер"
+    if "Edg/" in ua or "EdgA/" in ua:
+        browser = "Edge"
+    elif "OPR/" in ua or "Opera" in ua:
+        browser = "Opera"
+    elif "YaBrowser/" in ua:
+        browser = "Яндекс.Браузер"
+    elif "Chrome/" in ua:
+        browser = "Chrome"
+    elif "Firefox/" in ua:
+        browser = "Firefox"
+    elif "Safari/" in ua:
+        browser = "Safari"
+    else:
+        browser = "Браузер"
+
+    if "Android" in ua:
+        os_name = "Android"
+    elif "iPhone" in ua or "iPad" in ua:
+        os_name = "iOS"
+    elif "Windows" in ua:
+        os_name = "Windows"
+    elif "Mac OS" in ua:
+        os_name = "macOS"
+    elif "Linux" in ua:
+        os_name = "Linux"
+    else:
+        os_name = ""
+
+    return f"{browser}{' · ' + os_name if os_name else ''}"
+
+
 # ─── TOTP 2FA ─────────────────────────────────────────────────────────────────
 
 def generate_totp_secret() -> str:

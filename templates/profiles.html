@@ -12,6 +12,7 @@
           <small class="muted" style="margin-left:.4rem;">({{ user.role }}{% if device_limit is not none %}, лимит: {{ device_limit }}{% else %}, без лимита{% endif %})</small>
       </li>
       {% include '_admin_links.html' %}
+      <li><a href="/sessions" role="button" class="outline btn-sm">Сессии</a></li>
       <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
     </ul>
   </nav>
