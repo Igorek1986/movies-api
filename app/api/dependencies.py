@@ -1,18 +1,23 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, Request, Query
+from fastapi import Depends, Request, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.database import get_db
 from app.db.models import User, Device, Session
 
+SESSION_TTL = timedelta(days=30)
+SESSION_RENEW_BEFORE = timedelta(days=15)  # продлеваем, если до истечения < 15 дней
+COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+
 
 async def get_current_user(
-    request: Request, db: AsyncSession = Depends(get_db)
+    request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> User | None:
     """
     Авторизация в веб-интерфейсе через cookie (session_key → Session.key).
+    Скользящее окно: продлеваем сессию при активности (если < 15 дней до истечения).
     Возвращает None если не авторизован или сессия истекла.
     """
     key = request.cookies.get("session_key")
@@ -26,6 +31,15 @@ async def get_current_user(
     session = result.scalar_one_or_none()
     if not session:
         return None
+
+    # Скользящее окно: продлеваем сессию если осталось меньше половины TTL
+    if session.expires_at - now < SESSION_RENEW_BEFORE:
+        session.expires_at = now + SESSION_TTL
+        await db.commit()
+        response.set_cookie(
+            key="session_key", value=key,
+            httponly=True, max_age=COOKIE_MAX_AGE, samesite="lax",
+        )
 
     return await db.get(User, session.user_id)
 

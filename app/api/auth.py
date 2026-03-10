@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import secrets
@@ -36,6 +37,22 @@ PENDING_2FA_COOKIE = "2fa_pending"
 PENDING_2FA_TTL = 600  # 10 мин
 
 
+async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
+    """Fire-and-forget: Telegram-уведомление о новом входе."""
+    try:
+        from app.db.database import async_session_maker
+        from app.bot import send_new_session_notification
+        from app.utils import parse_user_agent
+        async with async_session_maker() as db:
+            result = await db.execute(select(TelegramUser).where(TelegramUser.user_id == user_id))
+            tg = result.scalar_one_or_none()
+        if tg:
+            change_password_url = f"{base_url}/profiles"
+            await send_new_session_notification(tg.telegram_id, ip, parse_user_agent(ua), change_password_url)
+    except Exception as e:
+        logger.warning(f"Session notification failed for user {user_id}: {e}")
+
+
 async def _create_session(db: AsyncSession, user_id: int, request: Request) -> str:
     """Создаёт запись Session и возвращает ключ для cookie."""
     key = generate_api_key()
@@ -44,6 +61,8 @@ async def _create_session(db: AsyncSession, user_id: int, request: Request) -> s
     ua = request.headers.get("User-Agent", "")[:500]
     db.add(Session(user_id=user_id, key=key, expires_at=expires_at, ip=ip, user_agent=ua))
     await db.commit()
+    base_url = str(request.base_url).rstrip("/")
+    asyncio.create_task(_notify_new_session(user_id, ip, ua, base_url))
     return key
 
 
