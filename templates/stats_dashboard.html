@@ -1,20 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Статистика API{% endblock %}
 
-{% block body %}
-<header class="container-fluid site-header">
-  <nav>
-    <ul>
-      <li><a href="/" class="outline btn-sm secondary" role="button">← Главная</a></li>
-      <li><strong>Статистика API</strong></li>
-      <li><small class="muted" id="lastUpdate">{{ now.strftime('%H:%M:%S') }}</small></li>
-    </ul>
-    <ul>
-      <li><button id="refreshBtn" class="outline secondary btn-sm" onclick="refreshData()">Обновить</button></li>
-    </ul>
-  </nav>
-</header>
+{% block header_actions %}
+<li><small class="muted" id="lastUpdate">{{ now.strftime('%H:%M:%S') }}</small></li>
+<li><button id="refreshBtn" class="outline secondary btn-sm" onclick="refreshData()">Обновить</button></li>
+{% endblock %}
 
+{% block body %}
 <main class="container" style="padding-top: 1.5rem;">
 
   <!-- ═══ Сводка ════════════════════════════════════════════════ -->
@@ -322,6 +314,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.STATS_PASSWORD = '{{ password }}';</script>
 <script src="/static/js/stats.js"></script>
 {% endblock %}

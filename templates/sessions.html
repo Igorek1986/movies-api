@@ -2,25 +2,14 @@
 {% block title %}Активные сессии — {{ user.username }}{% endblock %}
 
 {% block body %}
-<header class="container-fluid site-header">
-  <nav>
-    <ul>
-      <li><a href="/profiles" class="outline btn-sm secondary" role="button">← Настройки</a></li>
-    </ul>
-    <ul>
-      <li><span class="username-badge">{{ user.username }}</span></li>
-      <li>
-        <form method="POST" action="/sessions/revoke-all"
-              onsubmit="return confirm('Завершить все сессии? Вы будете выходены отовсюду.')">
-          <button type="submit" class="outline secondary btn-sm">Завершить все</button>
-        </form>
-      </li>
-    </ul>
-  </nav>
-</header>
-
 <main class="container" style="padding-top:1.5rem;max-width:800px">
-  <h2>Активные сессии</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.5rem">
+    <h2 style="margin:0">Активные сессии</h2>
+    <form method="POST" action="/sessions/revoke-all"
+          onsubmit="return confirm('Завершить все сессии? Вы будете выйдены отовсюду.')">
+      <button type="submit" class="outline secondary btn-sm">Завершить все</button>
+    </form>
+  </div>
   <p class="muted small">Список устройств, с которых выполнен вход в аккаунт. Текущая сессия отмечена.</p>
 
   {% if sessions %}

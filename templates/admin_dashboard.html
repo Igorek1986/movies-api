@@ -2,17 +2,16 @@
 {% block title %}Пользователи — Админ{% endblock %}
 
 {% block body %}
+{% if not user %}
 <header class="container-fluid site-header">
   <nav>
-    <ul>
-      <li><a href="/" class="outline btn-sm secondary" role="button">← Главная</a></li>
-      <li><strong>NUMParser Admin</strong></li>
-    </ul>
+    <ul><li><strong>NUMParser Admin</strong></li></ul>
     <ul>
       <li><a href="/admin/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
     </ul>
   </nav>
 </header>
+{% endif %}
 
 <main class="container" style="padding-top:1.5rem;max-width:860px">
   {% if success %}

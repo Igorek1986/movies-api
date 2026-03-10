@@ -1,6 +1,3 @@
-// Password injected by template via window.STATS_PASSWORD
-const password = window.STATS_PASSWORD || '';
-
 let isRefreshing = false;
 
 
@@ -20,7 +17,7 @@ async function refreshData() {
     isRefreshing = true;
 
     try {
-        const res = await fetch('/stats/api', { headers: { 'X-Password': password }, cache: 'no-store' });
+        const res = await fetch('/stats/api', { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         updateDashboard(data);

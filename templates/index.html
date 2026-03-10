@@ -4,18 +4,6 @@
 {% block body %}
 {% if user %}
 
-<header class="container-fluid site-header">
-  <nav>
-    <ul><li><strong>NUMParser</strong></li></ul>
-    <ul>
-      <li><span class="username-badge">{{ user.username }}</span></li>
-      {% include '_admin_links.html' %}
-      <li><a href="/profiles" role="button" class="outline btn-sm">Настройки</a></li>
-      <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
-    </ul>
-  </nav>
-</header>
-
 <main class="container" style="padding-top: 1.5rem;">
   <div class="history-controls">
     {% if devices|length > 1 %}

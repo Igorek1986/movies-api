@@ -1,4 +1,4 @@
 {% if user is defined and user and user.is_admin %}
-<li><a href="/stats/autologin?sk={{ user.session_key }}" role="button" class="outline btn-sm">📊 Статистика</a></li>
-<li><a href="/admin/autologin?sk={{ user.session_key }}" role="button" class="outline btn-sm">⚙️ Админ</a></li>
+<li><a href="/stats" role="button" class="outline btn-sm">📊 Статистика</a></li>
+<li><a href="/admin" role="button" class="outline btn-sm">⚙️ Админ</a></li>
 {% endif %}

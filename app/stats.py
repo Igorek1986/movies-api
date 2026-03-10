@@ -1,21 +1,18 @@
 import asyncio
 import logging
-import os
 from datetime import date, datetime
 from pathlib import Path
 
 import httpx
-from dotenv import load_dotenv
-from fastapi import APIRouter, Header, HTTPException, Request, Form
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.database import async_session_maker
-from app.db.models import MyShowsUser, ApiUser, CategoryRequest
-
-load_dotenv()
+from app.db.models import MyShowsUser, ApiUser, CategoryRequest, User
+from app.api.dependencies import get_current_user
 
 # -------------------------------------------------------------------
 # CONFIG
@@ -23,10 +20,6 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).parent.parent
 TEMPLATES_DIR = BASE_DIR / "templates"
-
-STATS_PASSWORD = os.getenv("STATS_PASSWORD")
-if not STATS_PASSWORD:
-    raise RuntimeError("STATS_PASSWORD is not set in .env")
 
 EXCLUDED_CATEGORIES = {
     "favicon.ico",
@@ -337,74 +330,21 @@ async def get_stats_data() -> dict:
 
 
 # -------------------------------------------------------------------
-# AUTH
-# -------------------------------------------------------------------
-
-import hashlib as _hashlib
-from fastapi.responses import RedirectResponse as _RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
-from fastapi import Depends as _Depends
-from app.db.database import get_db as _get_db
-from app.db.models import User as _User
-
-_STATS_COOKIE = "stats_session"
-
-
-def _stats_cookie_val() -> str:
-    return _hashlib.sha256(STATS_PASSWORD.encode()).hexdigest()
-
-
-def verify_password(password: str) -> bool:
-    return password == STATS_PASSWORD
-
-
-def _check_stats_auth(request: Request) -> bool:
-    """Авторизован, если верный cookie или пароль в query."""
-    return request.cookies.get(_STATS_COOKIE) == _stats_cookie_val()
-
-
-# -------------------------------------------------------------------
 # WEB INTERFACE
 # -------------------------------------------------------------------
 
-@router.get("/stats/autologin")
-async def stats_autologin(sk: str = "", db: _AsyncSession = _Depends(_get_db)):
-    """Автологин для админов сайта: проверяет session_key → ставит cookie → редирект."""
-    from sqlalchemy import select as _select
-    from app.config import get_settings as _get_settings
-    if not sk:
-        return _RedirectResponse(url="/stats", status_code=302)
-    result = await db.execute(_select(_User).where(_User.session_key == sk))
-    user = result.scalar_one_or_none()
-    if not user or not user.is_admin:
-        return _RedirectResponse(url="/stats", status_code=302)
-    response = _RedirectResponse(url="/stats", status_code=302)
-    response.set_cookie(_STATS_COOKIE, _stats_cookie_val(), httponly=True, samesite="lax")
-    return response
-
-
 @router.get("/stats", response_class=HTMLResponse)
-async def stats_page(request: Request, password: str = None):
-    authed = _check_stats_auth(request) or (password and verify_password(password))
-    if not authed:
-        return templates.TemplateResponse(
-            "stats_login.html",
-            {"request": request, "error": "Неверный пароль" if password else None},
-        )
+async def stats_page(request: Request, user: User | None = Depends(get_current_user)):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
 
     stats_data = await get_stats_data()
-    response = templates.TemplateResponse(
+    return templates.TemplateResponse(
         "stats_dashboard.html",
-        {"request": request, "stats": stats_data, "password": password or STATS_PASSWORD, "now": datetime.now()},
+        {"request": request, "stats": stats_data, "user": user, "now": datetime.now()},
     )
-    if password and verify_password(password):
-        response.set_cookie(_STATS_COOKIE, _stats_cookie_val(), httponly=True, samesite="lax")
-    return response
-
-
-@router.post("/stats", response_class=HTMLResponse)
-async def stats_page_post(request: Request, password: str = Form(...)):
-    return await stats_page(request, password)
 
 
 # -------------------------------------------------------------------
@@ -412,8 +352,8 @@ async def stats_page_post(request: Request, password: str = Form(...)):
 # -------------------------------------------------------------------
 
 @router.get("/stats/api")
-async def get_stats_api(x_password: str = Header(..., alias="X-Password")):
-    if not verify_password(x_password):
+async def get_stats_api(user: User | None = Depends(get_current_user)):
+    if not user or not user.is_admin:
         raise HTTPException(status_code=403, detail="Forbidden")
     return await get_stats_data()
 

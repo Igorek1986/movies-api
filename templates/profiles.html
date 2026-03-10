@@ -2,22 +2,6 @@
 {% block title %}Устройства — {{ user.username }}{% endblock %}
 
 {% block body %}
-<header class="container-fluid site-header">
-  <nav>
-    <ul>
-      <li><a href="/" class="outline btn-sm secondary" role="button">← История</a></li>
-    </ul>
-    <ul>
-      <li><span class="username-badge">{{ user.username }}</span>
-          <small class="muted" style="margin-left:.4rem;">({{ user.role }}{% if device_limit is not none %}, лимит: {{ device_limit }}{% else %}, без лимита{% endif %})</small>
-      </li>
-      {% include '_admin_links.html' %}
-      <li><a href="/sessions" role="button" class="outline btn-sm">Сессии</a></li>
-      <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
-    </ul>
-  </nav>
-</header>
-
 <main class="container" style="padding-top: 1.5rem;">
 
   {% if request.query_params.get('registered') %}
@@ -34,7 +18,7 @@
        ═══════════════════════════════════════════ -->
   <section>
     <div class="section-title-row">
-      <h2>Мои устройства</h2>
+      <h2>Мои устройства <small class="muted" style="font-size:.9rem;font-weight:400">({{ user.role }}{% if device_limit is not none %}, лимит: {{ device_limit }}{% endif %})</small></h2>
     </div>
 
     {% if profiles %}

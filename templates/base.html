@@ -88,6 +88,29 @@
 </head>
 <body>
   <button class="theme-toggle" id="themeToggle" title="Переключить тему" onclick="toggleTheme()"></button>
+
+  {% if user is defined and user %}
+  <header class="container-fluid site-header">
+    <nav>
+      <ul>
+        <li><strong>NUMParser</strong></li>
+      </ul>
+      <ul>
+        <li><span class="username-badge">{{ user.username }}</span></li>
+        {% if user.is_admin %}
+        <li><a href="/stats" role="button" class="outline btn-sm {% if request.url.path.startswith('/stats') %}secondary{% endif %}">📊 Статистика</a></li>
+        <li><a href="/admin" role="button" class="outline btn-sm {% if request.url.path.startswith('/admin') %}secondary{% endif %}">⚙️ Админ</a></li>
+        {% endif %}
+        <li><a href="/" role="button" class="outline btn-sm {% if request.url.path == '/' %}secondary{% endif %}">История</a></li>
+        <li><a href="/profiles" role="button" class="outline btn-sm {% if request.url.path.startswith('/profiles') %}secondary{% endif %}">Настройки</a></li>
+        <li><a href="/sessions" role="button" class="outline btn-sm {% if request.url.path == '/sessions' %}secondary{% endif %}">Сессии</a></li>
+        {% block header_actions %}{% endblock %}
+        <li><a href="/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+      </ul>
+    </nav>
+  </header>
+  {% endif %}
+
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
   <script>
