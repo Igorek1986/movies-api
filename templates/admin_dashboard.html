@@ -14,53 +14,58 @@
   </nav>
 </header>
 
-<main class="container" style="padding-top: 1.5rem;">
-  <h2>Пользователи</h2>
+<main class="container" style="padding-top:1.5rem;max-width:860px">
+  <h2>Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
 
-  <figure>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Имя</th>
-          <th>Роль</th>
-          <th>Админ</th>
-          <th>Устройств</th>
-          <th>Зарегистрирован</th>
-          <th>Действия</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for u in users %}
-        <tr>
-          <td>{{ u.id }}</td>
-          <td><strong>{{ u.username }}</strong></td>
-          <td>
-            <span class="role-badge role-{{ u.role }}">{{ u.role }}</span>
-          </td>
-          <td>
-            <form method="POST" action="/admin/user/{{ u.id }}/toggle-admin" style="margin:0">
-              <button type="submit" class="admin-toggle {% if u.is_admin %}is-admin{% endif %}">
-                {% if u.is_admin %}✅ Да{% else %}—{% endif %}
-              </button>
-            </form>
-          </td>
-          <td>{{ u.device_count }} / {{ u.device_limit }}</td>
-          <td>{{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}</td>
-          <td>
-            <form method="POST" action="/admin/user/{{ u.id }}/role" class="role-form">
-              <select name="role" onchange="this.form.submit()">
-                {% for r in roles %}
-                <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r }}</option>
-                {% endfor %}
-              </select>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </figure>
+  <div style="display:flex;flex-direction:column;gap:.6rem">
+    {% for u in users %}
+    <div style="padding:.85rem 1rem;border:1px solid var(--pico-table-border-color);border-radius:var(--pico-border-radius)">
+
+      <!-- Шапка карточки: имя + роль + дата -->
+      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">
+        <strong>{{ u.username }}</strong>
+        <span class="role-badge role-{{ u.role }}">{{ u.role }}</span>
+        {% if u.is_admin %}<span class="role-badge role-admin">admin</span>{% endif %}
+        <span class="muted small" style="margin-left:auto">
+          #{{ u.id }} · {{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}
+        </span>
+      </div>
+
+      <!-- Метрика: устройств -->
+      <div class="muted small" style="margin-bottom:.75rem">
+        Устройств: {{ u.device_count }} / {{ u.device_limit }}
+      </div>
+
+      <!-- Действия -->
+      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+
+        <!-- Роль -->
+        <form method="POST" action="/admin/user/{{ u.id }}/role" style="margin:0">
+          <select name="role" onchange="this.form.submit()" class="role-select">
+            {% for r in roles %}
+            <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </form>
+
+        <!-- Админ -->
+        <form method="POST" action="/admin/user/{{ u.id }}/toggle-admin" style="margin:0">
+          <button type="submit" class="btn-sm outline {% if u.is_admin %}is-admin{% else %}secondary{% endif %}">
+            {% if u.is_admin %}✅ Снять админа{% else %}Сделать админом{% endif %}
+          </button>
+        </form>
+
+        <!-- Сброс лимита импорта (только simple) -->
+        {% if u.role == "simple" %}
+        <form method="POST" action="/admin/user/{{ u.id }}/reset-import" style="margin:0">
+          <button type="submit" class="btn-sm outline secondary" title="Сбросить лимит JSON-импорта">↺ импорт</button>
+        </form>
+        {% endif %}
+
+      </div>
+    </div>
+    {% endfor %}
+  </div>
 </main>
 {% endblock %}
 
@@ -68,16 +73,16 @@
 <style>
   .role-badge {
     display: inline-block;
-    padding: .15rem .5rem;
+    padding: .15rem .45rem;
     border-radius: .25rem;
-    font-size: .8rem;
+    font-size: .78rem;
     font-weight: 600;
   }
   .role-simple  { background: var(--pico-secondary-background); color: var(--pico-secondary-foreground); }
   .role-premium { background: #2563eb22; color: #2563eb; }
-  .role-super   { background: #d97706222; color: #d97706; }
-  .role-form select { padding: .2rem .4rem; font-size: .85rem; }
-  .admin-toggle { padding: .15rem .5rem; font-size: .85rem; border: 1px solid var(--pico-muted-border-color); border-radius: .25rem; background: none; cursor: pointer; color: var(--pico-muted-color); }
-  .admin-toggle.is-admin { background: #16a34a22; color: #16a34a; border-color: #16a34a55; }
+  .role-super   { background: #d9770622; color: #d97706; }
+  .role-admin   { background: #16a34a22; color: #16a34a; }
+  .role-select  { padding: .2rem .4rem; font-size: .85rem; width: auto; margin: 0; }
+  .is-admin     { color: #16a34a; border-color: #16a34a55; }
 </style>
 {% endblock %}

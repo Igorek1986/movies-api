@@ -31,6 +31,7 @@ from sqlalchemy import select, delete, func, update
 
 from app.config import get_settings
 from app.db.database import get_db, async_session_maker
+from app import rate_limit
 from app.db.models import Device, Timecode, MediaCard, LampaProfile, User
 from app.api.dependencies import get_device_by_token
 
@@ -51,6 +52,20 @@ def _require_device(device: Device | None) -> Device:
     if not device:
         raise HTTPException(status_code=401, detail="Неверный или отсутствующий token")
     return device
+
+
+async def _check_import_rate_limit(device: Device, db: AsyncSession) -> None:
+    """Для simple-пользователей: 1 JSON-импорт в 24 часа на аккаунт."""
+    user = await db.get(User, device.user_id)
+    if user and user.role == "simple":
+        allowed, wait_sec = rate_limit.check_import(device.user_id)
+        if not allowed:
+            h, m = divmod(wait_sec // 60, 60)
+            wait_str = f"{h} ч {m} мин" if h else f"{m} мин"
+            raise HTTPException(
+                status_code=429,
+                detail=f"Импорт доступен раз в 24 часа. Повторите через {wait_str}.",
+            )
 
 
 async def _assert_profile_allowed(device: Device, profile_id: str, db: AsyncSession) -> None:
@@ -386,6 +401,7 @@ async def import_from_lampac(
     Body: {"123_movie": {"hash1": '{"percent":100,...}'}, ...}
     """
     _require_device(device)
+    await _check_import_rate_limit(device, db)
     await _assert_profile_allowed(device, profile_id or "", db)
 
     rows = []
@@ -426,6 +442,7 @@ async def import_from_lampa(
     В Lampa формате нет card_id — хранится с card_id="lampa_import".
     """
     _require_device(device)
+    await _check_import_rate_limit(device, db)
     await _assert_profile_allowed(device, profile_id or "", db)
 
     rows = []

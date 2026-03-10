@@ -419,6 +419,9 @@ async def sync_myshows(
     if not current_user:
         raise HTTPException(status_code=401, detail="Необходима авторизация")
 
+    if current_user.role == "simple":
+        raise HTTPException(status_code=403, detail="Синхронизация MyShows доступна только для Premium")
+
     allowed, wait_sec = rate_limit.check_sync(current_user.id)
     if not allowed:
         raise HTTPException(

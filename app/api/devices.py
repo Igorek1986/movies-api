@@ -16,8 +16,18 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, DEVICE_LIMITS, TelegramUser
+from app import rate_limit
 
 LAMPA_PROFILE_LIMITS: dict[str, int | None] = {"simple": 3, "premium": 8, "super": None}
+
+
+def _import_ctx(user: User) -> dict:
+    """Переменные для отображения лимита импорта в шаблоне."""
+    if user.role == "simple":
+        allowed, wait_sec = rate_limit.can_import(user.id)
+    else:
+        allowed, wait_sec = True, 0
+    return {"import_allowed": allowed, "import_wait_sec": wait_sec}
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string, backup_codes_count
@@ -105,6 +115,7 @@ async def profiles_page(
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": current_user.totp_enabled,
         "backup_codes_count": backup_codes_count(current_user.backup_codes),
+        **_import_ctx(current_user),
     })
 
 
@@ -127,7 +138,7 @@ async def create_device(
         limit = DEVICE_LIMITS.get(current_user.role, 3)
         return templates.TemplateResponse("profiles.html", {
             "request": request, "user": current_user, "profiles": devices,
-            "device_limit": limit, "error": msg,
+            "device_limit": limit, "error": msg, **_import_ctx(current_user),
         }, status_code=400)
 
     name = name.strip()[:100]
@@ -176,7 +187,7 @@ async def rename_device(
         limit = DEVICE_LIMITS.get(current_user.role, 3)
         return templates.TemplateResponse("profiles.html", {
             "request": request, "user": current_user, "profiles": devices,
-            "device_limit": limit, "error": error_msg,
+            "device_limit": limit, "error": error_msg, **_import_ctx(current_user),
         }, status_code=400)
     device.name = new_name
     await db.commit()

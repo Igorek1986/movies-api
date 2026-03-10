@@ -10,6 +10,7 @@ from sqlalchemy import select, func
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import User, Device, USER_ROLES, DEVICE_LIMITS
+from app import rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
@@ -164,4 +165,16 @@ async def toggle_user_admin(
     await db.commit()
 
     logger.info(f"Admin: user {user.username} is_admin → {user.is_admin}")
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@router.post("/user/{user_id}/reset-import")
+async def reset_user_import(
+    request: Request,
+    user_id: int,
+):
+    if not _check_admin(request):
+        raise HTTPException(status_code=403)
+    rate_limit.reset_import(user_id)
+    logger.info(f"Admin: import limit reset for user_id={user_id}")
     return RedirectResponse(url="/admin", status_code=302)

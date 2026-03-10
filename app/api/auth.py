@@ -87,6 +87,7 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         select(TelegramUser).where(TelegramUser.user_id == user.id)
     )
     tg = tg_result.scalar_one_or_none()
+    import_allowed, import_wait_sec = rate_limit.can_import(user.id) if user.role == "simple" else (True, 0)
     return {
         "request": request,
         "user": user,
@@ -96,6 +97,8 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": user.totp_enabled,
         "backup_codes_count": backup_codes_count(user.backup_codes),
+        "import_allowed": import_allowed,
+        "import_wait_sec": import_wait_sec,
         **extra,
     }
 

@@ -514,3 +514,17 @@ async def send_reset_code(telegram_id: int, username: str, code: str) -> bool:
         "Если вы не запрашивали сброс — проигнорируйте."
     )
     return await send_message(telegram_id, text)
+
+
+async def send_new_session_notification(telegram_id: int, ip: str, device: str, change_password_url: str) -> bool:
+    """Уведомить пользователя о новом входе в аккаунт."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    text = (
+        f"🔐 <b>Новый вход в аккаунт</b>\n\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"📱 Устройство: {device}\n"
+        f"🕐 Время: {now}\n\n"
+        f"Если это были не вы — <a href=\"{change_password_url}\">смените пароль</a>."
+    )
+    return await send_message(telegram_id, text)

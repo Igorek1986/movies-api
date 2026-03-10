@@ -55,6 +55,44 @@ def clear_2fa(ip: str):
     _reset(f"2fa:{ip}")
 
 
+def can_import(user_id: int) -> tuple[bool, int]:
+    """
+    Проверяет доступность импорта без записи попытки.
+    Returns (allowed, seconds_until_allowed).
+    """
+    key = f"import:{user_id}"
+    now = time.monotonic()
+    cooldown = 86400
+    entries = _windows.get(key, [])
+    if entries:
+        elapsed = now - entries[-1]
+        if elapsed < cooldown:
+            return False, int(cooldown - elapsed)
+    return True, 0
+
+
+def reset_import(user_id: int) -> None:
+    """Сбросить лимит импорта для пользователя (вызывается из админки)."""
+    _reset(f"import:{user_id}")
+
+
+def check_import(user_id: int) -> tuple[bool, int]:
+    """
+    JSON-импорт для simple-пользователей: 1 раз в 24 часа на аккаунт.
+    Returns (allowed, seconds_until_allowed).
+    """
+    key = f"import:{user_id}"
+    now = time.monotonic()
+    cooldown = 86400  # 24h
+    entries = _windows.get(key, [])
+    if entries:
+        elapsed = now - entries[-1]
+        if elapsed < cooldown:
+            return False, int(cooldown - elapsed)
+    _windows[key] = [now]
+    return True, 0
+
+
 def check_sync(user_id: int) -> tuple[bool, int]:
     """
     MyShows sync cooldown: 1 sync per 5 minutes per user.

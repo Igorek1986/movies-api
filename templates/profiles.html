@@ -181,6 +181,9 @@
   <details>
     <summary><strong>Синхронизация MyShows</strong> — импорт просмотренного</summary>
     <div class="details-body">
+      {% if user.role == "simple" %}
+      <p>🔒 Синхронизация MyShows доступна только для <strong>Premium</strong> аккаунтов.</p>
+      {% else %}
       <p>Все просмотренные фильмы и серии будут отмечены как 100% в выбранном устройстве.</p>
       <form id="myshowsSyncForm">
         <div class="grid">
@@ -212,6 +215,7 @@
           <span id="syncStatus"></span>
         </div>
       </form>
+      {% endif %}
     </div>
   </details>
 
@@ -221,6 +225,30 @@
   <details>
     <summary><strong>Импорт таймкодов</strong> — из Lampa или LampaC</summary>
     <div class="details-body">
+      {% if user.role == "simple" and not import_allowed %}
+      <p>⏳ Импорт уже использован. Повторите через
+        <strong id="importCountdown"></strong>.
+      </p>
+      <script>
+        (function() {
+          var sec = {{ import_wait_sec | default(0) }};
+          var el = document.getElementById('importCountdown');
+          function fmt(s) {
+            var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+            return h ? h+'ч '+m+'мин' : m ? m+'мин '+ss+'с' : ss+'с';
+          }
+          el.textContent = fmt(sec);
+          var t = setInterval(function() {
+            sec--;
+            if (sec <= 0) { clearInterval(t); el.textContent = '0с'; location.reload(); return; }
+            el.textContent = fmt(sec);
+          }, 1000);
+        })();
+      </script>
+      {% else %}
+      {% if user.role == "simple" %}
+      <p class="muted small">⚠️ Для вашего аккаунта импорт доступен <strong>1 раз в 24 часа</strong>.</p>
+      {% endif %}
       <div class="import-grid">
         <!-- Lampa (file_view) -->
         <div class="import-card">
@@ -281,6 +309,7 @@
           </form>
         </div>
       </div>
+      {% endif %}
     </div>
   </details>
 
