@@ -56,7 +56,7 @@
         </form>
 
         <!-- Сброс лимита импорта (только simple) -->
-        {% if u.role == "simple" %}
+        {% if u.role in ("simple", "premium") %}
         <form method="POST" action="/admin/user/{{ u.id }}/reset-import" style="margin:0">
           <button type="submit" class="btn-sm outline secondary" title="Сбросить лимит JSON-импорта">↺ импорт</button>
         </form>

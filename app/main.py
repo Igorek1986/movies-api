@@ -39,6 +39,7 @@ from app.admin import router as admin_router
 from app.api.dependencies import get_device_by_token
 from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
 from app.utils import lampa_hash, build_episode_hash_string
+from app.constants import WATCHED_THRESHOLD
 from app.db.database import get_db
 
 settings = get_settings()
@@ -547,7 +548,7 @@ def _item_card_id(item: dict) -> str | None:
 
 
 def _tv_show_watched(
-    item: dict, item_timecodes: dict[str, str], threshold: int = 90
+    item: dict, item_timecodes: dict[str, str], threshold: int = WATCHED_THRESHOLD
 ) -> bool:
     """
     Проверяет, все ли нужные эпизоды сериала просмотрены.
@@ -803,11 +804,11 @@ async def get_category(
                                 s_air = s.get("air_date") or ""
                                 if s_air and s_air <= today_str:
                                     total_aired += ep_count
-                        watched = sum(1 for p in v["items"].values() if p >= 90)
+                        watched = sum(1 for p in v["items"].values() if p >= WATCHED_THRESHOLD)
                         return watched < total_aired
                     except Exception:
                         pass
-                return v["max_pct"] < 90
+                return v["max_pct"] < WATCHED_THRESHOLD
 
             unfinished = [
                 (cid, v["max_pct"], v["last_watched"])

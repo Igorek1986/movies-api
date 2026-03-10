@@ -23,6 +23,11 @@ from app.utils import (
 from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app import rate_limit
+from app.constants import (
+    SESSION_TTL_DAYS, SESSION_RENEW_DAYS,
+    RESET_CODE_TTL_MINUTES, PENDING_2FA_TTL_SEC,
+    IMPORT_DAILY_LIMITS,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,11 +35,9 @@ templates = Jinja2Templates(directory="templates")
 settings = get_settings()
 
 COOKIE_NAME = "session_key"
-COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 дней
-SESSION_TTL = timedelta(days=30)
-RESET_CODE_TTL_MINUTES = 15
+COOKIE_MAX_AGE = SESSION_TTL_DAYS * 86400
+SESSION_TTL = timedelta(days=SESSION_TTL_DAYS)
 PENDING_2FA_COOKIE = "2fa_pending"
-PENDING_2FA_TTL = 600  # 10 мин
 
 
 async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
@@ -87,7 +90,11 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         select(TelegramUser).where(TelegramUser.user_id == user.id)
     )
     tg = tg_result.scalar_one_or_none()
-    import_allowed, import_wait_sec = rate_limit.can_import(user.id) if user.role == "simple" else (True, 0)
+    daily_limit = IMPORT_DAILY_LIMITS.get(user.role)
+    if daily_limit is not None:
+        import_allowed, import_wait_sec, import_remaining = rate_limit.can_import(user.id, daily_limit)
+    else:
+        import_allowed, import_wait_sec, import_remaining = True, 0, None
     return {
         "request": request,
         "user": user,
@@ -99,6 +106,8 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "backup_codes_count": backup_codes_count(user.backup_codes),
         "import_allowed": import_allowed,
         "import_wait_sec": import_wait_sec,
+        "import_daily_limit": daily_limit,
+        "import_remaining": import_remaining,
         **extra,
     }
 
@@ -143,13 +152,13 @@ async def login_submit(
     # Если включена 2FA — перенаправляем на страницу проверки кода
     if user.totp_enabled:
         pending_token = generate_api_key()
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=PENDING_2FA_TTL)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=PENDING_2FA_TTL_SEC)
         db.add(Totp2faPending(user_id=user.id, token=pending_token, expires_at=expires_at))
         await db.commit()
         response = RedirectResponse(url="/verify-2fa", status_code=status.HTTP_302_FOUND)
         response.set_cookie(
             key=PENDING_2FA_COOKIE, value=pending_token,
-            httponly=True, max_age=PENDING_2FA_TTL, samesite="lax",
+            httponly=True, max_age=PENDING_2FA_TTL_SEC, samesite="lax",
         )
         return response
 

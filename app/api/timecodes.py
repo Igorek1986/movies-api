@@ -34,18 +34,17 @@ from app.db.database import get_db, async_session_maker
 from app import rate_limit
 from app.db.models import Device, Timecode, MediaCard, LampaProfile, User
 from app.api.dependencies import get_device_by_token
+from app.constants import WATCHED_THRESHOLD, PROFILE_LIMITS, IMPORT_DAILY_LIMITS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/timecode", tags=["timecodes"])
-
-WATCHED_THRESHOLD = 90  # процент для пометки «просмотрено»
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 
-_PROFILE_LIMITS = {"simple": 3, "premium": 8, "super": None}
+_PROFILE_LIMITS = PROFILE_LIMITS
 
 
 def _require_device(device: Device | None) -> Device:
@@ -55,17 +54,21 @@ def _require_device(device: Device | None) -> Device:
 
 
 async def _check_import_rate_limit(device: Device, db: AsyncSession) -> None:
-    """Для simple-пользователей: 1 JSON-импорт в 24 часа на аккаунт."""
+    """Проверяет дневной лимит JSON-импорта по роли пользователя."""
     user = await db.get(User, device.user_id)
-    if user and user.role == "simple":
-        allowed, wait_sec = rate_limit.check_import(device.user_id)
-        if not allowed:
-            h, m = divmod(wait_sec // 60, 60)
-            wait_str = f"{h} ч {m} мин" if h else f"{m} мин"
-            raise HTTPException(
-                status_code=429,
-                detail=f"Импорт доступен раз в 24 часа. Повторите через {wait_str}.",
-            )
+    if not user:
+        return
+    daily_limit = IMPORT_DAILY_LIMITS.get(user.role)
+    if daily_limit is None:
+        return  # super — без ограничений
+    allowed, wait_sec = rate_limit.check_import(device.user_id, daily_limit)
+    if not allowed:
+        h, m = divmod(wait_sec // 60, 60)
+        wait_str = f"{h} ч {m} мин" if h else f"{m} мин"
+        raise HTTPException(
+            status_code=429,
+            detail=f"Лимит импорта исчерпан. Повторите через {wait_str}.",
+        )
 
 
 async def _assert_profile_allowed(device: Device, profile_id: str, db: AsyncSession) -> None:

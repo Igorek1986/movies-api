@@ -14,13 +14,10 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 
-# Роли пользователей и лимиты устройств
+# Роли пользователей
 USER_ROLES = ("simple", "premium", "super")
-DEVICE_LIMITS = {
-    "simple": 3,
-    "premium": 8,
-    "super": None,  # без ограничений
-}
+
+from app.constants import DEVICE_LIMITS  # noqa: E402 — используется в моделях и импортируется снаружи
 
 
 class User(Base):

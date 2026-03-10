@@ -19,11 +19,10 @@ from sqlalchemy import select, delete
 from app.db.database import get_db
 from app.db.models import TelegramUser, TelegramLinkCode, User
 from app.api.dependencies import get_current_user
+from app.constants import TELEGRAM_LINK_CODE_TTL_MINUTES as LINK_CODE_TTL_MINUTES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-LINK_CODE_TTL_MINUTES = 10
 
 
 # ─── Генерация кода привязки ──────────────────────────────────────────────────

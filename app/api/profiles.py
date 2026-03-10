@@ -12,12 +12,11 @@ from app.db.database import get_db
 from app.db.models import Profile, DeviceCode, Timecode, User
 from app.utils import generate_profile_api_key, generate_device_code, validate_name
 from app.api.dependencies import get_current_user
+from app.constants import DEVICE_CODE_TTL_MINUTES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
-
-DEVICE_CODE_TTL_MINUTES = 10
 
 
 # ---------------------------------------------------------------------------

@@ -6,10 +6,11 @@ from sqlalchemy import select
 
 from app.db.database import get_db
 from app.db.models import User, Device, Session
+from app.constants import SESSION_TTL_DAYS, SESSION_RENEW_DAYS
 
-SESSION_TTL = timedelta(days=30)
-SESSION_RENEW_BEFORE = timedelta(days=15)  # продлеваем, если до истечения < 15 дней
-COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+SESSION_TTL = timedelta(days=SESSION_TTL_DAYS)
+SESSION_RENEW_BEFORE = timedelta(days=SESSION_RENEW_DAYS)
+COOKIE_MAX_AGE = SESSION_TTL_DAYS * 86400
 
 
 async def get_current_user(

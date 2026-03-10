@@ -225,8 +225,8 @@
   <details>
     <summary><strong>Импорт таймкодов</strong> — из Lampa или LampaC</summary>
     <div class="details-body">
-      {% if user.role == "simple" and not import_allowed %}
-      <p>⏳ Импорт уже использован. Повторите через
+      {% if import_daily_limit is not none and not import_allowed %}
+      <p>⏳ Лимит импорта исчерпан. Повторите через
         <strong id="importCountdown"></strong>.
       </p>
       <script>
@@ -246,8 +246,13 @@
         })();
       </script>
       {% else %}
-      {% if user.role == "simple" %}
-      <p class="muted small">⚠️ Для вашего аккаунта импорт доступен <strong>1 раз в 24 часа</strong>.</p>
+      {% if import_daily_limit is not none %}
+      {% set used = import_daily_limit - import_remaining %}
+      {% if used > 0 %}
+      <p class="muted small">⚠️ Использовано {{ used }} из {{ import_daily_limit }} импортов за сутки — осталось <strong>{{ import_remaining }}</strong>.</p>
+      {% else %}
+      <p class="muted small">⚠️ Доступно <strong>{{ import_daily_limit }}</strong> импортов в сутки.</p>
+      {% endif %}
       {% endif %}
       <div class="import-grid">
         <!-- Lampa (file_view) -->

@@ -17,17 +17,19 @@ from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, DEVICE_LIMITS, TelegramUser
 from app import rate_limit
+from app.constants import DEVICE_CODE_TTL_MINUTES, PROFILE_LIMITS, IMPORT_DAILY_LIMITS
 
-LAMPA_PROFILE_LIMITS: dict[str, int | None] = {"simple": 3, "premium": 8, "super": None}
+LAMPA_PROFILE_LIMITS = PROFILE_LIMITS  # обратная совместимость для кода внутри модуля
 
 
 def _import_ctx(user: User) -> dict:
     """Переменные для отображения лимита импорта в шаблоне."""
-    if user.role == "simple":
-        allowed, wait_sec = rate_limit.can_import(user.id)
+    daily_limit = IMPORT_DAILY_LIMITS.get(user.role)
+    if daily_limit is not None:
+        allowed, wait_sec, remaining = rate_limit.can_import(user.id, daily_limit)
     else:
-        allowed, wait_sec = True, 0
-    return {"import_allowed": allowed, "import_wait_sec": wait_sec}
+        allowed, wait_sec, remaining = True, 0, None
+    return {"import_allowed": allowed, "import_wait_sec": wait_sec, "import_daily_limit": daily_limit, "import_remaining": remaining}
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string, backup_codes_count
@@ -36,8 +38,6 @@ from app.api.dependencies import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
-
-DEVICE_CODE_TTL_MINUTES = 10
 
 
 # ---------------------------------------------------------------------------
