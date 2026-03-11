@@ -39,7 +39,7 @@ from app.admin import router as admin_router
 from app.api.dependencies import get_device_by_token
 from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
 from app.utils import lampa_hash, build_episode_hash_string
-from app.constants import WATCHED_THRESHOLD
+from app import settings_cache as _sc
 from app.db.database import get_db
 
 settings = get_settings()
@@ -97,6 +97,11 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("✅ Database tables created")
 
+    # Загрузка настроек приложения из БД
+    from app import settings_cache
+    async with async_session_maker() as _settings_db:
+        await settings_cache.load(_settings_db)
+
     # Загрузка TMDB-кэша из PostgreSQL
     tmdb_cache = await load_cache_from_db()
     logger.info(f"TMDB кэш загружен из БД, записей: {len(tmdb_cache)}")
@@ -121,9 +126,15 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("TELEGRAM_BOT_TOKEN не задан — бот отключён")
 
+    # Запуск фоновых задач (premium expiry check, etc.)
+    from app.tasks import start_tasks
+    start_tasks()
+
     yield  # Приложение работает
 
     # Shutdown
+    from app.tasks import stop_tasks
+    stop_tasks()
     if settings.TELEGRAM_BOT_TOKEN:
         from app.bot import get_bot, get_dp
 
@@ -548,7 +559,7 @@ def _item_card_id(item: dict) -> str | None:
 
 
 def _tv_show_watched(
-    item: dict, item_timecodes: dict[str, str], threshold: int = WATCHED_THRESHOLD
+    item: dict, item_timecodes: dict[str, str], threshold: int | None = None
 ) -> bool:
     """
     Проверяет, все ли нужные эпизоды сериала просмотрены.
@@ -561,6 +572,8 @@ def _tv_show_watched(
     Аниме (нет last_episode_to_air):
       - проверяем все серии во всех сезонах по seasons[].episode_count
     """
+    if threshold is None:
+        threshold = _sc.get_int("watched_threshold")
     original_name = item.get("original_name") or item.get("original_title", "")
     if not original_name:
         logger.debug(
@@ -804,11 +817,11 @@ async def get_category(
                                 s_air = s.get("air_date") or ""
                                 if s_air and s_air <= today_str:
                                     total_aired += ep_count
-                        watched = sum(1 for p in v["items"].values() if p >= WATCHED_THRESHOLD)
+                        watched = sum(1 for p in v["items"].values() if p >= _sc.get_int("watched_threshold"))
                         return watched < total_aired
                     except Exception:
                         pass
-                return v["max_pct"] < WATCHED_THRESHOLD
+                return v["max_pct"] < _sc.get_int("watched_threshold")
 
             unfinished = [
                 (cid, v["max_pct"], v["last_watched"])

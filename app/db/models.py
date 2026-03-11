@@ -17,7 +17,18 @@ from app.db.database import Base
 # Роли пользователей
 USER_ROLES = ("simple", "premium", "super")
 
-from app.constants import DEVICE_LIMITS  # noqa: E402 — используется в моделях и импортируется снаружи
+
+class AppSetting(Base):
+    """Настройки приложения — ключ/значение. Изменяются через админку без перезапуска."""
+
+    __tablename__ = "app_settings"
+
+    key        = Column(String(100), primary_key=True)
+    value      = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<AppSetting({self.key}={self.value})>"
 
 
 class User(Base):
@@ -39,6 +50,16 @@ class User(Base):
     totp_secret  = Column(String(64), nullable=True)
     totp_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     backup_codes = Column(Text, nullable=True)   # JSON list of SHA-256 hex digests
+    # Premium subscription expiry
+    premium_until       = Column(DateTime(timezone=True), nullable=True)
+    # Grace period: timecodes kept N days after premium expiry if over simple limit
+    timecode_grace_until = Column(DateTime(timezone=True), nullable=True)
+    # Deferred Telegram notification (quiet hours)
+    notify_premium_after = Column(DateTime(timezone=True), nullable=True)
+    # Whether the 3-day advance warning has been sent (reset when premium is re-granted)
+    premium_warned = Column(Boolean, nullable=False, default=False, server_default="false")
+    # User's preferred timezone (e.g. "Europe/Moscow"); None = use server default
+    timezone = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

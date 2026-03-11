@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -9,9 +10,9 @@ from sqlalchemy import select, func
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import User, Device, USER_ROLES, DEVICE_LIMITS
+from app.db.models import User, Device, USER_ROLES
 from app.api.dependencies import get_current_user
-from app import rate_limit
+from app import rate_limit, settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
@@ -111,14 +112,16 @@ async def admin_dashboard(
             select(func.count()).select_from(Device).where(Device.user_id == u.id)
         )
         device_count = cnt_result.scalar() or 0
-        limit = DEVICE_LIMITS.get(u.role, 3)
+        dlimit = settings_cache.get_role_limit(u.role, "device_limit")
         users_data.append({
             "id": u.id,
             "username": u.username,
             "role": u.role,
             "is_admin": u.is_admin,
             "device_count": device_count,
-            "device_limit": limit if limit is not None else "∞",
+            "device_limit": dlimit if dlimit is not None else "∞",
+            "premium_until": u.premium_until,
+            "timecode_grace_until": u.timecode_grace_until,
             "created_at": u.created_at,
         })
 
@@ -128,7 +131,6 @@ async def admin_dashboard(
         "users": users_data,
         "roles": USER_ROLES,
         "success": request.query_params.get("success"),
-        "device_limits": DEVICE_LIMITS,
     })
 
 
@@ -157,6 +159,18 @@ async def change_user_role(
 
     old_role = user.role
     user.role = role
+
+    if role == "premium":
+        duration_days = settings_cache.get_int("premium_duration_days")
+        # Истекает в конец (23:59:59) дня через N дней — не зависит от времени выдачи
+        expiry_day = (datetime.now(timezone.utc) + timedelta(days=duration_days)).replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+        user.premium_until = expiry_day
+        user.premium_warned = False  # сброс чтобы предупреждение отправилось при следующем сроке
+    elif role in ("simple", "super"):
+        user.premium_until = None
+
     await db.commit()
 
     logger.info(f"Admin: user {user.username} role changed {old_role} → {role}")
@@ -205,3 +219,55 @@ async def reset_user_import(
     from urllib.parse import quote
     msg = quote(f"Лимит импорта сброшен для {user.username}")
     return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Настройки приложения
+# ---------------------------------------------------------------------------
+
+@router.get("/settings", response_class=HTMLResponse)
+async def admin_settings_page(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    current_user = await _get_admin_user(request, response, db)
+    return templates.TemplateResponse("admin_settings.html", {
+        "request": request,
+        "user": current_user,
+        "settings": settings_cache.all_settings(),
+        "groups": settings_cache.GROUPS,
+        "labels": settings_cache.LABELS,
+        "success": request.query_params.get("success"),
+    })
+
+
+@router.post("/settings")
+async def admin_settings_update(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    form = await request.form()
+    allowed_keys = set(settings_cache.DEFAULTS.keys())
+
+    for key, value in form.items():
+        if key not in allowed_keys:
+            continue
+        value = str(value).strip()
+        if value == "":
+            continue
+        await settings_cache.set_setting(key, value, db)
+
+    logger.info("Admin: app settings updated")
+    from urllib.parse import quote
+    return RedirectResponse(
+        url=f"/admin/settings?success={quote('Настройки сохранены')}",
+        status_code=302,
+    )

@@ -419,15 +419,23 @@ async def sync_myshows(
     if not current_user:
         raise HTTPException(status_code=401, detail="Необходима авторизация")
 
+    from app import settings_cache
+
     if current_user.role == "simple":
         raise HTTPException(status_code=403, detail="Синхронизация MyShows доступна только для Premium")
 
-    allowed, wait_sec = rate_limit.check_sync(current_user.id)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail={"message": "Синхронизация недавно запускалась.", "wait_sec": wait_sec},
-        )
+    # Super без лимита (myshows_daily == 0), premium и другие — проверяем cooldown
+    myshows_limit = settings_cache.get_role_limit(current_user.role, "myshows_daily")
+    if myshows_limit is not None:
+        allowed, wait_sec = rate_limit.check_sync(current_user.id)
+        if not allowed:
+            hours = wait_sec // 3600
+            mins  = (wait_sec % 3600) // 60
+            wait_str = f"{hours} ч {mins} мин" if hours else f"{mins} мин"
+            raise HTTPException(
+                status_code=429,
+                detail={"message": f"Синхронизация уже выполнялась сегодня. Следующая через {wait_str}.", "wait_sec": wait_sec},
+            )
 
     device_result = await db.execute(
         select(Device).where(Device.id == device_id, Device.user_id == current_user.id)
@@ -437,8 +445,7 @@ async def sync_myshows(
         raise HTTPException(status_code=404, detail="Устройство не найдено")
 
     # Проверяем лимит профилей
-    _limits = {"simple": 3, "premium": 8, "super": None}
-    limit = _limits.get(current_user.role, 3)
+    limit = settings_cache.get_role_limit(current_user.role, "profile_limit")
     if limit is not None:
         pid = profile_id or ""
         if pid:

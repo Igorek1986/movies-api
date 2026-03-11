@@ -34,7 +34,7 @@ from app.db.database import get_db, async_session_maker
 from app import rate_limit
 from app.db.models import Device, Timecode, MediaCard, LampaProfile, User
 from app.api.dependencies import get_device_by_token
-from app.constants import WATCHED_THRESHOLD, PROFILE_LIMITS, IMPORT_DAILY_LIMITS
+from app import settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/timecode", tags=["timecodes"])
@@ -43,9 +43,6 @@ router = APIRouter(prefix="/timecode", tags=["timecodes"])
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
-
-_PROFILE_LIMITS = PROFILE_LIMITS
-
 
 def _require_device(device: Device | None) -> Device:
     if not device:
@@ -58,7 +55,7 @@ async def _check_import_rate_limit(device: Device, db: AsyncSession) -> None:
     user = await db.get(User, device.user_id)
     if not user:
         return
-    daily_limit = IMPORT_DAILY_LIMITS.get(user.role)
+    daily_limit = settings_cache.get_role_limit(user.role, "import_daily")
     if daily_limit is None:
         return  # super — без ограничений
     allowed, wait_sec = rate_limit.check_import(device.user_id, daily_limit)
@@ -75,7 +72,7 @@ async def _assert_profile_allowed(device: Device, profile_id: str, db: AsyncSess
     """Проверяет лимит профилей. Бросает 403 если профиль новый и лимит исчерпан."""
     user = (await db.execute(select(User).where(User.id == device.user_id))).scalar_one_or_none()
     role = user.role if user else "simple"
-    limit = _PROFILE_LIMITS.get(role, 3)
+    limit = settings_cache.get_role_limit(role, "profile_limit") or 3
     if limit is None:
         return  # super — без лимита
 
@@ -176,9 +173,11 @@ async def load_device_timecodes(
 
 def get_watched_movie_ids(
     timecodes: dict[str, dict[str, str]],
-    threshold: int = WATCHED_THRESHOLD,
+    threshold: int | None = None,
 ) -> set[str]:
     """Возвращает card_id фильмов, где хоть один таймкод >= threshold."""
+    if threshold is None:
+        threshold = settings_cache.get_int("watched_threshold")
     watched = set()
     for card_id, items in timecodes.items():
         if card_id.endswith("_tv"):

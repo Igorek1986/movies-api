@@ -1,0 +1,185 @@
+"""
+In-memory cache for app_settings table.
+
+Load on startup via load(db). Updates via set_setting() apply immediately
+to both DB and memory — no restart needed.
+"""
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Default values (used if DB row is missing)
+DEFAULTS: dict[str, str] = {
+    # ── Simple role ────────────────────────────────────────────────────────────
+    "simple_device_limit":        "3",
+    "simple_profile_limit":       "3",
+    "simple_timecode_limit":      "3000",
+    "simple_import_daily":        "1",
+    # ── Premium role ───────────────────────────────────────────────────────────
+    "premium_device_limit":       "8",
+    "premium_profile_limit":      "8",
+    "premium_timecode_limit":     "10000",
+    "premium_import_daily":       "3",
+    "premium_myshows_daily":      "1",
+    "premium_duration_days":      "30",
+    # ── Super role (0 = unlimited) ─────────────────────────────────────────────
+    "super_device_limit":         "0",
+    "super_profile_limit":        "0",
+    "super_timecode_limit":       "0",
+    "super_import_daily":         "0",
+    "super_myshows_daily":        "0",
+    # ── Grace period after premium expiry ──────────────────────────────────────
+    "timecode_grace_days":        "3",
+    # ── Telegram quiet hours (no notifications between start and end) ──────────
+    "quiet_hours_start":          "22",
+    "quiet_hours_end":            "9",
+    "default_timezone":           "Europe/Moscow",
+    # ── General ────────────────────────────────────────────────────────────────
+    "watched_threshold":          "90",
+    "session_ttl_days":           "30",
+    "session_renew_days":         "15",
+    "device_code_ttl_minutes":    "10",
+    "telegram_link_ttl_minutes":  "10",
+    "reset_code_ttl_minutes":     "15",
+    "pending_2fa_ttl_sec":        "600",
+    # ── Rate limits ────────────────────────────────────────────────────────────
+    "rate_login_max":             "10",
+    "rate_login_window_sec":      "900",
+    "rate_register_max":          "5",
+    "rate_register_window_sec":   "3600",
+    "rate_forgot_max":            "3",
+    "rate_forgot_window_sec":     "3600",
+    "rate_2fa_max":               "5",
+    "rate_2fa_window_sec":        "900",
+    "sync_cooldown_sec":          "86400",
+}
+
+# Human-readable labels for the admin UI (key → label)
+LABELS: dict[str, str] = {
+    "simple_device_limit":        "Simple — устройств",
+    "simple_profile_limit":       "Simple — профилей",
+    "simple_timecode_limit":      "Simple — таймкодов на профиль",
+    "simple_import_daily":        "Simple — импортов в сутки",
+    "premium_device_limit":       "Premium — устройств",
+    "premium_profile_limit":      "Premium — профилей",
+    "premium_timecode_limit":     "Premium — таймкодов на профиль",
+    "premium_import_daily":       "Premium — импортов в сутки",
+    "premium_myshows_daily":      "Premium — MyShows синков в сутки",
+    "premium_duration_days":      "Premium — длительность (дней)",
+    "super_device_limit":         "Super — устройств (0=∞)",
+    "super_profile_limit":        "Super — профилей (0=∞)",
+    "super_timecode_limit":       "Super — таймкодов на профиль (0=∞)",
+    "super_import_daily":         "Super — импортов в сутки (0=∞)",
+    "super_myshows_daily":        "Super — MyShows синков в сутки (0=∞)",
+    "timecode_grace_days":        "Грейс-период таймкодов (дней)",
+    "quiet_hours_start":          "Тихий час — начало",
+    "quiet_hours_end":            "Тихий час — конец",
+    "default_timezone":           "Таймзона по умолчанию",
+    "watched_threshold":          "Порог «просмотрено» (%)",
+    "session_ttl_days":           "Срок сессии (дней)",
+    "session_renew_days":         "Продление сессии (дней до истечения)",
+    "device_code_ttl_minutes":    "TTL кода устройства (мин)",
+    "telegram_link_ttl_minutes":  "TTL кода Telegram (мин)",
+    "reset_code_ttl_minutes":     "TTL кода сброса пароля (мин)",
+    "pending_2fa_ttl_sec":        "Ожидание 2FA (сек)",
+    "rate_login_max":             "Rate: login — попыток",
+    "rate_login_window_sec":      "Rate: login — окно (сек)",
+    "rate_register_max":          "Rate: register — попыток",
+    "rate_register_window_sec":   "Rate: register — окно (сек)",
+    "rate_forgot_max":            "Rate: forgot — попыток",
+    "rate_forgot_window_sec":     "Rate: forgot — окно (сек)",
+    "rate_2fa_max":               "Rate: 2FA — попыток",
+    "rate_2fa_window_sec":        "Rate: 2FA — окно (сек)",
+    "sync_cooldown_sec":          "MyShows cooldown (сек)",
+}
+
+# Ordered groups for the UI
+GROUPS: list[tuple[str, list[str]]] = [
+    ("Лимиты Simple", [
+        "simple_device_limit", "simple_profile_limit",
+        "simple_timecode_limit", "simple_import_daily",
+    ]),
+    ("Лимиты Premium", [
+        "premium_device_limit", "premium_profile_limit",
+        "premium_timecode_limit", "premium_import_daily",
+        "premium_myshows_daily", "premium_duration_days",
+    ]),
+    ("Лимиты Super (0 = без ограничений)", [
+        "super_device_limit", "super_profile_limit",
+        "super_timecode_limit", "super_import_daily", "super_myshows_daily",
+    ]),
+    ("Общие настройки", [
+        "timecode_grace_days", "watched_threshold",
+        "session_ttl_days", "session_renew_days",
+        "device_code_ttl_minutes", "telegram_link_ttl_minutes",
+        "reset_code_ttl_minutes", "pending_2fa_ttl_sec",
+    ]),
+    ("Уведомления (тихий час)", [
+        "quiet_hours_start", "quiet_hours_end", "default_timezone",
+    ]),
+    ("Rate Limits", [
+        "rate_login_max", "rate_login_window_sec",
+        "rate_register_max", "rate_register_window_sec",
+        "rate_forgot_max", "rate_forgot_window_sec",
+        "rate_2fa_max", "rate_2fa_window_sec",
+        "sync_cooldown_sec",
+    ]),
+]
+
+_cache: dict[str, str] = dict(DEFAULTS)
+
+
+def get(key: str, default: str | None = None) -> str | None:
+    return _cache.get(key, default if default is not None else DEFAULTS.get(key))
+
+
+def get_int(key: str) -> int:
+    val = get(key)
+    try:
+        return int(val) if val is not None else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def get_role_limit(role: str, resource: str) -> int | None:
+    """Return limit for role+resource, or None if unlimited (value == 0).
+
+    resource examples: 'device_limit', 'profile_limit', 'timecode_limit',
+                       'import_daily', 'myshows_daily'
+    """
+    val = get_int(f"{role}_{resource}")
+    return None if val == 0 else val
+
+
+def all_settings() -> dict[str, str]:
+    """Return a copy of the current in-memory settings."""
+    # Fill missing keys with defaults
+    result = dict(DEFAULTS)
+    result.update(_cache)
+    return result
+
+
+async def load(db) -> None:
+    """Load all settings from DB into memory. Call once on startup."""
+    from app.db.models import AppSetting
+    from sqlalchemy import select
+
+    result = await db.execute(select(AppSetting))
+    rows = result.scalars().all()
+    for row in rows:
+        _cache[row.key] = row.value
+    logger.info(f"Settings loaded: {len(rows)} keys from DB")
+
+
+async def set_setting(key: str, value: str, db) -> None:
+    """Persist a setting to DB and update in-memory cache immediately."""
+    from app.db.models import AppSetting
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = pg_insert(AppSetting).values(key=key, value=value)
+    stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": value})
+    await db.execute(stmt)
+    await db.commit()
+    _cache[key] = value
+    logger.info(f"Setting updated: {key} = {value!r}")

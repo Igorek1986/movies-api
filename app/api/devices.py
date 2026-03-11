@@ -15,16 +15,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, DEVICE_LIMITS, TelegramUser
-from app import rate_limit
-from app.constants import DEVICE_CODE_TTL_MINUTES, PROFILE_LIMITS, IMPORT_DAILY_LIMITS
-
-LAMPA_PROFILE_LIMITS = PROFILE_LIMITS  # обратная совместимость для кода внутри модуля
+from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, TelegramUser
+from app import rate_limit, settings_cache
 
 
 def _import_ctx(user: User) -> dict:
     """Переменные для отображения лимита импорта в шаблоне."""
-    daily_limit = IMPORT_DAILY_LIMITS.get(user.role)
+    daily_limit = settings_cache.get_role_limit(user.role, "import_daily")
     if daily_limit is not None:
         allowed, wait_sec, remaining = rate_limit.can_import(user.id, daily_limit)
     else:
@@ -71,7 +68,7 @@ async def _get_device_or_404(device_id: int, user: User, db: AsyncSession) -> De
 
 
 async def _check_device_limit(user: User, db: AsyncSession) -> None:
-    limit = DEVICE_LIMITS.get(user.role, 3)
+    limit = settings_cache.get_role_limit(user.role, "device_limit")
     if limit is None:
         return  # super — без ограничений
     cnt_result = await db.execute(
@@ -101,7 +98,7 @@ async def profiles_page(
         return RedirectResponse(url="/login", status_code=302)
 
     devices = await _devices_with_stats(current_user.id, db)
-    limit = DEVICE_LIMITS.get(current_user.role, 3)
+    limit = settings_cache.get_role_limit(current_user.role, "device_limit")
     tg_result = await db.execute(
         select(TelegramUser).where(TelegramUser.user_id == current_user.id)
     )
@@ -136,7 +133,7 @@ async def create_device(
 
     async def _err(msg):
         devices = await _devices_with_stats(current_user.id, db)
-        limit = DEVICE_LIMITS.get(current_user.role, 3)
+        limit = settings_cache.get_role_limit(current_user.role, "device_limit")
         return templates.TemplateResponse("profiles.html", {
             "request": request, "user": current_user, "profiles": devices,
             "device_limit": limit, "error": msg, **_import_ctx(current_user),
@@ -185,7 +182,7 @@ async def rename_device(
     is_valid, error_msg = validate_name(new_name)
     if not is_valid:
         devices = await _devices_with_stats(current_user.id, db)
-        limit = DEVICE_LIMITS.get(current_user.role, 3)
+        limit = settings_cache.get_role_limit(current_user.role, "device_limit")
         return templates.TemplateResponse("profiles.html", {
             "request": request, "user": current_user, "profiles": devices,
             "device_limit": limit, "error": error_msg, **_import_ctx(current_user),
@@ -273,14 +270,14 @@ async def create_device_code(db: AsyncSession = Depends(get_db)):
     else:
         raise HTTPException(status_code=503, detail="Не удалось сгенерировать код")
 
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=DEVICE_CODE_TTL_MINUTES)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings_cache.get_int("device_code_ttl_minutes"))
     device_code = DeviceCode(code=code, expires_at=expires_at)
     db.add(device_code)
     await db.commit()
 
     return {
         "code": code,
-        "expires_in": DEVICE_CODE_TTL_MINUTES * 60,
+        "expires_in": settings_cache.get_int("device_code_ttl_minutes") * 60,
         "poll_interval": 3,
     }
 
@@ -536,7 +533,7 @@ async def api_profile_ids(
     # "Основной" (пустой profile_id) доступен если у него есть таймкоды
     # ИЛИ если лимит профилей не исчерпан
     lp_count = len(lp_map)
-    limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+    limit = settings_cache.get_role_limit(current_user.role, "profile_limit")
     основной_has_tc = "" in tc_ids
     основной_available = основной_has_tc or (limit is None or lp_count < limit)
 
@@ -579,7 +576,7 @@ async def api_set_profile_name(
             select(func.count()).select_from(LampaProfile)
             .where(LampaProfile.device_id == body.device_id)
         )).scalar() or 0
-        limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+        limit = settings_cache.get_role_limit(current_user.role, "profile_limit")
         if limit is not None and count >= limit:
             raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
 
@@ -620,7 +617,7 @@ async def api_create_lampa_profile(
     )
     count = count_result.scalar() or 0
 
-    limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+    limit = settings_cache.get_role_limit(current_user.role, "profile_limit")
     if limit is not None and count >= limit:
         raise HTTPException(
             status_code=403,
@@ -718,7 +715,7 @@ async def api_lampa_profile_quota(
         .where(LampaProfile.device_id == device_id)
     )
     count = count_result.scalar() or 0
-    limit = LAMPA_PROFILE_LIMITS.get(current_user.role, 3)
+    limit = settings_cache.get_role_limit(current_user.role, "profile_limit")
     return {"count": count, "limit": limit}
 
 

@@ -19,7 +19,7 @@ from sqlalchemy import select, delete
 from app.db.database import get_db
 from app.db.models import TelegramUser, TelegramLinkCode, User
 from app.api.dependencies import get_current_user
-from app.constants import TELEGRAM_LINK_CODE_TTL_MINUTES as LINK_CODE_TTL_MINUTES
+from app import settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,14 +51,14 @@ async def generate_link_code(
     else:
         raise HTTPException(status_code=503, detail="Не удалось сгенерировать код")
 
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=LINK_CODE_TTL_MINUTES)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings_cache.get_int("telegram_link_ttl_minutes"))
     db.add(TelegramLinkCode(user_id=current_user.id, code=code, expires_at=expires_at))
     await db.commit()
 
     from app.config import get_settings
     return {
         "code": code,
-        "expires_in": LINK_CODE_TTL_MINUTES * 60,
+        "expires_in": settings_cache.get_int("telegram_link_ttl_minutes") * 60,
         "bot_name": get_settings().TELEGRAM_BOT_NAME,
     }
 

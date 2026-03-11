@@ -14,7 +14,7 @@ from app.db.database import get_db
 import string
 import json as _json
 from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending, Session
-from app.api.devices import _devices_with_stats, DEVICE_LIMITS
+from app.api.devices import _devices_with_stats
 from app.utils import (
     hash_password, verify_password, generate_api_key, validate_password, validate_name,
     generate_totp_secret, get_totp_uri, verify_totp, make_totp_qr_base64,
@@ -22,12 +22,7 @@ from app.utils import (
 )
 from app.api.dependencies import get_current_user
 from app.config import get_settings
-from app import rate_limit
-from app.constants import (
-    SESSION_TTL_DAYS, SESSION_RENEW_DAYS,
-    RESET_CODE_TTL_MINUTES, PENDING_2FA_TTL_SEC,
-    IMPORT_DAILY_LIMITS,
-)
+from app import rate_limit, settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,8 +30,6 @@ templates = Jinja2Templates(directory="templates")
 settings = get_settings()
 
 COOKIE_NAME = "session_key"
-COOKIE_MAX_AGE = SESSION_TTL_DAYS * 86400
-SESSION_TTL = timedelta(days=SESSION_TTL_DAYS)
 PENDING_2FA_COOKIE = "2fa_pending"
 
 
@@ -59,7 +52,7 @@ async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
 async def _create_session(db: AsyncSession, user_id: int, request: Request) -> str:
     """Создаёт запись Session и возвращает ключ для cookie."""
     key = generate_api_key()
-    expires_at = datetime.now(timezone.utc) + SESSION_TTL
+    expires_at = datetime.now(timezone.utc) + timedelta(days=settings_cache.get_int("session_ttl_days"))
     ip = get_real_ip(request)
     ua = request.headers.get("User-Agent", "")[:500]
     db.add(Session(user_id=user_id, key=key, expires_at=expires_at, ip=ip, user_agent=ua))
@@ -78,7 +71,7 @@ async def _delete_all_sessions(db: AsyncSession, user_id: int):
 def _set_session_cookie(response, session_key: str):
     response.set_cookie(
         key=COOKIE_NAME, value=session_key,
-        httponly=True, max_age=COOKIE_MAX_AGE, samesite="lax",
+        httponly=True, max_age=settings_cache.get_int("session_ttl_days") * 86400, samesite="lax",
     )
 
 
@@ -90,7 +83,7 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         select(TelegramUser).where(TelegramUser.user_id == user.id)
     )
     tg = tg_result.scalar_one_or_none()
-    daily_limit = IMPORT_DAILY_LIMITS.get(user.role)
+    daily_limit = settings_cache.get_role_limit(user.role, "import_daily")
     if daily_limit is not None:
         import_allowed, import_wait_sec, import_remaining = rate_limit.can_import(user.id, daily_limit)
     else:
@@ -99,7 +92,7 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "request": request,
         "user": user,
         "profiles": devices,
-        "device_limit": DEVICE_LIMITS.get(user.role, 3),
+        "device_limit": settings_cache.get_role_limit(user.role, "device_limit"),
         "tg_linked": tg is not None,
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": user.totp_enabled,
@@ -152,13 +145,13 @@ async def login_submit(
     # Если включена 2FA — перенаправляем на страницу проверки кода
     if user.totp_enabled:
         pending_token = generate_api_key()
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=PENDING_2FA_TTL_SEC)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings_cache.get_int("pending_2fa_ttl_sec"))
         db.add(Totp2faPending(user_id=user.id, token=pending_token, expires_at=expires_at))
         await db.commit()
         response = RedirectResponse(url="/verify-2fa", status_code=status.HTTP_302_FOUND)
         response.set_cookie(
             key=PENDING_2FA_COOKIE, value=pending_token,
-            httponly=True, max_age=PENDING_2FA_TTL_SEC, samesite="lax",
+            httponly=True, max_age=settings_cache.get_int("pending_2fa_ttl_sec"), samesite="lax",
         )
         return response
 
@@ -361,7 +354,7 @@ async def forgot_password_submit(
                 delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
             )
             code = "".join(secrets.choice(string.digits) for _ in range(6))
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_CODE_TTL_MINUTES)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings_cache.get_int("reset_code_ttl_minutes"))
             db.add(PasswordResetToken(user_id=user.id, token=code, expires_at=expires_at))
             await db.commit()
 

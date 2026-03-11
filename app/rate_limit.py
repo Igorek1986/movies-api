@@ -1,20 +1,20 @@
 """
 In-memory rate limiter (per-process).
 Stores timestamps in a plain dict — safe for single-process uvicorn workers.
+
+All limits are read from settings_cache at call time, so admin changes apply immediately.
 """
 import time
 from collections import defaultdict
-from app.constants import (
-    RATE_LOGIN_MAX, RATE_LOGIN_WINDOW_SEC,
-    RATE_REGISTER_MAX, RATE_REGISTER_WINDOW_SEC,
-    RATE_FORGOT_MAX, RATE_FORGOT_WINDOW_SEC,
-    RATE_2FA_MAX, RATE_2FA_WINDOW_SEC,
-    SYNC_COOLDOWN_SEC,
-)
 
 _windows: dict[str, list[float]] = defaultdict(list)
 
 _IMPORT_WINDOW_SEC = 86400  # 24 ч — окно для подсчёта импортов
+
+
+def _cfg(key: str) -> int:
+    from app import settings_cache
+    return settings_cache.get_int(key)
 
 
 def _allowed(key: str, max_calls: int, window_sec: int) -> bool:
@@ -56,7 +56,9 @@ def _import_check(key: str, max_calls: int) -> tuple[bool, int]:
 # ── Public helpers ──────────────────────────────────────────────────────────────
 
 def check_login(ip: str) -> bool:
-    return _allowed(f"login:{ip}", max_calls=RATE_LOGIN_MAX, window_sec=RATE_LOGIN_WINDOW_SEC)
+    return _allowed(f"login:{ip}",
+                    max_calls=_cfg("rate_login_max"),
+                    window_sec=_cfg("rate_login_window_sec"))
 
 
 def clear_login(ip: str):
@@ -64,15 +66,21 @@ def clear_login(ip: str):
 
 
 def check_register(ip: str) -> bool:
-    return _allowed(f"reg:{ip}", max_calls=RATE_REGISTER_MAX, window_sec=RATE_REGISTER_WINDOW_SEC)
+    return _allowed(f"reg:{ip}",
+                    max_calls=_cfg("rate_register_max"),
+                    window_sec=_cfg("rate_register_window_sec"))
 
 
 def check_forgot(ip: str) -> bool:
-    return _allowed(f"forgot:{ip}", max_calls=RATE_FORGOT_MAX, window_sec=RATE_FORGOT_WINDOW_SEC)
+    return _allowed(f"forgot:{ip}",
+                    max_calls=_cfg("rate_forgot_max"),
+                    window_sec=_cfg("rate_forgot_window_sec"))
 
 
 def check_2fa(ip: str) -> bool:
-    return _allowed(f"2fa:{ip}", max_calls=RATE_2FA_MAX, window_sec=RATE_2FA_WINDOW_SEC)
+    return _allowed(f"2fa:{ip}",
+                    max_calls=_cfg("rate_2fa_max"),
+                    window_sec=_cfg("rate_2fa_window_sec"))
 
 
 def clear_2fa(ip: str):
@@ -95,13 +103,17 @@ def reset_import(user_id: int) -> None:
 
 
 def check_sync(user_id: int) -> tuple[bool, int]:
-    """MyShows sync cooldown. Returns (allowed, seconds_until_allowed)."""
+    """MyShows sync cooldown. Returns (allowed, seconds_until_allowed).
+
+    Cooldown duration is read from settings_cache['sync_cooldown_sec'] at call time.
+    """
+    cooldown = _cfg("sync_cooldown_sec")
     key = f"sync:{user_id}"
     now = time.monotonic()
     entries = _windows.get(key, [])
     if entries:
         elapsed = now - entries[-1]
-        if elapsed < SYNC_COOLDOWN_SEC:
-            return False, int(SYNC_COOLDOWN_SEC - elapsed)
+        if elapsed < cooldown:
+            return False, int(cooldown - elapsed)
     _windows[key] = [now]
     return True, 0

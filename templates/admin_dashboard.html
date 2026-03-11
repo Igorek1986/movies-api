@@ -20,7 +20,10 @@
     <button onclick="document.getElementById('adminAlert').remove()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;line-height:1;color:inherit;padding:0">×</button>
   </div>
   {% endif %}
-  <h2>Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
+    <h2 style="margin:0">Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
+    <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
+  </div>
 
   <div style="display:flex;flex-direction:column;gap:.6rem">
     {% for u in users %}
@@ -36,9 +39,15 @@
         </span>
       </div>
 
-      <!-- Метрика: устройств -->
-      <div class="muted small" style="margin-bottom:.75rem">
-        Устройств: {{ u.device_count }} / {{ u.device_limit }}
+      <!-- Метрика: устройств + premium info -->
+      <div class="muted small" style="margin-bottom:.75rem;display:flex;flex-wrap:wrap;gap:.5rem .8rem">
+        <span>Устройств: {{ u.device_count }} / {{ u.device_limit }}</span>
+        {% if u.premium_until %}
+        <span>Premium до: {{ u.premium_until.strftime('%d.%m.%Y') }}</span>
+        {% endif %}
+        {% if u.timecode_grace_until %}
+        <span style="color:var(--pico-del-color)">Грейс таймкодов до: {{ u.timecode_grace_until.strftime('%d.%m.%Y') }}</span>
+        {% endif %}
       </div>
 
       <!-- Действия -->

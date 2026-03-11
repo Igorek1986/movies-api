@@ -12,7 +12,7 @@ from app.db.database import get_db
 from app.db.models import Profile, DeviceCode, Timecode, User
 from app.utils import generate_profile_api_key, generate_device_code, validate_name
 from app.api.dependencies import get_current_user
-from app.constants import DEVICE_CODE_TTL_MINUTES
+from app import settings_cache as _sc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -216,14 +216,14 @@ async def create_device_code(db: AsyncSession = Depends(get_db)):
     else:
         raise HTTPException(status_code=503, detail="Не удалось сгенерировать код")
 
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=DEVICE_CODE_TTL_MINUTES)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=_sc.get_int("device_code_ttl_minutes"))
     device_code = DeviceCode(code=code, expires_at=expires_at)
     db.add(device_code)
     await db.commit()
 
     return {
         "code": code,
-        "expires_in": DEVICE_CODE_TTL_MINUTES * 60,
+        "expires_in": _sc.get_int("device_code_ttl_minutes") * 60,
         "poll_interval": 3,
     }
 

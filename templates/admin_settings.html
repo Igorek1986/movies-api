@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Настройки — Админ{% endblock %}
+
+{% block body %}
+{% if not user %}
+<header class="container-fluid site-header">
+  <nav>
+    <ul><li><strong>NUMParser Admin</strong></li></ul>
+    <ul>
+      <li><a href="/admin/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+    </ul>
+  </nav>
+</header>
+{% endif %}
+
+<main class="container" style="padding-top:1.5rem;max-width:720px">
+  {% if success %}
+  <div role="alert" class="alert-success" id="settingsAlert"
+       style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1rem">
+    <span>{{ success }}</span>
+    <button onclick="document.getElementById('settingsAlert').remove()"
+            style="background:none;border:none;cursor:pointer;font-size:1.2rem;line-height:1;color:inherit;padding:0">×</button>
+  </div>
+  {% endif %}
+
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
+    <h2 style="margin:0">Настройки приложения</h2>
+    <a href="/admin" role="button" class="outline secondary btn-sm">← Пользователи</a>
+  </div>
+
+  <form method="post" action="/admin/settings">
+    {% for group_name, keys in groups %}
+    <details open style="margin-bottom:1rem;border:1px solid var(--pico-table-border-color);border-radius:var(--pico-border-radius);padding:.8rem 1rem">
+      <summary style="font-weight:600;cursor:pointer;margin-bottom:.6rem">{{ group_name }}</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .8rem;align-items:center">
+        {% for key in keys %}
+        {% set val = settings.get(key, '') %}
+        <label for="{{ key }}" style="margin:0;font-size:.9rem;color:var(--pico-muted-color)">
+          {{ labels.get(key, key) }}
+        </label>
+        <input id="{{ key }}" name="{{ key }}" type="text"
+               value="{{ val }}"
+               style="margin:0;padding:.35rem .6rem;font-size:.9rem"
+               autocomplete="off">
+        {% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+      <a href="/admin/settings" role="button" class="outline secondary">Сбросить изменения</a>
+      <button type="submit">Сохранить настройки</button>
+    </div>
+  </form>
+</main>
+{% endblock %}

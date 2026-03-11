@@ -35,8 +35,8 @@ from app.db.models import (
     TelegramUser,
     User,
     USER_ROLES,
-    DEVICE_LIMITS,
 )
+from app import settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tg-app")
@@ -176,7 +176,7 @@ async def miniapp_me(
             "created_at": d.created_at.strftime("%d.%m.%Y") if d.created_at else None,
         })
 
-    limit = DEVICE_LIMITS.get(user.role)
+    limit = settings_cache.get_role_limit(user.role, "device_limit")
     role_labels = {"simple": "Базовый", "premium": "Премиум", "super": "Супер"}
 
     return {
@@ -344,8 +344,7 @@ async def miniapp_device_details(
     )
     profiles = profiles_result.scalars().all()
 
-    from app.api.devices import LAMPA_PROFILE_LIMITS
-    profile_limit = LAMPA_PROFILE_LIMITS.get(user.role)
+    profile_limit = settings_cache.get_role_limit(user.role, "profile_limit")
 
     return {
         "id": device.id,
@@ -383,8 +382,7 @@ async def miniapp_create_profile(
         raise HTTPException(status_code=400, detail="Название профиля не может быть пустым")
 
     # Проверка лимита профилей
-    from app.api.devices import LAMPA_PROFILE_LIMITS
-    limit = LAMPA_PROFILE_LIMITS.get(user.role)
+    limit = settings_cache.get_role_limit(user.role, "profile_limit")
     if limit is not None:
         count = await db.scalar(
             select(func.count()).select_from(LampaProfile)
@@ -470,7 +468,7 @@ async def miniapp_create_device(
         raise HTTPException(status_code=400, detail="Имя устройства не может быть пустым")
 
     # Проверка лимита
-    limit = DEVICE_LIMITS.get(user.role)
+    limit = settings_cache.get_role_limit(user.role, "device_limit")
     if limit is not None:
         count = await db.scalar(
             select(func.count()).select_from(Device).where(Device.user_id == user.id)
@@ -519,8 +517,12 @@ async def miniapp_stats(
     db: AsyncSession = Depends(get_db),
     _admin: dict = Depends(_require_admin),
 ):
-    total_users = await db.scalar(select(func.count()).select_from(User))
+    from datetime import date, timedelta
+    from app.db.models import Timecode, MediaCard
+
+    total_users   = await db.scalar(select(func.count()).select_from(User))
     total_devices = await db.scalar(select(func.count()).select_from(Device))
+    total_tcs     = await db.scalar(select(func.count()).select_from(Timecode))
 
     role_counts = {}
     for role in USER_ROLES:
@@ -531,6 +533,36 @@ async def miniapp_stats(
 
     tg_linked = await db.scalar(select(func.count()).select_from(TelegramUser))
 
+    # Пользователи с premium_until (активные подписки)
+    from sqlalchemy import and_
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    active_premium = await db.scalar(
+        select(func.count()).select_from(User).where(
+            and_(User.role == "premium", User.premium_until.isnot(None), User.premium_until > now)
+        )
+    )
+
+    # Новые пользователи за сегодня
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    new_users_today = await db.scalar(
+        select(func.count()).select_from(User).where(User.created_at >= today_start)
+    )
+
+    # Новые пользователи за 7 дней
+    week_start = today_start - timedelta(days=7)
+    new_users_week = await db.scalar(
+        select(func.count()).select_from(User).where(User.created_at >= week_start)
+    )
+
+    # Таймкоды за сегодня
+    tcs_today = await db.scalar(
+        select(func.count()).select_from(Timecode).where(Timecode.updated_at >= today_start)
+    )
+
+    # Размер TMDB-кеша
+    media_cards = await db.scalar(select(func.count()).select_from(MediaCard))
+
     unread_support = await db.scalar(
         select(func.count())
         .select_from(SupportMessage)
@@ -538,11 +570,17 @@ async def miniapp_stats(
     )
 
     return {
-        "total_users": total_users or 0,
-        "total_devices": total_devices or 0,
-        "role_counts": role_counts,
-        "tg_linked": tg_linked or 0,
-        "unread_support": unread_support or 0,
+        "total_users":     total_users or 0,
+        "total_devices":   total_devices or 0,
+        "total_timecodes": total_tcs or 0,
+        "role_counts":     role_counts,
+        "active_premium":  active_premium or 0,
+        "tg_linked":       tg_linked or 0,
+        "new_users_today": new_users_today or 0,
+        "new_users_week":  new_users_week or 0,
+        "tcs_today":       tcs_today or 0,
+        "media_cards":     media_cards or 0,
+        "unread_support":  unread_support or 0,
     }
 
 
@@ -572,7 +610,7 @@ async def miniapp_users(
             select(TelegramUser).where(TelegramUser.user_id == u.id)
         )
         tg = tg_result.scalar_one_or_none()
-        limit = DEVICE_LIMITS.get(u.role)
+        limit = settings_cache.get_role_limit(u.role, "device_limit")
 
         users_data.append({
             "id": u.id,
@@ -701,3 +739,44 @@ async def miniapp_mark_read(
     )
     await db.commit()
     return {"ok": True}
+
+
+# ─── Настройки приложения ──────────────────────────────────────────────────────
+
+@router.get("/api/settings")
+async def tg_get_settings(
+    _admin: dict = Depends(_require_admin),
+):
+    """Вернуть все настройки приложения с метаданными для UI."""
+    current = settings_cache.all_settings()
+    groups_out = []
+    for group_name, keys in settings_cache.GROUPS:
+        items = [
+            {
+                "key": k,
+                "label": settings_cache.LABELS.get(k, k),
+                "value": current.get(k, settings_cache.DEFAULTS.get(k, "")),
+                "default": settings_cache.DEFAULTS.get(k, ""),
+            }
+            for k in keys
+        ]
+        groups_out.append({"name": group_name, "items": items})
+    return {"groups": groups_out}
+
+
+class SettingUpdate(BaseModel):
+    key: str
+    value: str
+
+
+@router.post("/api/settings")
+async def tg_update_setting(
+    body: SettingUpdate,
+    db: AsyncSession = Depends(get_db),
+    _admin: dict = Depends(_require_admin),
+):
+    """Обновить одну настройку приложения."""
+    if body.key not in settings_cache.DEFAULTS:
+        raise HTTPException(status_code=400, detail=f"Неизвестный ключ: {body.key}")
+    await settings_cache.set_setting(body.key, body.value.strip(), db)
+    return {"ok": True, "key": body.key, "value": body.value.strip()}

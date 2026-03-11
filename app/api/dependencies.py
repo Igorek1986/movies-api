@@ -6,11 +6,7 @@ from sqlalchemy import select
 
 from app.db.database import get_db
 from app.db.models import User, Device, Session
-from app.constants import SESSION_TTL_DAYS, SESSION_RENEW_DAYS
-
-SESSION_TTL = timedelta(days=SESSION_TTL_DAYS)
-SESSION_RENEW_BEFORE = timedelta(days=SESSION_RENEW_DAYS)
-COOKIE_MAX_AGE = SESSION_TTL_DAYS * 86400
+from app import settings_cache
 
 
 async def get_current_user(
@@ -33,13 +29,15 @@ async def get_current_user(
     if not session:
         return None
 
-    # Скользящее окно: продлеваем сессию если осталось меньше половины TTL
-    if session.expires_at - now < SESSION_RENEW_BEFORE:
-        session.expires_at = now + SESSION_TTL
+    # Скользящее окно: продлеваем сессию если осталось меньше N дней до истечения
+    ttl_days    = settings_cache.get_int("session_ttl_days")
+    renew_days  = settings_cache.get_int("session_renew_days")
+    if session.expires_at - now < timedelta(days=renew_days):
+        session.expires_at = now + timedelta(days=ttl_days)
         await db.commit()
         response.set_cookie(
             key="session_key", value=key,
-            httponly=True, max_age=COOKIE_MAX_AGE, samesite="lax",
+            httponly=True, max_age=ttl_days * 86400, samesite="lax",
         )
 
     return await db.get(User, session.user_id)

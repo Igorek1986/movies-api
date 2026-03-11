@@ -31,7 +31,8 @@ from aiogram.types import (
 from sqlalchemy import select, func
 
 from app.db.database import async_session_maker
-from app.db.models import TelegramUser, TelegramLinkCode, User, Device, DEVICE_LIMITS, SupportMessage
+from app.db.models import TelegramUser, TelegramLinkCode, User, Device, SupportMessage
+from app import settings_cache
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,7 @@ async def cmd_status(message: types.Message):
         )
 
     role_labels = {"simple": "Базовый", "premium": "Премиум", "super": "Супер"}
-    limit = DEVICE_LIMITS.get(user.role, 3)
+    limit = settings_cache.get_role_limit(user.role, "device_limit") or 3
     limit_str = str(limit) if limit is not None else "∞"
 
     await message.answer(
@@ -290,7 +291,7 @@ async def cmd_info(message: types.Message, command: CommandObject):
         tg = tg_result.scalar_one_or_none()
 
     role_labels = {"simple": "Базовый", "premium": "Премиум", "super": "Супер"}
-    limit = DEVICE_LIMITS.get(user.role, 3)
+    limit = settings_cache.get_role_limit(user.role, "device_limit") or 3
     limit_str = str(limit) if limit is not None else "∞"
     tg_str = (f"@{tg.username}" if tg and tg.username else str(tg.telegram_id)) if tg else "не привязан"
 

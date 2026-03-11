@@ -150,7 +150,6 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .prim-btn { width:100%; padding:12px; background:var(--btn); color:var(--btn-text); border:none; border-radius:var(--r); font-size:15px; font-weight:600; cursor:pointer; margin-top:10px; }
 .prim-btn:active { opacity:.85; }
 .prim-btn:disabled { opacity:.5; }
-.ref-btn { display:block; text-align:center; margin-top:8px; background:none; border:none; color:var(--btn); cursor:pointer; font-size:14px; }
 
 /* Support chat */
 .conv-item { background:var(--bg2); border-radius:var(--r); padding:12px 14px; margin-bottom:8px; cursor:pointer; display:flex; align-items:flex-start; gap:10px; border-left:3px solid transparent; }
@@ -189,6 +188,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
       <span class="ic">💬</span><span>Поддержка</span>
       <span class="badge" id="unread-badge" style="display:none">!</span>
     </button>
+    <button class="tab" id="t-sett"  style="display:none" onclick="switchTab('sett')"><span class="ic">⚙️</span><span>Настройки</span></button>
   </div>
 
   <div class="pane active" id="p-home"></div>
@@ -202,12 +202,15 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
       <button class="prim-btn" id="create-btn" onclick="createDevice()">Создать</button>
     </div>
     <div id="dev-limit-msg" class="card" style="margin-top:4px;display:none;text-align:center;color:var(--hint);font-size:13px"></div>
-    <button class="ref-btn" onclick="loadDevices()">↻ Обновить</button>
+    <button onclick="loadDevices()" style="display:flex;align-items:center;gap:6px;margin:8px auto 0;padding:8px 16px;background:var(--bg2);border:1px solid rgba(255,255,255,.15);border-radius:20px;color:var(--text);font-size:13px;font-weight:600;cursor:pointer">
+      <span style="font-size:15px;line-height:1">↻</span> Обновить
+    </button>
   </div>
   <div class="pane" id="p-users">
     <input class="search" type="text" id="search" placeholder="Поиск по логину…" oninput="filterUsers(this.value)">
     <div id="users-list"></div>
   </div>
+  <div class="pane" id="p-sett"><div id="sett-body"></div></div>
   <div class="pane" id="p-supp">
     <div id="convs-list"></div>
     <div id="chat-view" style="display:none">
@@ -259,36 +262,79 @@ function switchTab(name) {
   if (name === 'devs') loadDevices();
   if (name === 'users') loadUsers();
   if (name === 'supp')  loadSupport();
+  if (name === 'sett')  loadSettings();
 }
 
 // ── Admin: Stats ──────────────────────────────────────────────────────────────
 function renderAdminHome() {
   document.getElementById('p-home').innerHTML = `
+    <div class="lbl">Пользователи</div>
     <div class="sg">
-      <div class="si"><div class="sv blue"   id="s-u">—</div><div class="sl">Пользователей</div></div>
-      <div class="si"><div class="sv"         id="s-d">—</div><div class="sl">Устройств</div></div>
-      <div class="si"><div class="sv yellow"  id="s-p">—</div><div class="sl">Premium</div></div>
-      <div class="si"><div class="sv green"   id="s-s">—</div><div class="sl">Super</div></div>
-      <div class="si"><div class="sv"         id="s-t">—</div><div class="sl">Telegram привязано</div></div>
-      <div class="si"><div class="sv red"     id="s-m">—</div><div class="sl">Новых сообщений</div></div>
+      <div class="si"><div class="sv blue"   id="s-u">—</div><div class="sl">Всего</div></div>
+      <div class="si"><div class="sv"         id="s-nu">—</div><div class="sl">Новых сегодня</div></div>
+      <div class="si"><div class="sv"         id="s-nw">—</div><div class="sl">За 7 дней</div></div>
+      <div class="si"><div class="sv"         id="s-tg">—</div><div class="sl">Telegram привязано</div></div>
     </div>
-    <button class="ref-btn" onclick="loadAdminStats()">↻ Обновить</button>
-    <button onclick="unlinkTelegram()" style="display:block;width:100%;margin-top:8px;padding:11px;background:rgba(255,69,58,.12);color:var(--danger);border:none;border-radius:var(--r);font-size:14px;font-weight:600;cursor:pointer">
+    <div class="lbl" style="margin-top:10px">Подписки</div>
+    <div class="sg">
+      <div class="si"><div class="sv yellow"  id="s-p">—</div><div class="sl">Premium</div></div>
+      <div class="si"><div class="sv yellow"  id="s-ap">—</div><div class="sl">Активных</div></div>
+      <div class="si"><div class="sv green"   id="s-s">—</div><div class="sl">Super</div></div>
+      <div class="si"><div class="sv"         id="s-sm">—</div><div class="sl">Simple</div></div>
+    </div>
+    <div class="lbl" style="margin-top:10px">Активность</div>
+    <div class="sg">
+      <div class="si"><div class="sv"         id="s-d">—</div><div class="sl">Устройств</div></div>
+      <div class="si"><div class="sv"         id="s-tc">—</div><div class="sl">Таймкодов</div></div>
+      <div class="si"><div class="sv"         id="s-tct">—</div><div class="sl">Активных сегодня</div></div>
+      <div class="si"><div class="sv"         id="s-mc">—</div><div class="sl">TMDB кеш</div></div>
+    </div>
+    <div class="lbl" style="margin-top:10px">Поддержка</div>
+    <div class="sg">
+      <div class="si"><div class="sv red"     id="s-m">—</div><div class="sl">Непрочитанных</div></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:8px">
+      <span id="s-updated" style="font-size:11px;color:var(--hint)"></span>
+      <button id="stats-ref-btn" onclick="loadAdminStats()" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--bg2);border:1px solid rgba(255,255,255,.15);border-radius:20px;color:var(--text);font-size:13px;font-weight:600;cursor:pointer">
+        <span id="stats-ref-ic" style="font-size:15px;line-height:1;transition:transform .4s">↻</span> Обновить
+      </button>
+    </div>
+    <hr style="border-color:rgba(255,255,255,.08);margin:16px 0 10px">
+    <button onclick="unlinkTelegram()" style="display:block;width:100%;padding:11px;background:rgba(255,69,58,.08);color:var(--danger);border:1px solid rgba(255,69,58,.2);border-radius:var(--r);font-size:13px;font-weight:600;cursor:pointer">
       🔗 Отвязать Telegram
     </button>`;
   loadAdminStats();
 }
 async function loadAdminStats() {
+  const btn = document.getElementById('stats-ref-btn');
+  const ic  = document.getElementById('stats-ref-ic');
+  if (btn) btn.disabled = true;
+  if (ic)  ic.style.transform = 'rotate(360deg)';
   try {
     const d = await api('GET', '/api/stats');
-    document.getElementById('s-u').textContent = d.total_users;
-    document.getElementById('s-d').textContent = d.total_devices;
-    document.getElementById('s-p').textContent = d.role_counts.premium || 0;
-    document.getElementById('s-s').textContent = d.role_counts.super   || 0;
-    document.getElementById('s-t').textContent = d.tg_linked;
-    document.getElementById('s-m').textContent = d.unread_support || 0;
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('s-u',   d.total_users);
+    set('s-nu',  d.new_users_today);
+    set('s-nw',  d.new_users_week);
+    set('s-tg',  d.tg_linked);
+    set('s-p',   d.role_counts?.premium || 0);
+    set('s-ap',  d.active_premium || 0);
+    set('s-s',   d.role_counts?.super   || 0);
+    set('s-sm',  d.role_counts?.simple  || 0);
+    set('s-d',   d.total_devices);
+    set('s-tc',  d.total_timecodes);
+    set('s-tct', d.tcs_today);
+    set('s-mc',  d.media_cards);
+    set('s-m',   d.unread_support || 0);
     setUnreadBadge(d.unread_support || 0);
-  } catch(e) { toast('Ошибка: ' + e.message); }
+    const upd = document.getElementById('s-updated');
+    if (upd) upd.textContent = 'Обновлено ' + new Date().toLocaleTimeString('ru', {hour:'2-digit', minute:'2-digit'});
+    haptic();
+  } catch(e) { toast('Ошибка: ' + e.message); haptic('error'); }
+  finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => { if (ic) ic.style.transform = ''; }, 500);
+  }
 }
 function setUnreadBadge(n) {
   const b = document.getElementById('unread-badge');
@@ -666,6 +712,64 @@ async function sendReply() {
 }
 document.getElementById('rep-inp').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendReply();} });
 
+// ── Admin: Settings ───────────────────────────────────────────────────────────
+let settGroups = [];
+async function loadSettings() {
+  const body = document.getElementById('sett-body');
+  body.innerHTML = '<div style="color:var(--hint);text-align:center;padding:20px">Загрузка…</div>';
+  try {
+    const d = await api('GET', '/api/settings');
+    settGroups = d.groups;
+    renderSettings();
+  } catch(e) { body.innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`; }
+}
+function renderSettings() {
+  const body = document.getElementById('sett-body');
+  body.innerHTML = settGroups.map(g => `
+    <details open style="margin-bottom:6px">
+      <summary style="font-weight:600;padding:10px 14px;cursor:pointer;background:var(--bg2);border-radius:var(--r);list-style:none;display:flex;justify-content:space-between;align-items:center">
+        ${esc(g.name)} <span style="font-size:11px;opacity:.5">▾</span>
+      </summary>
+      <div style="padding:6px 0">
+        ${g.items.map(it => `
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid rgba(255,255,255,.05)">
+          <label style="flex:1;font-size:12px;color:var(--hint);min-width:0;line-height:1.3">${esc(it.label)}</label>
+          <input id="si-${esc(it.key)}" type="text" value="${esc(it.value)}"
+            data-key="${esc(it.key)}" data-saved="${esc(it.value)}"
+            style="width:72px;padding:5px 7px;background:var(--bg2);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:var(--text);font-size:13px;text-align:right"
+            oninput="debounceSave(this)"
+            onblur="clearTimeout(this._t);saveSetting(this.dataset.key,this)"
+            onkeydown="if(event.key==='Enter'){clearTimeout(this._t);this.blur();}">
+        </div>`).join('')}
+      </div>
+    </details>`).join('');
+}
+function debounceSave(inp) {
+  clearTimeout(inp._t);
+  inp._t = setTimeout(() => saveSetting(inp.dataset.key, inp), 800);
+}
+async function saveSetting(key, inp) {
+  const newVal = inp.value.trim();
+  if (!newVal || newVal === inp.dataset.saved) return;
+  const prev = inp.dataset.saved;
+  inp.dataset.saved = newVal;
+  inp.style.opacity = '.5';
+  try {
+    await api('POST', '/api/settings', { key, value: newVal });
+    inp.style.borderColor = 'var(--ok, #30d158)';
+    inp.style.opacity = '1';
+    setTimeout(() => inp.style.borderColor = '', 1200);
+    toast('Сохранено'); haptic();
+  } catch(e) {
+    inp.value = prev;
+    inp.dataset.saved = prev;
+    inp.style.opacity = '1';
+    inp.style.borderColor = 'var(--danger)';
+    setTimeout(() => inp.style.borderColor = '', 1500);
+    toast('Ошибка: ' + e.message); haptic('error');
+  }
+}
+
 // ── Unlink ────────────────────────────────────────────────────────────────────
 async function unlinkTelegram() {
   if (!confirm('Отвязать Telegram от аккаунта?\nВы потеряете доступ к управлению через бота.')) return;
@@ -695,7 +799,11 @@ async function init() {
       return;
     }
     isAdmin = d.is_admin; myTgId = d.user.id;
-    if (isAdmin) { document.getElementById('t-users').style.display=''; document.getElementById('t-supp').style.display=''; }
+    if (isAdmin) {
+      document.getElementById('t-users').style.display='';
+      document.getElementById('t-supp').style.display='';
+      document.getElementById('t-sett').style.display='';
+    }
     document.getElementById('loading').style.display='none';
     document.getElementById('app').style.display='block';
     isAdmin ? renderAdminHome() : loadUserHome();
