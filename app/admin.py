@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import User, Device, USER_ROLES
+from app.db.models import User, Device, Timecode, USER_ROLES
 from app.api.dependencies import get_current_user
 from app import rate_limit, settings_cache
 
@@ -168,12 +168,64 @@ async def change_user_role(
         )
         user.premium_until = expiry_day
         user.premium_warned = False  # сброс чтобы предупреждение отправилось при следующем сроке
+        user.timecode_grace_until = None
     elif role in ("simple", "super"):
         user.premium_until = None
+
+    # При понижении лимита таймкодов — применить ограничение
+    if old_role != role:
+        old_limit = settings_cache.get_role_limit(old_role, "timecode_limit")
+        new_limit = settings_cache.get_role_limit(role,     "timecode_limit")
+        # Запускаем только если новый лимит строго меньше старого (или был безлимитный → стал ограниченным)
+        limit_reduced = new_limit is not None and (old_limit is None or new_limit < old_limit)
+        if limit_reduced:
+            dev_ids = (await db.execute(
+                select(Device.id).where(Device.user_id == user.id)
+            )).scalars().all()
+            if dev_ids:
+                tc_total = (await db.execute(
+                    select(func.count()).select_from(Timecode)
+                    .where(Timecode.device_id.in_(dev_ids))
+                )).scalar() or 0
+                if tc_total > new_limit:
+                    grace_days = settings_cache.get_int("timecode_grace_days")
+                    if grace_days == 0:
+                        # Немедленная очистка
+                        from app.tasks import _cleanup_timecodes
+                        await db.commit()  # зафиксировать смену роли до очистки
+                        await _cleanup_timecodes(db, user.id, new_limit, user.username)
+                    else:
+                        user.timecode_grace_until = datetime.now(timezone.utc) + timedelta(days=grace_days)
 
     await db.commit()
 
     logger.info(f"Admin: user {user.username} role changed {old_role} → {role}")
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@router.post("/user/{user_id}/extend-premium")
+async def extend_premium(
+    request: Request,
+    response: Response,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.role != "premium":
+        raise HTTPException(status_code=400, detail="Пользователь не является Premium")
+
+    now = datetime.now(timezone.utc)
+    base = user.premium_until if (user.premium_until and user.premium_until > now) else now
+    user.premium_until = (base + timedelta(days=30)).replace(hour=23, minute=59, second=59, microsecond=0)
+    user.premium_warned = False
+    await db.commit()
+
+    logger.info(f"Admin: extended premium for {user.username} until {user.premium_until.strftime('%d.%m.%Y')}")
     return RedirectResponse(url="/admin", status_code=302)
 
 

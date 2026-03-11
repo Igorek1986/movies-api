@@ -101,7 +101,11 @@ async def run_premium_expiry_check() -> None:
                 )).scalar() or 0
 
                 if tc_total > simple_tc_limit:
-                    user.timecode_grace_until = now + timedelta(days=grace_days)
+                    if grace_days == 0:
+                        # Грейс не нужен — очистим сразу после коммита
+                        user.timecode_grace_until = now  # маркер для шага 5
+                    else:
+                        user.timecode_grace_until = now + timedelta(days=grace_days)
 
             # Telegram notification
             tg = (await db.execute(
@@ -234,6 +238,7 @@ async def _send_premium_warning(telegram_id: int, user) -> None:
 
 
 async def _cleanup_timecodes(db, user_id: int, limit: int, username: str) -> None:
+    """Удаляет старейшие таймкоды по каждому профилю отдельно до лимита per-profile."""
     from app.db.models import Device, Timecode
     from sqlalchemy import select, func, delete
 
@@ -244,25 +249,42 @@ async def _cleanup_timecodes(db, user_id: int, limit: int, username: str) -> Non
     if not dev_ids:
         return
 
-    total = (await db.execute(
-        select(func.count()).select_from(Timecode)
-        .where(Timecode.device_id.in_(dev_ids))
-    )).scalar() or 0
+    total_deleted = 0
+    for device_id in dev_ids:
+        profiles = (await db.execute(
+            select(Timecode.lampa_profile_id)
+            .where(Timecode.device_id == device_id)
+            .distinct()
+        )).scalars().all()
 
-    if total <= limit:
-        return
+        for profile_id in profiles:
+            count = (await db.execute(
+                select(func.count()).select_from(Timecode).where(
+                    Timecode.device_id == device_id,
+                    Timecode.lampa_profile_id == profile_id,
+                )
+            )).scalar() or 0
 
-    to_delete = total - limit
-    ids = (await db.execute(
-        select(Timecode.id)
-        .where(Timecode.device_id.in_(dev_ids))
-        .order_by(Timecode.updated_at.asc())
-        .limit(to_delete)
-    )).scalars().all()
+            excess = count - limit
+            if excess <= 0:
+                continue
 
-    if ids:
-        await db.execute(delete(Timecode).where(Timecode.id.in_(ids)))
-        logger.info(f"User {username}: deleted {len(ids)} old timecodes (grace period expired)")
+            oldest_ids = (await db.execute(
+                select(Timecode.id)
+                .where(
+                    Timecode.device_id == device_id,
+                    Timecode.lampa_profile_id == profile_id,
+                )
+                .order_by(Timecode.updated_at.asc())
+                .limit(excess)
+            )).scalars().all()
+
+            if oldest_ids:
+                await db.execute(delete(Timecode).where(Timecode.id.in_(oldest_ids)))
+                total_deleted += len(oldest_ids)
+
+    if total_deleted:
+        logger.info(f"User {username}: deleted {total_deleted} old timecodes (limit={limit}/profile)")
 
 
 # ─── Task lifecycle ───────────────────────────────────────────────────────────

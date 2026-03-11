@@ -14,6 +14,7 @@ from app.utils import lampa_hash
 from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
+from app.api.timecodes import _trim_to_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -378,6 +379,11 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
 
             if all_timecodes or all_media_cards:
                 await db.commit()
+
+            if all_timecodes:
+                trimmed = await _trim_to_limit(db, device.id, profile_id, current_user.role)
+                if trimmed:
+                    yield _sse({"type": "status", "message": f"Удалено {trimmed} старых таймкодов (превышен лимит)"})
 
         total_ok = stats["movies_ok"] + stats["shows_ok"]
         total_err = stats["movies_err"] + stats["shows_err"]

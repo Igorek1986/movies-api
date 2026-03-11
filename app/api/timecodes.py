@@ -106,6 +106,57 @@ async def _assert_profile_allowed(device: Device, profile_id: str, db: AsyncSess
         raise HTTPException(status_code=403, detail="Достигнут лимит профилей")
 
 
+async def _get_user_role(device: Device, db: AsyncSession) -> str:
+    """Возвращает роль пользователя устройства."""
+    user = await db.get(User, device.user_id)
+    return user.role if user else "simple"
+
+
+async def _trim_to_limit(
+    db: AsyncSession,
+    device_id: int,
+    lampa_profile_id: str,
+    user_role: str,
+) -> int:
+    """
+    Удаляет самые старые таймкоды если их количество превышает лимит роли.
+    Возвращает количество удалённых записей.
+    """
+    limit = settings_cache.get_role_limit(user_role, "timecode_limit")
+    if limit is None:
+        return 0  # super — без ограничений
+
+    count = (await db.execute(
+        select(func.count()).select_from(Timecode).where(
+            Timecode.device_id == device_id,
+            Timecode.lampa_profile_id == lampa_profile_id,
+        )
+    )).scalar() or 0
+
+    excess = count - limit
+    if excess <= 0:
+        return 0
+
+    oldest_ids = (await db.execute(
+        select(Timecode.id)
+        .where(
+            Timecode.device_id == device_id,
+            Timecode.lampa_profile_id == lampa_profile_id,
+        )
+        .order_by(Timecode.updated_at.asc())
+        .limit(excess)
+    )).scalars().all()
+
+    if oldest_ids:
+        await db.execute(delete(Timecode).where(Timecode.id.in_(oldest_ids)))
+        await db.commit()
+        logger.info(
+            f"Trimmed {len(oldest_ids)} timecodes: device={device_id} "
+            f"profile={lampa_profile_id!r} role={user_role} limit={limit}"
+        )
+    return len(oldest_ids)
+
+
 async def _upsert_timecodes(
     db: AsyncSession,
     device_id: int,
@@ -313,10 +364,12 @@ async def save_timecode(
     lampa_profile_id = profile_id or ""
     await _assert_profile_allowed(device, lampa_profile_id, db)
 
+    user_role = await _get_user_role(device, db)
     await _upsert_timecodes(
         db, device.id, lampa_profile_id,
         [{"card_id": card_id, "item": item, "data": data}]
     )
+    await _trim_to_limit(db, device.id, lampa_profile_id, user_role)
 
     # Авто-сохраняем имя профиля если передано и профиль не дефолтный
     if lampa_profile_id and profile_name:
@@ -364,7 +417,9 @@ async def batch_save_timecodes(
             continue
         rows.append({"card_id": tc["card_id"], "item": tc["item"], "data": tc["data"]})
 
+    user_role = await _get_user_role(device, db)
     saved = await _upsert_timecodes(db, device.id, profile_id or "", rows)
+    await _trim_to_limit(db, device.id, profile_id or "", user_role)
     return {"success": True, "saved": saved}
 
 
@@ -411,8 +466,10 @@ async def import_from_lampac(
         for item, tc_data in items.items():
             rows.append({"card_id": card_id, "item": item, "data": tc_data})
 
+    user_role = await _get_user_role(device, db)
     saved = await _upsert_timecodes(db, device.id, profile_id or "", rows)
-    logger.info(f"Lampac import: device={device.id}, saved={saved}")
+    trimmed = await _trim_to_limit(db, device.id, profile_id or "", user_role)
+    logger.info(f"Lampac import: device={device.id}, saved={saved}, trimmed={trimmed}")
 
     # Запускаем фоновую загрузку MediaCard + обновление даты таймкодов
     lp = profile_id or ""
@@ -423,7 +480,7 @@ async def import_from_lampac(
                 card_id, int(m.group(1)), m.group(2), device.id, lp,
             ))
 
-    return {"success": True, "saved": saved}
+    return {"success": True, "saved": saved, "trimmed": trimmed}
 
 
 # ---------------------------------------------------------------------------
@@ -462,11 +519,14 @@ async def import_from_lampa(
             "data": json.dumps(normalized),
         })
 
+    user_role = await _get_user_role(device, db)
     saved = await _upsert_timecodes(db, device.id, profile_id or "", rows)
-    logger.info(f"Lampa import: device={device.id}, saved={saved}")
+    trimmed = await _trim_to_limit(db, device.id, profile_id or "", user_role)
+    logger.info(f"Lampa import: device={device.id}, saved={saved}, trimmed={trimmed}")
     return {
         "success": True,
         "saved": saved,
+        "trimmed": trimmed,
         "note": "Импортировано без card_id. Для серверной фильтрации используйте MyShows sync.",
     }
 

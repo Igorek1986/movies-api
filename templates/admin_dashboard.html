@@ -69,6 +69,13 @@
           </button>
         </form>
 
+        <!-- Продлить Premium +30 дней -->
+        {% if u.role == "premium" %}
+        <form method="POST" action="/admin/user/{{ u.id }}/extend-premium" style="margin:0">
+          <button type="submit" class="btn-sm outline secondary" title="Продлить Premium на 30 дней">+30 дней</button>
+        </form>
+        {% endif %}
+
         <!-- Сброс лимита импорта (только simple) -->
         {% if u.role in ("simple", "premium") %}
         <form method="POST" action="/admin/user/{{ u.id }}/reset-import" style="margin:0">
