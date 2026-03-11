@@ -277,3 +277,5 @@ __marimo__/
 /tmdb_cache.json
 
 .DS_Store
+
+dev/
