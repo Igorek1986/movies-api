@@ -161,8 +161,9 @@ button.danger-btn {
   margin-left: 0.5rem;
   font-size: 0.88rem;
 }
-.status-ok  { color: #16a34a; }
-.status-err { color: #dc2626; }
+.status-ok   { color: #16a34a; }
+.status-err  { color: #dc2626; }
+.status-warn { color: #d97706; }
 
 /* Progress/status box */
 .status-box {
@@ -242,6 +243,7 @@ button.danger-btn {
 /* Muted / small helpers */
 .muted { color: var(--pico-muted-color); }
 .small { font-size: 0.85rem; }
+.account-limits { font-size: .85rem; margin-top: -.5rem; margin-bottom: .75rem; }
 
 /* Landing page equal-width blocks */
 .landing-grid {

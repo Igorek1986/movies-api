@@ -297,15 +297,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
               case 'done': {
                 const notFound = evt.not_found || [];
+                const trimmed  = evt.trimmed  || 0;
+                let html = evt.message;
+                if (trimmed) {
+                  html += `<br><b style="color:#d97706">⚠️ Удалено ${trimmed} старых таймкодов — превышен лимит.</b>`;
+                  status.className = 'status-text status-warn';
+                }
                 if (notFound.length) {
                   const list = notFound.map(s => `<li>${s}</li>`).join('');
-                  status.innerHTML = evt.message
-                    + `<br><b>Не найдено в TMDB (${notFound.length}):</b><ul style="margin:.4em 0 0 1em;text-align:left">${list}</ul>`;
-                  setTimeout(() => location.reload(), 6000);
-                } else {
-                  status.textContent = evt.message + ' Обновление…';
-                  setTimeout(() => location.reload(), 1500);
+                  html += `<br><b>Не найдено в TMDB (${notFound.length}):</b><ul style="margin:.4em 0 0 1em;text-align:left">${list}</ul>`;
                 }
+                if (!trimmed && !notFound.length) html += ' Обновление…';
+                status.innerHTML = html;
+                setTimeout(() => location.reload(), trimmed ? 10000 : notFound.length ? 6000 : 1500);
                 break;
               }
               case 'error':
@@ -368,9 +372,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (res.ok) {
-          statusEl.textContent = `Импортировано: ${data.saved}. Обновление…`;
-          statusEl.className = 'status-text status-ok';
-          setTimeout(() => location.reload(), 1200);
+          if (data.trimmed) {
+            statusEl.innerHTML = `Импортировано: ${data.saved}.<br><b style="color:#d97706">⚠️ Удалено ${data.trimmed} старых таймкодов — превышен лимит.</b>`;
+            statusEl.className = 'status-text status-warn';
+            setTimeout(() => location.reload(), 10000);
+          } else {
+            statusEl.textContent = `Импортировано: ${data.saved}. Обновление…`;
+            statusEl.className = 'status-text status-ok';
+            setTimeout(() => location.reload(), 1200);
+          }
         } else {
           statusEl.textContent = data.detail || 'Ошибка';
           statusEl.className = 'status-text status-err';
@@ -424,9 +434,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (res.ok) {
-          statusEl.textContent = `Импортировано: ${data.saved}. Обновление…`;
-          statusEl.className = 'status-text status-ok';
-          setTimeout(() => location.reload(), 1200);
+          if (data.trimmed) {
+            statusEl.innerHTML = `Импортировано: ${data.saved}.<br><b style="color:#d97706">⚠️ Удалено ${data.trimmed} старых таймкодов — превышен лимит.</b>`;
+            statusEl.className = 'status-text status-warn';
+            setTimeout(() => location.reload(), 10000);
+          } else {
+            statusEl.textContent = `Импортировано: ${data.saved}. Обновление…`;
+            statusEl.className = 'status-text status-ok';
+            setTimeout(() => location.reload(), 1200);
+          }
         } else {
           statusEl.textContent = data.detail || 'Ошибка';
           statusEl.className = 'status-text status-err';

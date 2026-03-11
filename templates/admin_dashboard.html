@@ -22,7 +22,12 @@
   {% endif %}
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
     <h2 style="margin:0">Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
-    <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
+    <div style="display:flex;gap:.4rem">
+      <form method="POST" action="/admin/run-expiry-check" style="margin:0">
+        <button type="submit" class="btn-sm outline secondary" title="Запустить проверку истечения Premium вручную">▶ Проверка Premium</button>
+      </form>
+      <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
+    </div>
   </div>
 
   <div style="display:flex;flex-direction:column;gap:.6rem">
@@ -46,7 +51,7 @@
         <span>Premium до: {{ u.premium_until.strftime('%d.%m.%Y') }}</span>
         {% endif %}
         {% if u.timecode_grace_until %}
-        <span style="color:var(--pico-del-color)">Грейс таймкодов до: {{ u.timecode_grace_until.strftime('%d.%m.%Y') }}</span>
+        <span style="color:var(--pico-del-color)">Грейс до: {{ u.timecode_grace_until.strftime('%d.%m.%Y') }}</span>
         {% endif %}
       </div>
 
@@ -69,19 +74,35 @@
           </button>
         </form>
 
-        <!-- Продлить Premium +30 дней -->
-        {% if u.role == "premium" %}
+        <!-- Продлить / восстановить Premium +30 дней -->
+        {% if u.role == "premium" or u.timecode_grace_until %}
         <form method="POST" action="/admin/user/{{ u.id }}/extend-premium" style="margin:0">
-          <button type="submit" class="btn-sm outline secondary" title="Продлить Premium на 30 дней">+30 дней</button>
+          <button type="submit" class="btn-sm outline {% if u.timecode_grace_until %}primary{% else %}secondary{% endif %}"
+                  title="{% if u.timecode_grace_until %}Восстановить Premium (сбросить grace) на 30 дней{% else %}Продлить Premium на 30 дней{% endif %}">
+            {% if u.timecode_grace_until %}♻ +30 дней{% else %}+30 дней{% endif %}
+          </button>
         </form>
         {% endif %}
 
-        <!-- Сброс лимита импорта (только simple) -->
+        <!-- Сброс лимита импорта -->
         {% if u.role in ("simple", "premium") %}
         <form method="POST" action="/admin/user/{{ u.id }}/reset-import" style="margin:0">
           <button type="submit" class="btn-sm outline secondary" title="Сбросить лимит JSON-импорта">↺ импорт</button>
         </form>
         {% endif %}
+
+        <!-- Сброс кулдауна MyShows -->
+        {% if u.role in ("premium", "super") %}
+        <form method="POST" action="/admin/user/{{ u.id }}/reset-sync" style="margin:0">
+          <button type="submit" class="btn-sm outline secondary" title="Разрешить повторную синхронизацию MyShows">↺ MyShows</button>
+        </form>
+        {% endif %}
+
+        <!-- Принудительная очистка по лимитам текущей роли -->
+        <form method="POST" action="/admin/user/{{ u.id }}/cleanup-limits" style="margin:0"
+              onsubmit="return confirm('Удалить лишние устройства, профили и таймкоды для {{ u.username }}?')">
+          <button type="submit" class="btn-sm outline secondary" title="Удалить устройства/профили/таймкоды сверх лимита текущей роли">🗑 лимиты</button>
+        </form>
 
       </div>
     </div>

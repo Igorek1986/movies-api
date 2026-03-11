@@ -58,7 +58,7 @@ def _seconds_until_next_5am() -> float:
 
 # ─── Core check ───────────────────────────────────────────────────────────────
 
-async def run_premium_expiry_check() -> None:
+async def run_premium_expiry_check(_now: datetime | None = None) -> None:
     from app.db.database import async_session_maker
     from app.db.models import User, Device, Timecode, TelegramUser
     from app import settings_cache
@@ -67,7 +67,7 @@ async def run_premium_expiry_check() -> None:
     logger.info("Running premium expiry check...")
 
     async with async_session_maker() as db:
-        now = datetime.now(timezone.utc)
+        now = _now or datetime.now(timezone.utc)
         quiet_start      = settings_cache.get_int("quiet_hours_start")
         quiet_end        = settings_cache.get_int("quiet_hours_end")
         simple_tc_limit  = settings_cache.get_int("simple_timecode_limit")
@@ -89,23 +89,12 @@ async def run_premium_expiry_check() -> None:
             user.role = "simple"
             user.premium_until = None
 
-            # Check if timecodes exceed simple limit
-            dev_ids = (await db.execute(
-                select(Device.id).where(Device.user_id == user.id)
-            )).scalars().all()
-
-            if dev_ids:
-                tc_total = (await db.execute(
-                    select(func.count()).select_from(Timecode)
-                    .where(Timecode.device_id.in_(dev_ids))
-                )).scalar() or 0
-
-                if tc_total > simple_tc_limit:
-                    if grace_days == 0:
-                        # Грейс не нужен — очистим сразу после коммита
-                        user.timecode_grace_until = now  # маркер для шага 5
-                    else:
-                        user.timecode_grace_until = now + timedelta(days=grace_days)
+            # Устанавливаем grace-период для всей очистки (устройства, профили, таймкоды).
+            # Если пользователь продлит premium до истечения grace — данные не удаляются.
+            if grace_days == 0:
+                user.timecode_grace_until = now  # немедленная очистка в шаге 5
+            else:
+                user.timecode_grace_until = now + timedelta(days=grace_days)
 
             # Telegram notification
             tg = (await db.execute(
@@ -170,7 +159,7 @@ async def run_premium_expiry_check() -> None:
 
         await db.commit()
 
-        # ── 5. Clean up timecodes after grace period ──────────────────────────
+        # ── 5. Clean up devices / profiles / timecodes after grace period ────────
         result = await db.execute(
             select(User).where(
                 and_(
@@ -180,7 +169,15 @@ async def run_premium_expiry_check() -> None:
             )
         )
         for user in result.scalars().all():
-            await _cleanup_timecodes(db, user.id, simple_tc_limit, user.username)
+            dev_limit  = settings_cache.get_role_limit(user.role, "device_limit")
+            prof_limit = settings_cache.get_role_limit(user.role, "profile_limit")
+            tc_limit   = settings_cache.get_role_limit(user.role, "timecode_limit")
+            if dev_limit is not None:
+                await _cleanup_devices(db, user.id, dev_limit, user.username)
+            if prof_limit is not None:
+                await _cleanup_profiles(db, user.id, prof_limit, user.username)
+            if tc_limit is not None:
+                await _cleanup_timecodes(db, user.id, tc_limit, user.username)
             user.timecode_grace_until = None
 
         await db.commit()
@@ -196,45 +193,152 @@ async def _send_premium_expired(telegram_id: int, user) -> None:
     if not bot:
         return
 
+    s_dev  = settings_cache.get_int("simple_device_limit")
+    s_prof = settings_cache.get_int("simple_profile_limit")
+    s_tc   = settings_cache.get_int("simple_timecode_limit")
+    grace_days = settings_cache.get_int("timecode_grace_days")
+
     grace_note = ""
     if user.timecode_grace_until:
-        grace_days = settings_cache.get_int("timecode_grace_days")
-        limit      = settings_cache.get_int("simple_timecode_limit")
+        deadline = user.timecode_grace_until.strftime("%d.%m.%Y")
         grace_note = (
-            f"\n\n⚠️ Ваша история просмотров превышает лимит <b>{limit}</b> таймкодов. "
-            f"Старые записи будут автоматически удалены через <b>{grace_days} дн.</b>"
+            f"\n\n⏳ Лишние данные будут удалены <b>{deadline}</b>.\n"
+            f"Продлите подписку до этой даты, чтобы сохранить историю."
         )
 
     try:
         await bot.send_message(
             telegram_id,
-            f"⏰ <b>Подписка Premium истекла.</b>\n\n"
-            f"Ваш аккаунт переведён на тариф <b>Simple</b>.{grace_note}",
+            f"❌ <b>Подписка Premium истекла.</b>\n\n"
+            f"Аккаунт переведён на <b>Simple</b>:\n"
+            f"• Синхронизация с MyShows — недоступна\n"
+            f"• Лимит устройств: <b>{s_dev}</b>\n"
+            f"• Лимит профилей на устройство: <b>{s_prof}</b>\n"
+            f"• Лимит таймкодов на профиль: <b>{s_tc}</b>"
+            f"{grace_note}",
+            parse_mode="HTML",
         )
     except Exception as e:
         logger.warning(f"Failed to send premium expiry notification to {telegram_id}: {e}")
 
 
-async def _send_premium_warning(telegram_id: int, user) -> None:
+async def _send_premium_renewed(telegram_id: int, user, was_grace: bool) -> None:
+    """Уведомление об успешном продлении / восстановлении Premium."""
     from app.bot import get_bot
-    from zoneinfo import ZoneInfo
 
     bot = get_bot()
     if not bot:
         return
 
-    tz = _get_tz(user.timezone)
-    expires_local = user.premium_until.astimezone(tz)
-    expires_str = expires_local.strftime("%d.%m.%Y")
+    expires_str = user.premium_until.strftime("%d.%m.%Y") if user.premium_until else "—"
+
+    if was_grace:
+        text = (
+            f"✅ <b>Подписка Premium восстановлена!</b>\n\n"
+            f"Аккаунт снова <b>Premium</b> до {expires_str}.\n"
+            f"Все данные сохранены — история, устройства, профили."
+        )
+    else:
+        text = (
+            f"✅ <b>Подписка Premium продлена.</b>\n\n"
+            f"Аккаунт <b>Premium</b> до {expires_str}."
+        )
+
+    try:
+        await bot.send_message(telegram_id, text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to send premium renewed notification to {telegram_id}: {e}")
+
+
+async def _send_premium_warning(telegram_id: int, user) -> None:
+    from app.bot import get_bot
+    from app import settings_cache
+
+    bot = get_bot()
+    if not bot:
+        return
+
+    # Показываем дату как в админке — UTC-дата (premium_until = 23:59:59 UTC нужного дня)
+    expires_str = user.premium_until.strftime("%d.%m.%Y")
+
+    s_dev  = settings_cache.get_int("simple_device_limit")
+    s_prof = settings_cache.get_int("simple_profile_limit")
+    s_tc   = settings_cache.get_int("simple_timecode_limit")
 
     try:
         await bot.send_message(
             telegram_id,
             f"⏰ <b>Подписка Premium истекает {expires_str}.</b>\n\n"
-            f"Продлите подписку, чтобы сохранить доступ к Premium-функциям.",
+            f"После истечения аккаунт будет переведён на <b>Simple</b>:\n"
+            f"• Синхронизация с MyShows — недоступна\n"
+            f"• Лишние устройства будут удалены (оставлено {s_dev} старейших)\n"
+            f"• Лишние профили на устройство будут удалены (оставлено {s_prof})\n"
+            f"• Лишние таймкоды на профиль будут удалены (лимит {s_tc})\n\n"
+            f"Обратитесь к администратору для продления.",
+            parse_mode="HTML",
         )
     except Exception as e:
         logger.warning(f"Failed to send premium warning to {telegram_id}: {e}")
+
+
+async def _cleanup_devices(db, user_id: int, device_limit: int, username: str) -> int:
+    """Удаляет самые новые устройства сверх лимита. Таймкоды удаляются каскадно.
+    Возвращает количество удалённых устройств."""
+    from app.db.models import Device
+    from sqlalchemy import select, delete
+
+    all_ids = (await db.execute(
+        select(Device.id)
+        .where(Device.user_id == user_id)
+        .order_by(Device.created_at.asc())
+    )).scalars().all()
+
+    if len(all_ids) <= device_limit:
+        return 0
+
+    delete_ids = all_ids[device_limit:]
+    await db.execute(delete(Device).where(Device.id.in_(delete_ids)))
+    logger.info(f"User {username}: deleted {len(delete_ids)} devices (limit={device_limit})")
+    return len(delete_ids)
+
+
+async def _cleanup_profiles(db, user_id: int, profile_limit: int, username: str) -> int:
+    """Для каждого устройства удаляет самые новые профили сверх лимита + их таймкоды.
+    Возвращает суммарное количество удалённых профилей."""
+    from app.db.models import Device, LampaProfile, Timecode
+    from sqlalchemy import select, delete
+
+    dev_ids = (await db.execute(
+        select(Device.id).where(Device.user_id == user_id)
+    )).scalars().all()
+
+    total_deleted = 0
+    for device_id in dev_ids:
+        profiles = (await db.execute(
+            select(LampaProfile)
+            .where(LampaProfile.device_id == device_id)
+            .order_by(LampaProfile.id.asc())
+        )).scalars().all()
+
+        if len(profiles) <= profile_limit:
+            continue
+
+        to_delete = profiles[profile_limit:]
+        del_profile_ids = [lp.lampa_profile_id for lp in to_delete]
+        del_lp_ids      = [lp.id for lp in to_delete]
+
+        await db.execute(
+            delete(Timecode).where(
+                Timecode.device_id == device_id,
+                Timecode.lampa_profile_id.in_(del_profile_ids),
+            )
+        )
+        await db.execute(delete(LampaProfile).where(LampaProfile.id.in_(del_lp_ids)))
+        total_deleted += len(to_delete)
+
+    if total_deleted:
+        logger.info(f"User {username}: deleted {total_deleted} profiles (limit={profile_limit}/device)")
+    return total_deleted
 
 
 async def _cleanup_timecodes(db, user_id: int, limit: int, username: str) -> None:

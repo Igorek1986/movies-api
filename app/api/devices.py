@@ -20,13 +20,31 @@ from app import rate_limit, settings_cache
 
 
 def _import_ctx(user: User) -> dict:
-    """Переменные для отображения лимита импорта в шаблоне."""
+    """Переменные для шаблона profiles.html: импорт, синхронизация, лимиты."""
     daily_limit = settings_cache.get_role_limit(user.role, "import_daily")
     if daily_limit is not None:
         allowed, wait_sec, remaining = rate_limit.can_import(user.id, daily_limit)
     else:
         allowed, wait_sec, remaining = True, 0, None
-    return {"import_allowed": allowed, "import_wait_sec": wait_sec, "import_daily_limit": daily_limit, "import_remaining": remaining}
+
+    myshows_limit = settings_cache.get_role_limit(user.role, "myshows_daily")
+    if user.role == "simple":
+        sync_allowed, sync_wait_sec = False, 0
+    elif myshows_limit is None:
+        sync_allowed, sync_wait_sec = True, 0
+    else:
+        sync_allowed, sync_wait_sec = rate_limit.peek_sync(user.id)
+
+    return {
+        "import_allowed": allowed,
+        "import_wait_sec": wait_sec,
+        "import_daily_limit": daily_limit,
+        "import_remaining": remaining,
+        "sync_allowed": sync_allowed,
+        "sync_wait_sec": sync_wait_sec,
+        "timecode_limit": settings_cache.get_role_limit(user.role, "timecode_limit"),
+        "profile_limit": settings_cache.get_role_limit(user.role, "profile_limit"),
+    }
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string, backup_codes_count

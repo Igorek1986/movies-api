@@ -158,7 +158,7 @@ def _parse_watch_date(date_str: str | None) -> datetime:
 
 # ─── Sync stream generator ─────────────────────────────────────────────────────
 
-async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession, profile_id: str = ""):
+async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession, profile_id: str = "", user_role: str = "simple"):
     all_timecodes: list[dict] = []
     all_media_cards: list[dict] = []
     tmdb_cache: dict = {}
@@ -380,20 +380,21 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
             if all_timecodes or all_media_cards:
                 await db.commit()
 
+            trimmed = 0
             if all_timecodes:
-                trimmed = await _trim_to_limit(db, device.id, profile_id, current_user.role)
-                if trimmed:
-                    yield _sse({"type": "status", "message": f"Удалено {trimmed} старых таймкодов (превышен лимит)"})
+                trimmed = await _trim_to_limit(db, device.id, profile_id, user_role)
 
         total_ok = stats["movies_ok"] + stats["shows_ok"]
         total_err = stats["movies_err"] + stats["shows_err"]
+        trim_note = f" Удалено старых: {trimmed} (превышен лимит)." if trimmed else ""
         yield _sse({
             "type": "done",
             "added": len(all_timecodes),
+            "trimmed": trimmed,
             "stats": stats,
             "not_found": not_found,
             "message": (
-                f"Готово! Таймкодов: {len(all_timecodes)}. "
+                f"Готово! Таймкодов: {len(all_timecodes)}.{trim_note} "
                 f"Обработано: {total_ok}, не найдено в TMDB: {total_err}."
             ),
         })
@@ -482,7 +483,7 @@ async def sync_myshows(
     logger.info(f"MyShows sync: user={current_user.username}, device={device.name}")
 
     return StreamingResponse(
-        _sync_generator(device, login, password, db, profile_id),
+        _sync_generator(device, login, password, db, profile_id, current_user.role),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

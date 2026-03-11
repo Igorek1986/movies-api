@@ -102,6 +102,24 @@ def reset_import(user_id: int) -> None:
     _reset(f"import:{user_id}")
 
 
+def peek_sync(user_id: int) -> tuple[bool, int]:
+    """Проверить cooldown синхронизации без записи попытки. Returns (allowed, wait_sec)."""
+    cooldown = _cfg("sync_cooldown_sec")
+    key = f"sync:{user_id}"
+    now = time.monotonic()
+    entries = _windows.get(key, [])
+    if entries:
+        elapsed = now - entries[-1]
+        if elapsed < cooldown:
+            return False, max(1, int(cooldown - elapsed))
+    return True, 0
+
+
+def reset_sync(user_id: int) -> None:
+    """Сбросить cooldown синхронизации (вызывается из админки)."""
+    _reset(f"sync:{user_id}")
+
+
 def check_sync(user_id: int) -> tuple[bool, int]:
     """MyShows sync cooldown. Returns (allowed, seconds_until_allowed).
 

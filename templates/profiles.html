@@ -18,8 +18,15 @@
        ═══════════════════════════════════════════ -->
   <section>
     <div class="section-title-row">
-      <h2>Мои устройства <small class="muted" style="font-size:.9rem;font-weight:400">({{ user.role }}{% if device_limit is not none %}, лимит: {{ device_limit }}{% endif %})</small></h2>
+      <h2>Мои устройства <small class="muted" style="font-size:.9rem;font-weight:400">({{ user.role }})</small></h2>
     </div>
+    <p class="account-limits muted">
+      {% if device_limit is none %}
+        Без ограничений — устройств, профилей и таймкодов.
+      {% else %}
+        {{ device_limit }} устр.{% if profile_limit is not none %} · {{ profile_limit }} профилей на устройство{% endif %}{% if timecode_limit is not none %} · {{ timecode_limit }} таймкодов на профиль{% endif %}.
+      {% endif %}
+    </p>
 
     {% if profiles %}
     <figure class="mobile-cards">
@@ -167,6 +174,34 @@
     <div class="details-body">
       {% if user.role == "simple" %}
       <p>🔒 Синхронизация MyShows доступна только для <strong>Premium</strong> аккаунтов.</p>
+      {% elif not sync_allowed %}
+      <p>⏳ Синхронизация уже выполнялась сегодня. Следующая через
+        <strong id="syncCountdown"></strong>.
+      </p>
+      <script>
+        (function() {
+          var sec = {{ sync_wait_sec | default(0) }};
+          var el = document.getElementById('syncCountdown');
+          function fmt(s) {
+            var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+            if (h > 0) return h + ' ч ' + m + ' мин';
+            if (m > 0) return m + ' мин ' + ss + ' сек';
+            return ss + ' сек';
+          }
+          if (el) {
+            if (sec <= 0) {
+              el.textContent = 'скоро…';
+            } else {
+              el.textContent = fmt(sec);
+              var t = setInterval(function() {
+                sec--;
+                if (sec <= 0) { clearInterval(t); location.reload(); }
+                else el.textContent = fmt(sec);
+              }, 1000);
+            }
+          }
+        })();
+      </script>
       {% else %}
       <p>Все просмотренные фильмы и серии будут отмечены как 100% в выбранном устройстве.</p>
       <form id="myshowsSyncForm">

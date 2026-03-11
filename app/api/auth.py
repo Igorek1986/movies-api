@@ -14,7 +14,7 @@ from app.db.database import get_db
 import string
 import json as _json
 from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending, Session
-from app.api.devices import _devices_with_stats
+from app.api.devices import _devices_with_stats, _import_ctx
 from app.utils import (
     hash_password, verify_password, generate_api_key, validate_password, validate_name,
     generate_totp_secret, get_totp_uri, verify_totp, make_totp_qr_base64,
@@ -83,11 +83,6 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         select(TelegramUser).where(TelegramUser.user_id == user.id)
     )
     tg = tg_result.scalar_one_or_none()
-    daily_limit = settings_cache.get_role_limit(user.role, "import_daily")
-    if daily_limit is not None:
-        import_allowed, import_wait_sec, import_remaining = rate_limit.can_import(user.id, daily_limit)
-    else:
-        import_allowed, import_wait_sec, import_remaining = True, 0, None
     return {
         "request": request,
         "user": user,
@@ -97,10 +92,7 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": user.totp_enabled,
         "backup_codes_count": backup_codes_count(user.backup_codes),
-        "import_allowed": import_allowed,
-        "import_wait_sec": import_wait_sec,
-        "import_daily_limit": daily_limit,
-        "import_remaining": import_remaining,
+        **_import_ctx(user),
         **extra,
     }
 

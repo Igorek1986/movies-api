@@ -158,6 +158,7 @@ async def change_user_role(
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
     old_role = user.role
+    was_in_grace = user.role == "simple" and user.timecode_grace_until is not None
     user.role = role
 
     if role == "premium":
@@ -171,33 +172,50 @@ async def change_user_role(
         user.timecode_grace_until = None
     elif role in ("simple", "super"):
         user.premium_until = None
+        user.timecode_grace_until = None  # у simple/super нет грейс-периода
+        if role == "super":
+            rate_limit.reset_sync(user.id)  # super не имеет ограничений на синхронизацию
 
-    # При понижении лимита таймкодов — применить ограничение
+    await db.commit()  # фиксируем смену роли до очисток
+
     if old_role != role:
-        old_limit = settings_cache.get_role_limit(old_role, "timecode_limit")
-        new_limit = settings_cache.get_role_limit(role,     "timecode_limit")
-        # Запускаем только если новый лимит строго меньше старого (или был безлимитный → стал ограниченным)
-        limit_reduced = new_limit is not None and (old_limit is None or new_limit < old_limit)
-        if limit_reduced:
-            dev_ids = (await db.execute(
-                select(Device.id).where(Device.user_id == user.id)
-            )).scalars().all()
-            if dev_ids:
-                tc_total = (await db.execute(
-                    select(func.count()).select_from(Timecode)
-                    .where(Timecode.device_id.in_(dev_ids))
-                )).scalar() or 0
-                if tc_total > new_limit:
-                    grace_days = settings_cache.get_int("timecode_grace_days")
-                    if grace_days == 0:
-                        # Немедленная очистка
-                        from app.tasks import _cleanup_timecodes
-                        await db.commit()  # зафиксировать смену роли до очистки
-                        await _cleanup_timecodes(db, user.id, new_limit, user.username)
-                    else:
-                        user.timecode_grace_until = datetime.now(timezone.utc) + timedelta(days=grace_days)
+        # Проверяем нужен ли grace (устройства, профили или таймкоды превышают новые лимиты).
+        # Очистка выполняется через grace-период (шаг 5 в run_premium_expiry_check),
+        # чтобы пользователь мог продлить подписку не потеряв данные.
+        new_dev_limit  = settings_cache.get_role_limit(role, "device_limit")
+        new_prof_limit = settings_cache.get_role_limit(role, "profile_limit")
+        new_tc_limit   = settings_cache.get_role_limit(role, "timecode_limit")
+        old_dev_limit  = settings_cache.get_role_limit(old_role, "device_limit")
+        old_prof_limit = settings_cache.get_role_limit(old_role, "profile_limit")
+        old_tc_limit   = settings_cache.get_role_limit(old_role, "timecode_limit")
 
-    await db.commit()
+        limits_reduced = any([
+            new_dev_limit  is not None and (old_dev_limit  is None or new_dev_limit  < old_dev_limit),
+            new_prof_limit is not None and (old_prof_limit is None or new_prof_limit < old_prof_limit),
+            new_tc_limit   is not None and (old_tc_limit   is None or new_tc_limit   < old_tc_limit),
+        ])
+
+        if limits_reduced:
+            grace_days = settings_cache.get_int("timecode_grace_days")
+            if grace_days == 0:
+                from app.tasks import _cleanup_devices, _cleanup_profiles, _cleanup_timecodes
+                if new_dev_limit  is not None: await _cleanup_devices(db, user.id, new_dev_limit, user.username)
+                if new_prof_limit is not None: await _cleanup_profiles(db, user.id, new_prof_limit, user.username)
+                if new_tc_limit   is not None: await _cleanup_timecodes(db, user.id, new_tc_limit, user.username)
+            else:
+                base = user.premium_until if (role == "premium" and user.premium_until) else datetime.now(timezone.utc)
+                user.timecode_grace_until = base + timedelta(days=grace_days)
+            await db.commit()
+
+    # Уведомление при восстановлении premium из grace-периода через смену роли
+    if role == "premium" and was_in_grace:
+        from app.db.models import TelegramUser
+        tg = (await db.execute(
+            select(TelegramUser).where(TelegramUser.user_id == user.id)
+        )).scalar_one_or_none()
+        if tg:
+            from app.tasks import _send_premium_renewed
+            await _send_premium_renewed(tg.telegram_id, user, was_grace=True)
 
     logger.info(f"Admin: user {user.username} role changed {old_role} → {role}")
     return RedirectResponse(url="/admin", status_code=302)
@@ -216,16 +234,38 @@ async def extend_premium(
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    if user.role != "premium":
-        raise HTTPException(status_code=400, detail="Пользователь не является Premium")
 
     now = datetime.now(timezone.utc)
+
+    # Случай 1: активный premium — продлить
+    # Случай 2: simple в grace-периоде — восстановить premium и сбросить grace
+    in_grace = user.role == "simple" and user.timecode_grace_until is not None
+    if user.role != "premium" and not in_grace:
+        raise HTTPException(status_code=400, detail="Пользователь не является Premium и не в grace-периоде")
+
     base = user.premium_until if (user.premium_until and user.premium_until > now) else now
     user.premium_until = (base + timedelta(days=30)).replace(hour=23, minute=59, second=59, microsecond=0)
     user.premium_warned = False
+
+    if in_grace:
+        user.role = "premium"
+        user.timecode_grace_until = None
+
     await db.commit()
 
-    logger.info(f"Admin: extended premium for {user.username} until {user.premium_until.strftime('%d.%m.%Y')}")
+    # Уведомление в Telegram
+    from app.db.models import TelegramUser
+    tg = (await db.execute(
+        select(TelegramUser).where(TelegramUser.user_id == user.id)
+    )).scalar_one_or_none()
+    if tg:
+        from app.tasks import _send_premium_renewed
+        await _send_premium_renewed(tg.telegram_id, user, was_grace=in_grace)
+
+    logger.info(
+        f"Admin: {'restored' if in_grace else 'extended'} premium for {user.username} "
+        f"until {user.premium_until.strftime('%d.%m.%Y')}"
+    )
     return RedirectResponse(url="/admin", status_code=302)
 
 
@@ -270,6 +310,91 @@ async def reset_user_import(
     logger.info(f"Admin: import limit reset for user_id={user_id} ({user.username})")
     from urllib.parse import quote
     msg = quote(f"Лимит импорта сброшен для {user.username}")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+@router.post("/user/{user_id}/reset-sync")
+async def reset_user_sync(
+    request: Request,
+    response: Response,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    rate_limit.reset_sync(user_id)
+    logger.info(f"Admin: sync cooldown reset for user_id={user_id} ({user.username})")
+    from urllib.parse import quote
+    msg = quote(f"Кулдаун синхронизации сброшен для {user.username}")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Ручной запуск очистки устройств/профилей для конкретного пользователя
+# ---------------------------------------------------------------------------
+
+@router.post("/user/{user_id}/cleanup-limits")
+async def cleanup_user_limits(
+    request: Request,
+    response: Response,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    from app.tasks import _cleanup_devices, _cleanup_profiles, _cleanup_timecodes
+    dev_limit  = settings_cache.get_role_limit(user.role, "device_limit")
+    prof_limit = settings_cache.get_role_limit(user.role, "profile_limit")
+    tc_limit   = settings_cache.get_role_limit(user.role, "timecode_limit")
+
+    del_dev = del_prof = 0
+    if dev_limit is not None:
+        del_dev = await _cleanup_devices(db, user.id, dev_limit, user.username)
+        await db.commit()
+    if prof_limit is not None:
+        del_prof = await _cleanup_profiles(db, user.id, prof_limit, user.username)
+        await db.commit()
+    if tc_limit is not None:
+        await _cleanup_timecodes(db, user.id, tc_limit, user.username)
+        await db.commit()
+
+    from urllib.parse import quote
+    parts = []
+    if del_dev:   parts.append(f"устройств: {del_dev}")
+    if del_prof:  parts.append(f"профилей: {del_prof}")
+    summary = f"Очистка {user.username}: удалено {', '.join(parts)}" if parts else f"Очистка {user.username}: ничего не удалено"
+    return RedirectResponse(url=f"/admin?success={quote(summary)}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Ручной запуск проверки истечения Premium
+# ---------------------------------------------------------------------------
+
+@router.post("/run-expiry-check")
+async def run_expiry_check(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    from app.tasks import run_premium_expiry_check
+    await run_premium_expiry_check()
+    from urllib.parse import quote
+    msg = quote("Проверка истечения Premium выполнена")
     return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
 
 
