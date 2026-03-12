@@ -55,6 +55,18 @@ class AdminStates(StatesGroup):
     waiting_broadcast_text = State()
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(n)
+    if 11 <= n % 100 <= 19:
+        return many
+    r = n % 10
+    if r == 1:
+        return one
+    if 2 <= r <= 4:
+        return few
+    return many
+
+
 def _main_keyboard() -> ReplyKeyboardMarkup:
     from app.config import get_settings
 
@@ -259,7 +271,7 @@ async def cmd_status(message: types.Message):
             grace_until = grace_until.replace(tzinfo=timezone.utc)
         if grace_until > now:
             days_left = (grace_until - now).days
-            subscription_line = f"\n⚠️ <b>Grace-период:</b> ещё {days_left} дн. (до {grace_until.strftime('%d.%m.%Y')})"
+            subscription_line = f"\n⚠️ <b>Grace-период:</b> ещё {days_left} {_plural(days_left, 'день', 'дня', 'дней')} (до {grace_until.strftime('%d.%m.%Y')})"
         else:
             subscription_line = "\n❌ <b>Grace-период истёк</b>"
     elif user.premium_until:
@@ -268,7 +280,7 @@ async def cmd_status(message: types.Message):
             premium_until = premium_until.replace(tzinfo=timezone.utc)
         if premium_until > now:
             days_left = (premium_until - now).days
-            subscription_line = f"\n📅 <b>Подписка до:</b> {premium_until.strftime('%d.%m.%Y')} (осталось {days_left} дн.)"
+            subscription_line = f"\n📅 <b>Подписка до:</b> {premium_until.strftime('%d.%m.%Y')} (осталось {days_left} {_plural(days_left, 'день', 'дня', 'дней')})"
         else:
             subscription_line = f"\n⏰ <b>Подписка истекла:</b> {premium_until.strftime('%d.%m.%Y')}"
 
@@ -562,7 +574,7 @@ async def btn_not_working(message: types.Message):
         if elapsed < _REPORT_COOLDOWN_MINUTES:
             wait = int(_REPORT_COOLDOWN_MINUTES - elapsed)
             await message.answer(
-                f"Вы уже отправляли репорт. Следующий можно через {wait} мин."
+                f"Вы уже отправляли репорт. Следующий можно через {wait} {_plural(wait, 'минуту', 'минуты', 'минут')}."
             )
             return
 

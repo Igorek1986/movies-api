@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templates import get_templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -16,7 +16,7 @@ from app import rate_limit, settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
-templates = Jinja2Templates(directory="templates")
+templates = get_templates()
 
 _COOKIE = "admin_session"
 

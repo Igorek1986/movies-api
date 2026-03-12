@@ -20,7 +20,7 @@ from urllib.parse import parse_qsl, unquote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from app.templates import get_templates
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,7 @@ from app import settings_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tg-app")
-templates = Jinja2Templates(directory="templates")
+templates = get_templates()
 
 
 # ─── Валидация initData ───────────────────────────────────────────────────────

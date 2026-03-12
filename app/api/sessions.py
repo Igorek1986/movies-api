@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templates import get_templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
@@ -12,7 +12,7 @@ from app.api.dependencies import get_current_user
 from app.utils import parse_user_agent
 
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = get_templates()
 
 COOKIE_NAME = "session_key"
 

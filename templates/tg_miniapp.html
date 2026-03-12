@@ -250,6 +250,14 @@ function toast(msg, d=2200) {
   setTimeout(() => t.classList.remove('show'), d);
 }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function plural(n, one, few, many) {
+  n = Math.abs(n);
+  if (n % 100 >= 11 && n % 100 <= 19) return many;
+  const r = n % 10;
+  if (r === 1) return one;
+  if (r >= 2 && r <= 4) return few;
+  return many;
+}
 function haptic(t='success') { tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(t); }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -355,7 +363,7 @@ async function loadUserHome() {
           <div style="font-size:17px;font-weight:700">${esc(d.username)}</div>
           <div style="font-size:13px;color:var(--hint);margin-top:4px">
             <span class="role-badge role-${d.role}">${d.role_label}</span>
-            <span style="margin-left:6px">${d.device_count} / ${lim} устройств</span>
+            <span style="margin-left:6px">${d.device_count} / ${lim} ${plural(d.device_count, 'устройство', 'устройства', 'устройств')}</span>
           </div>
         </div>
       </div>
@@ -391,7 +399,7 @@ function renderDevices(devices) {
         <div class="dev-ic">📺</div>
         <div class="dev-inf">
           <div class="dev-nm" id="dnm-${d.id}">${esc(d.name)}</div>
-          <div class="dev-mt">${d.timecodes_count} таймкодов · ${d.created_at||'—'}</div>
+          <div class="dev-mt">${d.timecodes_count} ${plural(d.timecodes_count, 'таймкод', 'таймкода', 'таймкодов')} · ${d.created_at||'—'}</div>
         </div>
         <div class="chev">▶</div>
       </div>

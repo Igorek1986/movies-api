@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.templates import get_templates
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -30,7 +30,7 @@ EXCLUDED_CATEGORIES = {
 }
 
 router = APIRouter(tags=["stats"])
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates = get_templates()
 logger = logging.getLogger(__name__)
 
 

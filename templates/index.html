@@ -76,16 +76,16 @@
     <article style="border: 1px solid var(--pico-muted-border-color);">
       <header><strong>Базовый</strong> <small class="muted">— бесплатно</small></header>
       <ul>
-        <li>До {{ simple_device_limit }} устройств</li>
-        <li>До {{ simple_tc_limit }} таймкодов на профиль</li>
+        <li>До {{ simple_device_limit }} {{ simple_device_limit | plural('устройства', 'устройств', 'устройств') }}</li>
+        <li>До {{ simple_tc_limit }} {{ simple_tc_limit | plural('таймкода', 'таймкодов', 'таймкодов') }}</li>
         <li>Привязка Telegram для восстановления пароля</li>
       </ul>
     </article>
     <article style="border: 1px solid var(--pico-primary);">
       <header><strong>Премиум</strong> <small class="muted">— по запросу</small></header>
       <ul>
-        <li>До {{ premium_device_limit }} устройств</li>
-        <li>До {{ premium_tc_limit }} таймкодов на профиль</li>
+        <li>До {{ premium_device_limit }} {{ premium_device_limit | plural('устройства', 'устройств', 'устройств') }}</li>
+        <li>До {{ premium_tc_limit }} {{ premium_tc_limit | plural('таймкода', 'таймкодов', 'таймкодов') }}</li>
         <li>Синхронизация просмотренного из MyShows</li>
       </ul>
     </article>
@@ -96,7 +96,7 @@
         <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔑</span><span>Сброс пароля через бота</span></li>
         <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔐</span><span>Уведомления о новых входах</span></li>
         <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔔</span><span>Напоминания об истечении подписки</span></li>
-        <li style="display:flex;gap:.4rem;align-items:baseline"><span>⚠️</span><span>Предупреждение за {{ inactive_warn_days }} дн. до удаления аккаунта</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>⚠️</span><span>Предупреждение за {{ inactive_warn_days }} {{ inactive_warn_days | plural('день', 'дня', 'дней') }} до удаления аккаунта</span></li>
       </ul>
       <a href="https://t.me/{{ bot_name }}" target="_blank" role="button" class="outline btn-sm">@{{ bot_name }}</a>
     </article>
@@ -105,8 +105,8 @@
 
   {% if inactive_delete_days > 0 %}
   <p class="muted" style="font-size: .85rem; margin-top: .5rem;">
-    * Аккаунты удаляются автоматически при отсутствии активности более {{ inactive_delete_days }} дней.
-    {% if bot_name %}За {{ inactive_warn_days }} дн. до удаления придёт уведомление в Telegram.{% endif %}
+    * Аккаунты удаляются автоматически при отсутствии активности более {{ inactive_delete_days }} {{ inactive_delete_days | plural('дня', 'дней', 'дней') }}.
+    {% if bot_name %}За {{ inactive_warn_days }} {{ inactive_warn_days | plural('день', 'дня', 'дней') }} до удаления придёт уведомление в Telegram.{% endif %}
   </p>
   {% endif %}
 

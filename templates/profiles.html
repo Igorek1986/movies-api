@@ -24,7 +24,7 @@
       {% if device_limit is none %}
         Без ограничений — устройств, профилей и таймкодов.
       {% else %}
-        {{ device_limit }} устр.{% if profile_limit is not none %} · {{ profile_limit }} профилей на устройство{% endif %}{% if timecode_limit is not none %} · {{ timecode_limit }} таймкодов на профиль{% endif %}.
+        {{ device_limit }} {{ device_limit | plural('устройство', 'устройства', 'устройств') }}{% if profile_limit is not none %} · {{ profile_limit }} {{ profile_limit | plural('профиль', 'профиля', 'профилей') }} на устройство{% endif %}{% if timecode_limit is not none %} · {{ timecode_limit }} {{ timecode_limit | plural('таймкод', 'таймкода', 'таймкодов') }} на профиль{% endif %}.
       {% endif %}
     </p>
 
@@ -87,7 +87,7 @@
       <button type="submit">Добавить устройство</button>
     </form>
     {% else %}
-    <p class="muted">Достигнут лимит устройств ({{ device_limit }}). Для увеличения лимита обратитесь к администратору.</p>
+    <p class="muted">Достигнут лимит: {{ device_limit }} {{ device_limit | plural('устройство', 'устройства', 'устройств') }}. Для увеличения обратитесь к администратору.</p>
     {% endif %}
   </section>
 

@@ -19,7 +19,7 @@ from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depe
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response
-from fastapi.templating import Jinja2Templates
+from app.templates import get_templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -1016,7 +1016,7 @@ async def get_category(
         )
 
 
-_templates = Jinja2Templates(directory="templates")
+_templates = get_templates()
 
 
 @app.get("/", response_class=HTMLResponse)
