@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # True если сервер за NAT без публичного порта (polling вместо webhook)
     TELEGRAM_USE_POLLING: bool = False
 
+    # Ссылка на донат (показывается в боте; если пусто — кнопки нет)
+    DONATE_URL: str = ""
+
     # HTTP/SOCKS-прокси для загрузки картинок с TMDB (опционально)
     # Формат: http://host:port или socks5://host:port
     IMAGE_PROXY_URL: str = ""
