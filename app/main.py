@@ -2,60 +2,75 @@ import asyncio
 import gzip
 import json
 import logging
-import os
+import re
 import httpx
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, date as _date
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, Tuple
 from logging import DEBUG, INFO
 
-import aiofiles
 import requests
-from dotenv import load_dotenv
-from fastapi import FastAPI, Header, status, Request, HTTPException
+from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response
+from app.templates import get_templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.database import init_db, async_session_maker
+from app.db.models import MediaCard, User, Timecode
+from app.api.dependencies import get_current_user
+from app.config import get_settings
+from app.api import auth, myshows_sync, timecodes as timecodes_router
+from app.api import devices
+from app.api import sessions as sessions_router
+from app.api import telegram as telegram_router
+from app.api import tg_miniapp as tg_miniapp_router
+from app.admin import router as admin_router
+from app.api.dependencies import get_device_by_token
+from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
+from app.utils import lampa_hash, build_episode_hash_string
+from app import settings_cache as _sc
+from app.db.database import get_db
+
+settings = get_settings()
 
 from app import myshows
 from app import stats
 
-# Загрузка переменных окружения
-load_dotenv()
-TMDB_TOKEN = os.getenv("TMDB_TOKEN")
-releases_dir_env = os.getenv("RELEASES_DIR", "NUMParser/public")
-BANNED_PATTERNS = json.loads(os.getenv("BANNED_PATTERNS", "[]"))
-
-
-# Проверяем, абсолютный ли путь
-if os.path.isabs(releases_dir_env):
-    RELEASES_DIR = Path(releases_dir_env)
-else:
-    RELEASES_DIR = Path.home() / releases_dir_env
+TMDB_TOKEN = settings.TMDB_TOKEN
+RELEASES_DIR = settings.releases_dir_path
+BANNED_PATTERNS = settings.banned_patterns_list
 
 # Получаем путь к директории, где находится текущий скрипт
 BASE_DIR = Path(__file__).parent.parent
 BLOCKED_JSON_PATH = BASE_DIR / "blocked.json"
-CACHE_FILE = BASE_DIR / "tmdb_cache.json"
 tmdb_cache: Dict[Tuple[str, int], Any] = None
 with open(BLOCKED_JSON_PATH, "r", encoding="utf-8") as f:
     BLOCKED_RESPONSE = json.load(f)
 
 STATIC_DIR = BASE_DIR / "static"
+PLUGINS_DIR = BASE_DIR / "lampa-plugins"
+PLUGINS_DIR.mkdir(exist_ok=True)
 # Настройка логирования
-DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
 logging.basicConfig(
-    level=DEBUG if DEBUG_MODE else INFO,  # Уровень логирования
+    level=DEBUG if settings.DEBUG else INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()],  # Вывод в консоль
+    handlers=[logging.StreamHandler()],
 )
 
 logger = logging.getLogger(__name__)
+
+# Отключаем verbose DEBUG-логи httpx/httpcore
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -63,25 +78,62 @@ async def lifespan(app: FastAPI):
     """Собственный обработчик жизненного цикла приложения"""
     global tmdb_cache
 
-    # Инициализация кэша
-    tmdb_cache = await load_cache_from_file()
-    logger.debug(f"Кэш инициализирован, записей: {len(tmdb_cache)}")
+    stats.init_stats()
 
-    # Логируем первые 5 ключей для проверки
-    sample_keys = list(tmdb_cache.keys())[:5]
-    logger.debug(f"Пример ключей в кэше: {sample_keys}")
+    # === Startup ===
+    print("🔍 Connecting to:", settings.DATABASE_URL)
+    await init_db()
+    print("✅ Database tables created")
 
-    # Добавьте проверку путей
+    # Загрузка настроек приложения из БД
+    from app import settings_cache
+    async with async_session_maker() as _settings_db:
+        await settings_cache.load(_settings_db)
+
+    # Загрузка TMDB-кэша из PostgreSQL
+    tmdb_cache = await load_cache_from_db()
+    logger.info(f"TMDB кэш загружен из БД, записей: {len(tmdb_cache)}")
     logger.info(f"Рабочая директория: {BASE_DIR}")
     logger.info(f"Директория с релизами: {RELEASES_DIR}")
-    logger.info(f"Файл кэша: {CACHE_FILE}")
 
-    stats.init_stats()
+    # Инициализация Telegram-бота
+    _polling_task = None
+    if settings.TELEGRAM_BOT_TOKEN:
+        from app.bot import init_bot
+
+        bot, dp = init_bot(settings.TELEGRAM_BOT_TOKEN)
+        if settings.TELEGRAM_USE_POLLING:
+            await bot.delete_webhook(drop_pending_updates=True)
+            _polling_task = asyncio.create_task(
+                dp.start_polling(bot, handle_signals=False)
+            )
+            logger.info("Telegram bot started in polling mode")
+        else:
+            # webhook регистрируется через dp.startup hook в bot.py
+            await dp.emit_startup(bot=bot)
+    else:
+        logger.warning("TELEGRAM_BOT_TOKEN не задан — бот отключён")
+
+    # Запуск фоновых задач (premium expiry check, etc.)
+    from app.tasks import start_tasks
+    start_tasks()
 
     yield  # Приложение работает
 
-    # Очистка при завершении (опционально)
-    await save_cache_to_file(tmdb_cache)
+    # Shutdown
+    from app.tasks import stop_tasks
+    stop_tasks()
+    if settings.TELEGRAM_BOT_TOKEN:
+        from app.bot import get_bot, get_dp
+
+        b = get_bot()
+        d = get_dp()
+        if _polling_task:
+            _polling_task.cancel()
+        elif d and b:
+            await d.emit_shutdown(bot=b)
+        if b:
+            await b.session.close()
 
 
 # app = FastAPI()
@@ -100,11 +152,19 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/favicon.ico")
 async def favicon():
-    return FileResponse("static/images/favicon/favicon.ico", media_type="image/x-icon")
+    return FileResponse("static/favicon/favicon.ico", media_type="image/x-icon")
 
 
+app.include_router(auth.router)
+app.include_router(devices.router)
+app.include_router(sessions_router.router)
+app.include_router(timecodes_router.router)
 app.include_router(myshows.router)
 app.include_router(stats.router)
+app.include_router(myshows_sync.router)
+app.include_router(admin_router)
+app.include_router(telegram_router.router)
+app.include_router(tg_miniapp_router.router)
 
 
 @app.middleware("http")
@@ -129,6 +189,23 @@ async def block_banned_origins(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def serve_lampa_plugins(request: Request, call_next):
+    if request.method == "GET":
+        rel = request.url.path.lstrip("/")
+        if rel:
+            try:
+                plugin_path = (PLUGINS_DIR / rel).resolve()
+                plugin_path.relative_to(PLUGINS_DIR.resolve())
+                if plugin_path.is_file():
+                    response = FileResponse(str(plugin_path))
+                    response.headers["Access-Control-Allow-Origin"] = "*"
+                    return response
+            except (ValueError, OSError):
+                pass
+    return await call_next(request)
+
+
 def is_banned_origin(origin: str | None) -> bool:
     if not origin or origin == "null":
         return False
@@ -142,62 +219,153 @@ logger.debug("Настройки окружения загружены успе�
 executor = ThreadPoolExecutor(max_workers=10)  # Пул потоков для запросов
 
 
-# Кэш для TMDB данных
-def tuple_to_str(key: Tuple[str, int]) -> str:
-    """Преобразует кортеж (media_type, tmdb_id) в строку"""
-    return f"{key[0]}_{key[1]}"
+def _extract_tmdb_fields(media_type: str, data: dict) -> dict:
+    """Извлекает только нужные поля из полного ответа TMDB API для in-memory кэша."""
+    base = {
+        "poster_path": data.get("poster_path", ""),
+        "backdrop_path": data.get("backdrop_path", ""),
+        "overview": data.get("overview", ""),
+        "vote_average": data.get("vote_average", 0),
+    }
+    if media_type == "movie":
+        base.update(
+            {
+                "title": data.get("title", ""),
+                "original_title": data.get("original_title", ""),
+                "release_date": data.get("release_date", ""),
+            }
+        )
+    else:  # tv
+        base.update(
+            {
+                "name": data.get("name", ""),
+                "original_name": data.get("original_name", ""),
+                "first_air_date": data.get("first_air_date", ""),
+                "last_air_date": data.get("last_air_date", ""),
+                "number_of_seasons": data.get("number_of_seasons", 0),
+                "seasons": data.get("seasons", []),
+                "last_episode_to_air": data.get("last_episode_to_air"),
+            }
+        )
+    return base
 
 
-def str_to_tuple(key_str: str) -> Tuple[str, int]:
-    """Преобразует строку обратно в кортеж"""
-    parts = key_str.split("_")
-    return (parts[0], int(parts[1]))
-
-
-async def save_cache_to_file(cache: Dict[Tuple[str, int], Any]) -> None:
-    """Асинхронно сохраняет кэш в сжатый GZIP файл"""
+async def load_cache_from_db() -> Dict[Tuple[str, int], Any]:
+    """Загружает TMDB-кэш из таблицы media_cards."""
     try:
-        # Преобразуем кортежные ключи в строки для JSON
-        cache_with_str_keys = {f"{k[0]}_{k[1]}": v for k, v in cache.items()}
+        async with async_session_maker() as db:
+            result = await db.execute(select(MediaCard))
+            rows = result.scalars().all()
 
-        async with aiofiles.open(CACHE_FILE, mode="wb") as f:
-            # Сжимаем данные с помощью gzip
-            json_data = json.dumps(cache_with_str_keys, ensure_ascii=False).encode(
-                "utf-8"
-            )
-            compressed_data = gzip.compress(json_data)
-            await f.write(compressed_data)
-
-        logger.debug(f"Кэш TMDB сохранен в сжатый файл: {CACHE_FILE}")
+        cache: Dict[Tuple[str, int], Any] = {}
+        for mc in rows:
+            key = (mc.media_type, mc.tmdb_id)
+            if mc.media_type == "movie":
+                cache[key] = {
+                    "title": mc.title or "",
+                    "original_title": mc.original_title or "",
+                    "poster_path": mc.poster_path or "",
+                    "backdrop_path": mc.backdrop_path or "",
+                    "overview": mc.overview or "",
+                    "vote_average": mc.vote_average or 0,
+                    "release_date": mc.release_date or "",
+                }
+            else:  # tv
+                seasons = []
+                if mc.seasons_json:
+                    try:
+                        seasons = json.loads(mc.seasons_json)
+                    except Exception:
+                        pass
+                last_ep = None
+                if mc.last_ep_season and mc.last_ep_number:
+                    last_ep = {
+                        "season_number": mc.last_ep_season,
+                        "episode_number": mc.last_ep_number,
+                    }
+                cache[key] = {
+                    "name": mc.title or "",
+                    "original_name": mc.original_title or "",
+                    "poster_path": mc.poster_path or "",
+                    "backdrop_path": mc.backdrop_path or "",
+                    "overview": mc.overview or "",
+                    "vote_average": mc.vote_average or 0,
+                    "first_air_date": mc.release_date or "",
+                    "last_air_date": mc.last_air_date or "",
+                    "number_of_seasons": mc.number_of_seasons or 0,
+                    "seasons": seasons,
+                    "last_episode_to_air": last_ep,
+                }
+        return cache
     except Exception as e:
-        logger.error(f"Ошибка сохранения сжатого кэша: {str(e)}")
-
-
-async def load_cache_from_file() -> Dict[Tuple[str, int], Any]:
-    """Асинхронно загружает кэш из сжатого GZIP файла"""
-    try:
-        if not CACHE_FILE.exists():
-            logger.debug("Файл кэша не найден, будет создан новый")
-            return {}
-
-        async with aiofiles.open(CACHE_FILE, mode="rb") as f:
-            compressed_data = await f.read()
-            json_data = gzip.decompress(compressed_data).decode("utf-8")
-            cache_with_str_keys = json.loads(json_data)
-
-            # Преобразуем строковые ключи обратно в кортежи с правильными типами
-            result = {}
-            for k, v in cache_with_str_keys.items():
-                media_type, tmdb_id_str = k.split("_")
-                try:
-                    tmdb_id = int(tmdb_id_str)
-                    result[(media_type, tmdb_id)] = v
-                except ValueError:
-                    logger.warning(f"Некорректный TMDB ID в кэше: {tmdb_id_str}")
-            return result
-    except Exception as e:
-        logger.error(f"Ошибка загрузки кэша: {str(e)}")
+        logger.error(f"Ошибка загрузки TMDB кэша из БД: {e}")
         return {}
+
+
+async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
+    """Сохраняет TMDB-данные в media_cards (upsert)."""
+    card_id = f"{tmdb_id}_{media_type}"
+    if media_type == "movie":
+        date_val = data.get("release_date") or ""
+        values = {
+            "card_id": card_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": data.get("title") or "",
+            "original_title": data.get("original_title") or "",
+            "poster_path": data.get("poster_path") or "",
+            "year": date_val[:4],
+            "backdrop_path": data.get("backdrop_path") or "",
+            "overview": data.get("overview") or "",
+            "vote_average": data.get("vote_average"),
+            "release_date": date_val,
+        }
+    else:  # tv
+        date_val = data.get("first_air_date") or ""
+        seasons = data.get("seasons")
+        values = {
+            "card_id": card_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": data.get("name") or "",
+            "original_title": data.get("original_name") or "",
+            "poster_path": data.get("poster_path") or "",
+            "year": date_val[:4],
+            "backdrop_path": data.get("backdrop_path") or "",
+            "overview": data.get("overview") or "",
+            "vote_average": data.get("vote_average"),
+            "release_date": date_val,
+            "last_air_date": data.get("last_air_date") or "",
+            "number_of_seasons": data.get("number_of_seasons"),
+            "seasons_json": (
+                json.dumps(seasons, ensure_ascii=False) if seasons else None
+            ),
+            "last_ep_season": (data.get("last_episode_to_air") or {}).get(
+                "season_number"
+            ),
+            "last_ep_number": (data.get("last_episode_to_air") or {}).get(
+                "episode_number"
+            ),
+            "next_ep_air_date": (data.get("next_episode_to_air") or {}).get("air_date") or "",
+        }
+
+    try:
+        async with async_session_maker() as db:
+            stmt = pg_insert(MediaCard).values([values])
+            # Не затираем непустые поля пустыми значениями
+            update_set = {
+                k: stmt.excluded[k] for k in values
+                if k != "card_id"
+                and not (k in ("poster_path", "overview", "title") and not values[k])
+            }
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["card_id"],
+                set_=update_set,
+            )
+            await db.execute(stmt)
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Ошибка upsert MediaCard {card_id}: {e}")
 
 
 def convert_date(date_str: str) -> str:
@@ -248,6 +416,9 @@ def load_data(category: str):
     """Загружает данные из файла в releases/"""
     path = RELEASES_DIR / f"{category}.json"
 
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+
     try:
         with gzip.open(path, "rt") as f:
             return json.load(f)
@@ -264,7 +435,7 @@ async def fetch_tmdb_batch(requests_list: list) -> dict:
         try:
             url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}"
             headers = {"Authorization": TMDB_TOKEN}
-            params = {"language": "ru"}
+            params = {"language": "ru-RU"}
             response = requests.get(url, headers=headers, params=params, timeout=5)
             response.raise_for_status()
             return (media_type, tmdb_id), response.json()
@@ -282,15 +453,12 @@ async def fetch_tmdb_batch(requests_list: list) -> dict:
     for future in asyncio.as_completed(futures):
         key, data = await future
         if data:  # Сохраняем только успешные ответы
-            results[key] = data
-            tmdb_cache[key] = data  # Обновляем глобальный кэш
+            media_type, tmdb_id = key
+            cleaned = _extract_tmdb_fields(media_type, data)
+            results[key] = cleaned
+            tmdb_cache[key] = cleaned
+            asyncio.create_task(upsert_tmdb_cache(media_type, tmdb_id, data))
 
-            # Периодически сохраняем (каждые 10 записей)
-            if len(results) % 10 == 0:
-                await save_cache_to_file(tmdb_cache)
-
-    # Финализируем сохранение
-    await save_cache_to_file(tmdb_cache)
     return results
 
 
@@ -349,11 +517,184 @@ def enhance_with_tmdb(item: dict, tmdb_data: dict) -> dict:
 
 def get_clear_cache_password():
     """Получает пароль из переменных окружения"""
-    password = os.getenv("CACHE_CLEAR_PASSWORD")
+    password = get_settings().CACHE_CLEAR_PASSWORD
     if not password:
         logger.error("Пароль для очистки кэша не задан в переменных окружения")
         raise RuntimeError("Не настроен пароль для очистки кэша")
     return password
+
+
+def _item_card_id(item: dict) -> str | None:
+    """Вычисляет card_id для элемента в формате '{tmdb_id}_{media_type}'."""
+    try:
+        tmdb_id = int(item.get("id", 0))
+        media_type = item.get("media_type")
+        if not media_type:
+            # Lampac-файлы не содержат media_type — определяем по TMDB-полям:
+            # сериалы имеют seasons/last_episode_to_air, фильмы — нет
+            if (
+                item.get("seasons") is not None
+                or item.get("last_episode_to_air") is not None
+            ):
+                media_type = "tv"
+            else:
+                media_type = "movie"
+        if tmdb_id:
+            return f"{tmdb_id}_{media_type}"
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _tv_show_watched(
+    item: dict, item_timecodes: dict[str, str], threshold: int | None = None
+) -> bool:
+    """
+    Проверяет, все ли нужные эпизоды сериала просмотрены.
+
+    Сериалы/мультсериалы (есть last_episode_to_air):
+      - для предыдущих сезонов — все серии по seasons[].episode_count
+      - для последнего сезона — только до last_episode_to_air.episode_number
+        (следующая серия могла ещё не выйти)
+
+    Аниме (нет last_episode_to_air):
+      - проверяем все серии во всех сезонах по seasons[].episode_count
+    """
+    if threshold is None:
+        threshold = _sc.get_int("watched_threshold")
+    original_name = item.get("original_name") or item.get("original_title", "")
+    if not original_name:
+        logger.debug(
+            f"[tv_watched] нет original_name/original_title, item keys={list(item.keys())}"
+        )
+        return False
+
+    seasons = [s for s in item.get("seasons", []) if s.get("season_number", 0) > 0]
+    if not seasons:
+        logger.debug(
+            f"[tv_watched] нет seasons для {original_name!r}, raw seasons={item.get('seasons')}"
+        )
+        return False
+
+    # Хеши эпизодов с достаточным прогрессом
+    watched_hashes: set[str] = set()
+    for h, data_str in item_timecodes.items():
+        try:
+            if json.loads(data_str).get("percent", 0) >= threshold:
+                watched_hashes.add(h)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    last_ep = item.get("last_episode_to_air")
+    if last_ep:
+        # Сериал/мультсериал: проверяем до последней вышедшей серии
+        last_season = last_ep.get("season_number", 0)
+        last_episode = last_ep.get("episode_number", 0)
+        if not last_season or not last_episode:
+            logger.debug(
+                f"[tv_watched] {original_name!r}: last_episode_to_air без season/episode: {last_ep}"
+            )
+            return False
+        season_ep_count = {s["season_number"]: s["episode_count"] for s in seasons}
+        logger.debug(
+            f"[tv_watched] {original_name!r}: проверяем до S{last_season}E{last_episode}, "
+            f"watched_hashes={len(watched_hashes)}, season_ep_count={season_ep_count}"
+        )
+        for sn in range(1, last_season + 1):
+            ep_count = last_episode if sn == last_season else season_ep_count.get(sn, 0)
+            for ep in range(1, ep_count + 1):
+                h = lampa_hash(build_episode_hash_string(sn, ep, original_name))
+                if h not in watched_hashes:
+                    logger.debug(
+                        f"[tv_watched] {original_name!r}: S{sn}E{ep} hash={h} НЕ просмотрен"
+                    )
+                    return False
+    else:
+        # Аниме: нет last_episode_to_air — проверяем все серии всех сезонов
+        for s in seasons:
+            sn = s["season_number"]
+            for ep in range(1, s.get("episode_count", 0) + 1):
+                if (
+                    lampa_hash(build_episode_hash_string(sn, ep, original_name))
+                    not in watched_hashes
+                ):
+                    return False
+
+    return True
+
+
+def _item_watched(
+    item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str],
+    threshold: int | None = None,
+) -> bool:
+    """True если элемент уже полностью просмотрен и должен быть скрыт."""
+    card_id = _item_card_id(item)
+    if not card_id:
+        logger.debug(
+            f"[filter] нет card_id для item id={item.get('id')} media_type={item.get('media_type')}"
+        )
+        return False
+    if card_id.endswith("_tv"):
+        if card_id not in timecodes:
+            logger.debug(
+                f"[filter] {card_id} не найден в таймкодах (всего tv-ключей: {sum(1 for k in timecodes if k.endswith('_tv'))})"
+            )
+            return False
+        result = _tv_show_watched(item, timecodes[card_id], threshold=threshold)
+        logger.debug(
+            f"[filter] {card_id} → _tv_show_watched={result}, "
+            f"original_name={item.get('original_name') or item.get('original_title')!r}, "
+            f"seasons={len(item.get('seasons', []))}, "
+            f"last_episode_to_air={item.get('last_episode_to_air')}, "
+            f"timecode_keys={len(timecodes[card_id])}"
+        )
+        return result
+    is_watched = card_id in watched_movies
+    if is_watched:
+        logger.debug(f"[filter] {card_id} → фильм просмотрен")
+    else:
+        logger.debug(
+            f"[filter] {card_id} → не просмотрен (movie-ветка), media_type в item={item.get('media_type')!r}"
+        )
+    return is_watched
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/imgproxy/{path:path}")
+async def image_proxy(path: str):
+    """Проксирует изображения TMDB через настроенный прокси-сервер."""
+    if not settings.IMAGE_PROXY_URL:
+        raise HTTPException(status_code=404, detail="Image proxy not configured")
+
+    proxy_url = settings.IMAGE_PROXY_URL
+    if settings.IMAGE_PROXY_USER and settings.IMAGE_PROXY_PASS:
+        scheme, rest = proxy_url.split("://", 1)
+        proxy_url = (
+            f"{scheme}://{settings.IMAGE_PROXY_USER}:{settings.IMAGE_PROXY_PASS}@{rest}"
+        )
+
+    tmdb_url = f"https://image.tmdb.org/{path}"
+    try:
+        async with httpx.AsyncClient(
+            proxy=proxy_url, timeout=20, follow_redirects=True
+        ) as client:
+            resp = await client.get(tmdb_url)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code)
+        return Response(
+            content=resp.content,
+            media_type=resp.headers.get("content-type", "image/jpeg"),
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Image proxy error for {path}: {e}")
+        raise HTTPException(status_code=502, detail="Proxy error")
 
 
 @app.get("/{category}")
@@ -363,37 +704,260 @@ async def get_category(
     page: int = 1,
     per_page: int = 20,
     language: str = "ru",
+    token: str = Query(None),
+    profile_id: str = Query(None),
+    min_progress: int = Query(None, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
 ):
+    if not re.match(r"^[\w\-]+$", category):
+        raise HTTPException(status_code=404, detail="Not found")
+
     try:
-        logger.debug(f"Запрос: {category}, страница {page}")
+        logger.debug(
+            f"Запрос: {category}, страница {page}, token={'yes' if token else 'no'}"
+        )
 
-        # Загрузка данных
-        data = load_data(category)
+        # Загружаем таймкоды устройства (если передан token)
+        timecodes: dict = {}
+        watched_movies: set[str] = set()
+        if token:
+            device = await get_device_by_token(token=token, db=db)
+            if device:
+                timecodes = await load_device_timecodes(db, device.id, profile_id or "")
+                watched_movies = get_watched_movie_ids(timecodes, threshold=min_progress)
+                logger.debug(
+                    f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
+                    f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах"
+                )
 
-        # Обработка lampac-файлов
-        if "results" in data or isinstance(data, list):
-            items = data["results"] if "results" in data else data
-            total = len(items)
+        # ── "Продолжить просмотр" — незавершённые из таймкодов ──────────────────
+        if category == "continues" or category.startswith("continues_"):
+            if not token:
+                return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
+
+            media_filter = None
+            if category == "continues_movie":
+                media_filter = "movie"
+            elif category in ("continues_tv", "continues_anime"):
+                media_filter = "tv"
+            # continues — без фильтра, все типы
+
+            device = await get_device_by_token(token=token, db=db)
+            if not device:
+                return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
+
+            tc_where = [Timecode.device_id == device.id]
+            if profile_id is not None:
+                tc_where.append(Timecode.lampa_profile_id == profile_id)
+            tc_result = await db.execute(select(Timecode).where(*tc_where))
+            all_tc = tc_result.scalars().all()
+
+            # Группируем: card_id → {max_pct, last_watched, items}
+            agg: dict[str, dict] = {}
+            for tc in all_tc:
+                if not re.match(r"^\d+_(movie|tv)$", tc.card_id):
+                    continue
+                if media_filter and not tc.card_id.endswith(f"_{media_filter}"):
+                    continue
+                try:
+                    pct = float(json.loads(tc.data).get("percent", 0))
+                except Exception:
+                    pct = 0
+                if tc.card_id not in agg:
+                    agg[tc.card_id] = {"max_pct": pct, "last_watched": tc.updated_at, "items": {}}
+                else:
+                    if pct > agg[tc.card_id]["max_pct"]:
+                        agg[tc.card_id]["max_pct"] = pct
+                    if tc.updated_at and (
+                        not agg[tc.card_id]["last_watched"]
+                        or tc.updated_at > agg[tc.card_id]["last_watched"]
+                    ):
+                        agg[tc.card_id]["last_watched"] = tc.updated_at
+                agg[tc.card_id]["items"][tc.item] = max(
+                    agg[tc.card_id]["items"].get(tc.item, 0), pct
+                )
+
+            # Загружаем MediaCard для всех card_id (нужны seasons_json для сериалов)
+            mc_all_result = await db.execute(
+                select(MediaCard).where(MediaCard.card_id.in_(list(agg.keys())))
+            )
+            mc_map = {mc.card_id: mc for mc in mc_all_result.scalars().all()}
+
+            today_str = _date.today().isoformat()
+
+            def _is_unfinished(cid: str, v: dict) -> bool:
+                mc = mc_map.get(cid)
+                if cid.endswith("_tv") and mc and mc.seasons_json:
+                    try:
+                        seasons = json.loads(mc.seasons_json)
+                        last_s = mc.last_ep_season or 0
+                        last_e = mc.last_ep_number or 0
+                        total_aired = 0
+                        for s in seasons:
+                            snum = s.get("season_number") or 0
+                            if snum == 0:
+                                continue
+                            ep_count = s.get("episode_count") or 0
+                            if last_s > 0:
+                                if snum < last_s:
+                                    total_aired += ep_count
+                                elif snum == last_s:
+                                    total_aired += last_e
+                            else:
+                                s_air = s.get("air_date") or ""
+                                if s_air and s_air <= today_str:
+                                    total_aired += ep_count
+                        _thr = min_progress if min_progress is not None else _sc.get_int("watched_threshold")
+                        watched = sum(1 for p in v["items"].values() if p >= _thr)
+                        return watched < total_aired
+                    except Exception:
+                        pass
+                _thr = min_progress if min_progress is not None else _sc.get_int("watched_threshold")
+                return v["max_pct"] < _thr
+
+            unfinished = [
+                (cid, v["max_pct"], v["last_watched"])
+                for cid, v in agg.items()
+                if _is_unfinished(cid, v)
+            ]
+            unfinished.sort(key=lambda x: x[2] or datetime.min, reverse=True)
+
+            total = len(unfinished)
             start = (page - 1) * per_page
+            page_items = unfinished[start : start + per_page]
 
-            stats.track_api_user(request)
-            stats.track_category_request(request, category)
+            if not page_items:
+                return {
+                    "results": [],
+                    "page": page,
+                    "total_pages": ceil(total / per_page) or 1,
+                    "total_results": total,
+                }
+
+            # mc_map уже загружен выше
+
+            results = []
+            for cid, pct, _ in page_items:
+                mc = mc_map.get(cid)
+                if not mc:
+                    continue
+                item: dict = {
+                    "id": mc.tmdb_id,
+                    "poster_path": mc.poster_path,
+                    "backdrop_path": mc.backdrop_path or "",
+                    "overview": mc.overview or "",
+                    "vote_average": mc.vote_average or 0,
+                }
+                if mc.media_type == "tv":
+                    item["name"] = mc.title
+                    item["original_name"] = mc.original_title
+                    item["first_air_date"] = mc.release_date or ""
+                    item["media_type"] = "tv"
+                else:
+                    item["title"] = mc.title
+                    item["original_title"] = mc.original_title
+                    item["release_date"] = mc.release_date or ""
+                    item["media_type"] = "movie"
+                results.append(item)
 
             return {
+                "results": results,
                 "page": page,
-                "results": items[start : start + per_page],
-                "total_pages": ceil(total / per_page),
+                "total_pages": ceil(total / per_page) or 1,
                 "total_results": total,
             }
 
-        # Обработка не-lampac файлов
+        # Загрузка данных из файла
+        data = load_data(category)
+
+        stats.track_api_user(request)
+        stats.track_category_request(request, category)
+
+        # ── Lampac-формат: {"results": [...]} или [...]  ─────────────────────
+        if "results" in data or isinstance(data, list):
+            items = data["results"] if "results" in data else data
+
+            if timecodes or watched_movies:
+
+                def _enrich_lampac_item(item: dict) -> dict:
+                    """Подмешивает поля из tmdb_cache нужные для фильтрации сериалов."""
+                    tmdb_id = item.get("id")
+                    if not tmdb_id:
+                        return item
+                    media_type = item.get("media_type")
+                    if not media_type:
+                        if (
+                            item.get("seasons") is not None
+                            or item.get("last_episode_to_air") is not None
+                        ):
+                            media_type = "tv"
+                        else:
+                            return item  # фильм
+                    if media_type != "tv":
+                        return item
+                    cached = tmdb_cache.get((media_type, int(tmdb_id)))
+                    if not cached:
+                        return item
+                    patch = {}
+                    if not item.get("original_name") and cached.get("original_name"):
+                        patch["original_name"] = cached["original_name"]
+                    if not item.get("seasons") and cached.get("seasons"):
+                        patch["seasons"] = cached["seasons"]
+                    if cached.get("last_episode_to_air"):
+                        patch["last_episode_to_air"] = cached["last_episode_to_air"]
+                    return {**item, **patch} if patch else item
+
+                items = [
+                    i
+                    for i in map(_enrich_lampac_item, items)
+                    if not _item_watched(i, timecodes, watched_movies, threshold=min_progress)
+                ]
+
+            total = len(items)
+            start = (page - 1) * per_page
+            return {
+                "page": page,
+                "results": items[start : start + per_page],
+                "total_pages": ceil(total / per_page) if per_page else 1,
+                "total_results": total,
+            }
+
+        # ── NUMParser-формат: {"items": [...]} с обогащением TMDB  ───────────
         if "items" not in data:
             raise ValueError("Неизвестный формат данных")
 
-        items = data["items"]
-        total = len(items)
+        all_items = data["items"]
+
+        # Фильтруем ДО обогащения TMDB — экономим запросы к API
+        # Но подмешиваем last_episode_to_air из кэша для корректной фильтрации сериалов
+        if timecodes or watched_movies:
+
+            def _enrich_numparser_item(item: dict) -> dict:
+                if item.get("media_type") != "tv":
+                    return item
+                cached = (
+                    tmdb_cache.get(("tv", int(item["id"]))) if item.get("id") else None
+                )
+                if not cached:
+                    return item
+                patch = {}
+                if not item.get("original_name") and cached.get("original_name"):
+                    patch["original_name"] = cached["original_name"]
+                if not item.get("seasons") and cached.get("seasons"):
+                    patch["seasons"] = cached["seasons"]
+                if cached.get("last_episode_to_air"):
+                    patch["last_episode_to_air"] = cached["last_episode_to_air"]
+                return {**item, **patch} if patch else item
+
+            all_items = [
+                i
+                for i in map(_enrich_numparser_item, all_items)
+                if not _item_watched(i, timecodes, watched_movies)
+            ]
+
+        total = len(all_items)
         start = (page - 1) * per_page
-        page_items = items[start : start + per_page]
+        page_items = all_items[start : start + per_page]
 
         # Подготовка запросов к TMDB
         requests_to_make = []
@@ -403,10 +967,8 @@ async def get_category(
             if "media_type" in item and "id" in item:
                 try:
                     media_type = str(item["media_type"])
-                    tmdb_id = int(item["id"])  # Гарантируем что id будет int
+                    tmdb_id = int(item["id"])
                     cache_key = (media_type, tmdb_id)
-
-                    # Проверяем кэш более тщательно
                     if cache_key in tmdb_cache and isinstance(
                         tmdb_cache[cache_key], dict
                     ):
@@ -414,21 +976,14 @@ async def get_category(
                     else:
                         requests_to_make.append((media_type, tmdb_id))
                 except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Некорректные данные в item: {item}, ошибка: {str(e)}"
-                    )
+                    logger.warning(f"Некорректные данные в item: {item}, ошибка: {e}")
 
-        # Пакетный запрос для отсутствующих в кэше данных
         if requests_to_make:
-            logger.debug(
-                f"Делаем {len(requests_to_make)} запросов к TMDB для элементов: {requests_to_make}"
-            )
+            logger.debug(f"Запросы к TMDB: {len(requests_to_make)} элементов")
             tmdb_batch = await fetch_tmdb_batch(requests_to_make)
             tmdb_cache.update(tmdb_batch)
             cached_results.update(tmdb_batch)
-            await save_cache_to_file(tmdb_cache)  # Сохраняем обновленный кэш
 
-        # Формируем ответ
         results = []
         for item in page_items:
             if "media_type" in item and "id" in item:
@@ -438,15 +993,12 @@ async def get_category(
                     if enhanced:
                         results.append(enhanced)
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Ошибка обработки item: {item}, ошибка: {str(e)}")
-
-        stats.track_api_user(request)
-        stats.track_category_request(request, category)
+                    logger.warning(f"Ошибка обработки item: {item}, ошибка: {e}")
 
         return {
             "page": page,
             "results": results,
-            "total_pages": ceil(total / per_page),
+            "total_pages": ceil(total / per_page) if per_page else 1,
             "total_results": total,
         }
     except Exception as e:
@@ -456,25 +1008,55 @@ async def get_category(
         )
 
 
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "message": "NUMParser API работает"}
+_templates = get_templates()
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    devices = []
+    if current_user:
+        from app.api.devices import _devices_with_stats
+
+        devices = await _devices_with_stats(current_user.id, db)
+    from app import settings_cache as sc
+    return _templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "user": current_user,
+            "devices": devices,
+            "plugin_url": plugin_url,
+            "bot_name": settings.TELEGRAM_BOT_NAME,
+            "image_base": image_base,
+            "simple_device_limit":   sc.get_int("simple_device_limit"),
+            "premium_device_limit":  sc.get_int("premium_device_limit"),
+            "simple_tc_limit":       sc.get_int("simple_timecode_limit"),
+            "premium_tc_limit":      sc.get_int("premium_timecode_limit"),
+            "inactive_delete_days":  sc.get_int("inactive_delete_days"),
+            "inactive_warn_days":    sc.get_int("inactive_warn_days"),
+        },
+    )
 
 
 @app.get("/cache/path")
 async def get_cache_path():
-    """Возвращает абсолютный путь к файлу кэша"""
+    """Возвращает информацию об источнике TMDB-кэша"""
     return {
-        "cache_path": str(CACHE_FILE.absolute()),
-        "exists": CACHE_FILE.exists(),
-        "size": CACHE_FILE.stat().st_size if CACHE_FILE.exists() else 0,
+        "source": "PostgreSQL (media_cards table)",
+        "cache_size": len(tmdb_cache),
     }
 
 
 @app.post("/cache/clear")
 async def clear_cache(x_password: str = Header(..., alias="X-Password")):
-    """Очистка кэша с проверкой пароля"""
-    correct_password = os.getenv("CACHE_CLEAR_PASSWORD")
+    """Очистка in-memory кэша с проверкой пароля"""
+    correct_password = get_settings().CACHE_CLEAR_PASSWORD
 
     if not correct_password or x_password != correct_password:
         return PlainTextResponse(
@@ -483,7 +1065,6 @@ async def clear_cache(x_password: str = Header(..., alias="X-Password")):
 
     global tmdb_cache
     tmdb_cache = {}
-    await save_cache_to_file(tmdb_cache)
 
     return PlainTextResponse("Кэш успешно очищен\n", status_code=200)
 
@@ -491,15 +1072,10 @@ async def clear_cache(x_password: str = Header(..., alias="X-Password")):
 @app.get("/cache/info")
 async def cache_info():
     """Возвращает информацию о кэше"""
-    cache_size = len(tmdb_cache)
-    cache_size_mb = (
-        CACHE_FILE.stat().st_size / (1024 * 1024) if CACHE_FILE.exists() else 0
-    )
-
     return {
-        "cache_size": cache_size,
-        "cache_size_mb": round(cache_size_mb, 2),
-        "sample_keys": list(tmdb_cache.keys())[:5],
+        "cache_size": len(tmdb_cache),
+        "source": "PostgreSQL",
+        "sample_keys": [f"{k[0]}_{k[1]}" for k in list(tmdb_cache.keys())[:5]],
     }
 
 

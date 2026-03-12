@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Активные сессии — {{ user.username }}{% endblock %}
+
+{% block body %}
+<main class="container" style="padding-top:1.5rem;max-width:800px">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.5rem">
+    <h2 style="margin:0">Активные сессии</h2>
+    <form method="POST" action="/sessions/revoke-all"
+          onsubmit="return confirm('Завершить все сессии? Вы будете выйдены отовсюду.')">
+      <button type="submit" class="outline secondary btn-sm">Завершить все</button>
+    </form>
+  </div>
+  <p class="muted small">Список устройств, с которых выполнен вход в аккаунт. Текущая сессия отмечена.</p>
+
+  {% if sessions %}
+  <div style="display:flex;flex-direction:column;gap:.5rem">
+    {% for s in sessions %}
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;
+                padding:.75rem 1rem;border:1px solid var(--pico-table-border-color);
+                border-radius:var(--pico-border-radius);
+                {% if s.is_current %}border-color:var(--pico-primary){% endif %}">
+      <div style="min-width:0">
+        <div style="font-weight:500">{{ s.browser }}</div>
+        <div style="font-size:.82rem;color:var(--pico-muted-color);margin-top:.15rem">
+          {{ s.ip }} · {{ s.created_at.strftime('%d.%m.%Y') if s.created_at else '—' }}
+          {% if s.is_current %} · <em>эта сессия</em>{% endif %}
+        </div>
+      </div>
+      <form method="POST" action="/sessions/{{ s.id }}/revoke" style="flex-shrink:0"
+            onsubmit="return confirm('Завершить эту сессию?{% if s.is_current %} Вы будете выйдены из текущего устройства.{% endif %}')">
+        <button type="submit" class="btn-sm outline {% if s.is_current %}danger-btn{% else %}secondary{% endif %}">
+          {% if s.is_current %}Выйти{% else %}Завершить{% endif %}
+        </button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Активных сессий нет.</p>
+  {% endif %}
+</main>
+{% endblock %}

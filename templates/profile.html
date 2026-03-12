@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+
+{% block title %}Профиль{% endblock %}
+
+{% block body %}
+<div class="profile-container">
+  <h1>Профиль: {{ user.username }}</h1>
+  
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+  
+  {% if success %}
+  <div class="success">{{ success }}</div>
+  {% endif %}
+  
+  {% if new_api_key %}
+  <div class="success">
+    <p><strong>Новый API-ключ (сохраните!):</strong></p>
+    <div class="api-key" id="newApiKey">{{ new_api_key }}</div>
+    <button class="btn" onclick="copyKey()">Копировать</button>
+  </div>
+  {% endif %}
+  
+  <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+  
+  <h2>API-ключ для плагина</h2>
+  <p>Используйте этот ключ в настройках плагина Lampa</p>
+  <div class="api-key">••••••••••••••••••••••••••••••••••••</div>
+  <p><small>Ключ хранится в зашифрованном виде и не может быть показан</small></p>
+  
+  <form method="POST" action="/profile/regenerate-key" style="margin-top: 15px;">
+    <button type="submit" class="btn" onclick="return confirm('Старый ключ перестанет работать!')">Перевыпустить ключ</button>
+  </form>
+  
+  <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+
+  <h2>Сменить пароль</h2>
+  <form method="POST" action="/profile/reset-password" id="changePasswordForm">
+    <div class="form-group">
+      <label for="current_password">Текущий пароль</label>
+      <input type="password" id="current_password" name="current_password" required>
+    </div>
+
+    <div class="form-group">
+      <label for="new_password">Новый пароль</label>
+      <input type="password" id="new_password" name="new_password" required minlength="8">
+
+      <!-- Индикатор сложности -->
+      <div id="newPasswordStrength" class="password-strength"></div>
+
+      <!-- Требования к паролю -->
+      <ul class="password-requirements">
+        <li id="req-length" class="invalid">Минимум 8 символов</li>
+        <li id="req-uppercase" class="invalid">Заглавная буква</li>
+        <li id="req-lowercase" class="invalid">Строчная буква</li>
+        <li id="req-digit" class="invalid">Цифра</li>
+      </ul>
+    </div>
+
+    <div class="form-group">
+      <label for="new_password_confirm">Подтвердите новый пароль</label>
+      <input type="password" id="new_password_confirm" name="new_password_confirm" required>
+      <div id="newPasswordMatch" class="password-match"></div>
+    </div>
+
+    <button type="submit" class="btn" id="changePasswordBtn" disabled>Сменить пароль</button>
+  </form>
+  
+  <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+  
+  <!-- Секция синхронизации MyShows -->
+  <h2>🔄 Синхронизация MyShows</h2>
+  <form id="myshowsSyncForm">
+    <div class="form-group">
+      <label>Логин MyShows</label>
+      <input type="text" id="myshowsLogin" required>
+    </div>
+    <div class="form-group">
+      <label>Пароль MyShows</label>
+      <input type="password" id="myshowsPassword" required>
+    </div>
+    <div class="form-group">
+      <label>Profile ID (опционально)</label>
+      <input type="text" id="profileId" placeholder="F12 → Lampa.Storage.get('lampac_profile_id')">
+    </div>
+    <button type="submit" class="btn">Начать синхронизацию</button>
+    <div id="syncProgress" style="display:none;margin-top:15px">
+      <span id="syncStatus">Синхронизация...</span>
+    </div>
+  </form>
+
+  <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+
+  <h2 style="color: #f44336;">Удалить аккаунт</h2>
+  <p>Это действие необратимо! Все данные будут удалены.</p>
+  <form method="POST" action="/profile/delete">
+    <div class="form-group">
+      <label for="delete_password">Подтвердите паролем</label>
+      <input type="password" id="delete_password" name="password" required>
+    </div>
+    <button type="submit" class="btn" style="background: #f44336;" onclick="return confirm('Вы уверены? Это необратимо!')">Удалить аккаунт</button>
+  </form>
+
+  <div style="margin-top: 30px; text-align: center;">
+    <a href="/logout" class="btn logout-btn" style="display: inline-block; text-decoration: none; background: #666;">Выйти</a>
+  </div>
+</div>
+
+<style>
+/* Стили для валидации пароля */
+.password-strength {
+  font-size: 13px;
+  margin-top: 5px;
+  font-weight: 600;
+}
+.password-strength.weak { color: #f44336; }
+.password-strength.medium { color: #ff9800; }
+.password-strength.strong { color: #00c853; }
+
+.password-requirements {
+  list-style: none;
+  font-size: 12px;
+  color: #666;
+  margin-top: 8px;
+  padding-left: 0;
+}
+.password-requirements li {
+  padding: 2px 0 2px 20px;
+  position: relative;
+  transition: color 0.2s;
+}
+.password-requirements li::before {
+  content: "✗";
+  position: absolute;
+  left: 0;
+  color: #f44336;
+  font-weight: bold;
+}
+.password-requirements li.valid {
+  color: #00c853;
+}
+.password-requirements li.valid::before {
+  content: "✓";
+  color: #00c853;
+}
+.password-requirements li.invalid {
+  color: #999;
+}
+.password-requirements li.invalid::before {
+  content: "✗";
+  color: #f44336;
+}
+
+.password-match {
+  font-size: 13px;
+  margin-top: 5px;
+  font-weight: 600;
+}
+.password-match.match { color: #00c853; }
+.password-match.nomatch { color: #f44336; }
+
+/* Стили для полей синхронизации */
+#myshowsSyncForm .form-group {
+  margin-bottom: 20px;
+}
+
+#myshowsSyncForm label {
+  display: block;
+  margin-bottom: 8px;
+  color: #555;
+  font-weight: 600;
+}
+
+#myshowsSyncForm input[type="text"],
+#myshowsSyncForm input[type="password"],
+#myshowsSyncForm select {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #ddd;
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  transition: border-color 0.3s;
+}
+
+#myshowsSyncForm input:focus,
+#myshowsSyncForm select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+</style>
+
+<script>
+// === Валидация нового пароля ===
+const newPasswordInput = document.getElementById('new_password');
+const newPasswordConfirmInput = document.getElementById('new_password_confirm');
+const changePasswordBtn = document.getElementById('changePasswordBtn');
+const newPasswordStrength = document.getElementById('newPasswordStrength');
+const newPasswordMatch = document.getElementById('newPasswordMatch');
+
+const newReqs = {
+  length: document.getElementById('req-length'),
+  uppercase: document.getElementById('req-uppercase'),
+  lowercase: document.getElementById('req-lowercase'),
+  digit: document.getElementById('req-digit')
+};
+
+function checkNewPassword() {
+  const pwd = newPasswordInput.value;
+
+  // Проверка каждого требования
+  const checks = {
+    length: pwd.length >= 8,
+    uppercase: /[A-Z]/.test(pwd),
+    lowercase: /[a-z]/.test(pwd),
+    digit: /\d/.test(pwd)
+  };
+
+  // Обновляем визуальные индикаторы
+  Object.keys(checks).forEach(key => {
+    if (checks[key]) {
+      newReqs[key].classList.remove('invalid');
+      newReqs[key].classList.add('valid');
+    } else {
+      newReqs[key].classList.remove('valid');
+      newReqs[key].classList.add('invalid');
+    }
+  });
+
+  // Оценка общей сложности
+  const validCount = Object.values(checks).filter(v => v).length;
+  if (pwd.length === 0) {
+    newPasswordStrength.textContent = '';
+    newPasswordStrength.className = 'password-strength';
+  } else if (validCount < 3) {
+    newPasswordStrength.textContent = 'Слабый пароль';
+    newPasswordStrength.className = 'password-strength weak';
+  } else if (validCount === 3) {
+    newPasswordStrength.textContent = 'Средний пароль';
+    newPasswordStrength.className = 'password-strength medium';
+  } else {
+    newPasswordStrength.textContent = 'Надёжный пароль';
+    newPasswordStrength.className = 'password-strength strong';
+  }
+
+  // Проверяем совпадение паролей
+  checkNewMatch();
+}
+
+function checkNewMatch() {
+  const pwd = newPasswordInput.value;
+  const confirm = newPasswordConfirmInput.value;
+
+  if (confirm.length === 0) {
+    newPasswordMatch.textContent = '';
+    newPasswordMatch.className = 'password-match';
+    return false;
+  }
+
+  if (pwd === confirm) {
+    newPasswordMatch.textContent = 'Пароли совпадают';
+    newPasswordMatch.className = 'password-match match';
+    return true;
+  } else {
+    newPasswordMatch.textContent = 'Пароли не совпадают';
+    newPasswordMatch.className = 'password-match nomatch';
+    return false;
+  }
+}
+
+function canChangePassword() {
+  const pwd = newPasswordInput.value;
+
+  // Все требования должны быть выполнены
+  const checks = {
+    length: pwd.length >= 8,
+    uppercase: /[A-Z]/.test(pwd),
+    lowercase: /[a-z]/.test(pwd),
+    digit: /\d/.test(pwd)
+  };
+
+  const allValid = Object.values(checks).every(v => v);
+  const match = checkNewMatch();
+  const currentPwd = document.getElementById('current_password').value;
+
+  // Кнопка активна только если: все требования + пароли совпадают + введён текущий пароль
+  changePasswordBtn.disabled = !(allValid && match && currentPwd.length > 0 && pwd.length > 0);
+}
+
+// Слушатели событий
+newPasswordInput.addEventListener('input', checkNewPassword);
+newPasswordConfirmInput.addEventListener('input', () => {
+  checkNewMatch();
+  canChangePassword();
+});
+document.getElementById('current_password').addEventListener('input', canChangePassword);
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+  canChangePassword();
+});
+
+// === Синхронизация MyShows (логин/пароль + profile_id) ===
+document.getElementById('myshowsSyncForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const login = document.getElementById('myshowsLogin').value;
+  const password = document.getElementById('myshowsPassword').value;
+  const profileId = document.getElementById('profileId').value;
+
+  document.getElementById('syncProgress').style.display = 'block';
+  document.getElementById('syncStatus').textContent = 'Получение данных...';
+
+  const formData = new FormData();
+  formData.append('myshows_login', login);
+  formData.append('myshows_password', password);
+
+  const url = `/myshows/sync${profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ''}`;
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      body: formData
+      // cookie с api_key отправится автоматически
+    });
+
+    const result = await resp.json();
+
+    if (result.success) {
+      document.getElementById('syncStatus').textContent =
+        `✅ Готово! Добавлено: ${result.added}, обновлено: ${result.updated}`;
+      setTimeout(() => window.location.reload(), 20000);
+    } else {
+      document.getElementById('syncStatus').textContent = `❌ ${result.detail}`;
+    }
+  } catch (error) {
+    document.getElementById('syncStatus').textContent = `❌ ${error.message}`;
+  }
+});
+</script>
+{% endblock %}

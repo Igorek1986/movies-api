@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Подтверждение входа — NUMParser{% endblock %}
+
+{% block body %}
+<main class="container auth-container">
+  <article>
+    <hgroup>
+      <h1>Двухфакторная аутентификация</h1>
+      <p>Введите код из приложения-аутентификатора</p>
+    </hgroup>
+
+    {% if error %}
+    <p role="alert" class="alert-error">{{ error }}</p>
+    {% endif %}
+
+    <form method="POST" action="/verify-2fa">
+      <label for="code">
+        Код (6 цифр) или резервный код
+        <input type="text" id="code" name="code" required autofocus
+               autocomplete="one-time-code" inputmode="numeric"
+               maxlength="8" pattern="[0-9a-fA-F]{6,8}">
+      </label>
+      <button type="submit">Подтвердить</button>
+    </form>
+
+    <p class="auth-link"><a href="/login">← Вернуться ко входу</a></p>
+  </article>
+</main>
+{% endblock %}
