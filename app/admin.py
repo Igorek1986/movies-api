@@ -421,6 +421,42 @@ async def run_expiry_check(
 
 
 # ---------------------------------------------------------------------------
+# Продлить Premium всем активным пользователям
+# ---------------------------------------------------------------------------
+
+@router.post("/extend-all-premium")
+async def extend_all_premium(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    days = max(1, settings_cache.get_int("premium_extend_all_days"))
+
+    result = await db.execute(
+        select(User).where(User.role == "premium", User.premium_until.isnot(None))
+    )
+    users = result.scalars().all()
+
+    now = datetime.now(timezone.utc)
+    for user in users:
+        base = user.premium_until if user.premium_until > now else now
+        user.premium_until = (base + timedelta(days=days)).replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+        user.premium_warned = False
+
+    await db.commit()
+
+    from urllib.parse import quote
+    msg = quote(f"Premium продлён на {days} дн. для {len(users)} пользователей")
+    logger.info(f"Admin: extended premium by {days} days for {len(users)} users")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
 # Настройки приложения
 # ---------------------------------------------------------------------------
 

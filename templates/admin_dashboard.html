@@ -26,6 +26,10 @@
       <form method="POST" action="/admin/run-expiry-check" style="margin:0">
         <button type="submit" class="btn-sm outline secondary" title="Запустить проверку истечения Premium вручную">▶ Проверка Premium</button>
       </form>
+      <form method="POST" action="/admin/extend-all-premium" style="margin:0"
+            onsubmit="return confirm('Продлить Premium всем активным пользователям?')">
+        <button type="submit" class="btn-sm outline secondary">➕ Продлить всем</button>
+      </form>
       <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
     </div>
   </div>

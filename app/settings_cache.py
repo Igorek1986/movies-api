@@ -32,6 +32,7 @@ DEFAULTS: dict[str, str] = {
     # ── Grace period after premium expiry ──────────────────────────────────────
     "timecode_grace_days":        "3",
     "premium_warn_days":          "3",
+    "premium_extend_all_days":    "3",
     # ── Notifications ──────────────────────────────────────────────────────────
     "default_timezone":           "Europe/Moscow",
     # ── General ────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ LABELS: dict[str, str] = {
     "super_myshows_daily":        "Super — MyShows синков в сутки (0=∞)",
     "timecode_grace_days":        "Грейс-период таймкодов (дней)",
     "premium_warn_days":          "Предупреждение об истечении Premium (дней)",
+    "premium_extend_all_days":    "Продлить всем Premium (дней)",
     "default_timezone":           "Таймзона по умолчанию (fallback)",
     "watched_threshold":          "Порог «просмотрено» (%)",
     "session_ttl_days":           "Срок сессии (дней)",
@@ -108,7 +110,7 @@ GROUPS: list[tuple[str, list[str]]] = [
         "super_timecode_limit", "super_import_daily", "super_myshows_daily",
     ]),
     ("Общие настройки", [
-        "timecode_grace_days", "premium_warn_days", "watched_threshold",
+        "timecode_grace_days", "premium_warn_days", "premium_extend_all_days", "watched_threshold",
         "session_ttl_days", "session_renew_days",
         "device_code_ttl_minutes", "telegram_link_ttl_minutes",
         "reset_code_ttl_minutes", "pending_2fa_ttl_sec",
