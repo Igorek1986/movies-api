@@ -1,0 +1,561 @@
+{% extends "base.html" %}
+{% block title %}Устройства — {{ user.username }}{% endblock %}
+
+{% block body %}
+<main class="container" style="padding-top: 1.5rem;">
+
+  {% if request.query_params.get('registered') %}
+  <p role="alert" class="alert-success">
+    Добро пожаловать! Создайте первое устройство для доступа к API из Lampa.
+  </p>
+  {% endif %}
+
+  {% if error %}<p role="alert" class="alert-error">{{ error }}</p>{% endif %}
+  {% if success %}<p role="alert" class="alert-success">{{ success }}</p>{% endif %}
+
+  <!-- ═══════════════════════════════════════════
+       УСТРОЙСТВА
+       ═══════════════════════════════════════════ -->
+  <section>
+    <div class="section-title-row">
+      <h2>Мои устройства <small class="muted" style="font-size:.9rem;font-weight:400">({{ user.role }})</small></h2>
+    </div>
+    <p class="account-limits muted">
+      {% if device_limit is none %}
+        Без ограничений — устройств, профилей и таймкодов.
+      {% else %}
+        {{ device_limit }} {{ device_limit | plural('устройство', 'устройства', 'устройств') }}{% if profile_limit is not none %} · {{ profile_limit }} {{ profile_limit | plural('профиль', 'профиля', 'профилей') }} на устройство{% endif %}{% if timecode_limit is not none %} · {{ timecode_limit }} {{ timecode_limit | plural('таймкод', 'таймкода', 'таймкодов') }} на профиль{% endif %}.
+      {% endif %}
+    </p>
+
+    {% if profiles %}
+    <figure class="mobile-cards">
+      <table>
+        <thead>
+          <tr>
+            <th>Устройство</th>
+            <th>Токен</th>
+            <th>Таймкодов</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in profiles %}
+          <tr data-device-id="{{ p.id }}">
+            <td data-label="Устройство"><strong>{{ p.name }}</strong></td>
+            <td data-label="Токен">
+              <code class="api-key-mono" title="Нажмите, чтобы скопировать"
+                    style="cursor:pointer" onclick="copyKey(this, '{{ p.token }}')">
+                {{ p.token[:4] }}-••••-••••-••••
+              </code>
+              <button class="btn-icon" title="Показать/скрыть"
+                      onclick="toggleKey(this, '{{ p.token }}')">👁</button>
+            </td>
+            <td data-label="Таймкодов">{{ p.timecodes_count }}</td>
+            <td class="actions-cell">
+              <button class="btn-sm outline"
+                      onclick="openLinkForm({{ p.id }})">Привязать</button>
+              <button class="btn-sm outline"
+                      onclick="renameDevice({{ p.id }}, '{{ p.name|e }}', this)">Переименовать</button>
+              <form method="POST" action="/profiles/{{ p.id }}/regenerate"
+                    onsubmit="return confirm('Старый токен перестанет работать в Lampa!')">
+                <button type="submit" class="btn-sm outline secondary">Новый токен</button>
+              </form>
+              <form method="POST" action="/profiles/{{ p.id }}/clear-timecodes"
+                    onsubmit="return confirm('Удалить все таймкоды устройства «{{ p.name }}»?')">
+                <button type="submit" class="btn-sm outline warning-btn">Очистить</button>
+              </form>
+              <form method="POST" action="/profiles/{{ p.id }}/delete"
+                    onsubmit="return confirm('Удалить устройство «{{ p.name }}» и все его таймкоды?')">
+                <button type="submit" class="btn-sm outline danger-btn">Удалить</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </figure>
+    {% else %}
+    <p class="muted">Устройств ещё нет. Создайте первое.</p>
+    {% endif %}
+
+    <!-- Создать устройство -->
+    {% if device_limit is none or profiles|length < device_limit %}
+    <form method="POST" action="/profiles/create" class="inline-form">
+      <input type="text" name="name" placeholder="Название устройства (напр. Гостиная ТВ)"
+             required maxlength="100" style="flex:1;">
+      <button type="submit">Добавить устройство</button>
+    </form>
+    {% else %}
+    <p class="muted">Достигнут лимит: {{ device_limit }} {{ device_limit | plural('устройство', 'устройства', 'устройств') }}. Для увеличения обратитесь к администратору.</p>
+    {% endif %}
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       ПРИВЯЗКА УСТРОЙСТВА
+       ═══════════════════════════════════════════ -->
+  <details id="linkDeviceDetails">
+    <summary><strong>Привязать устройство</strong> — по коду с экрана Lampa</summary>
+    <div class="details-body">
+      <p>
+        В настройках плагина NUMParser нажмите <em>«Привязать устройство»</em> —
+        на экране появится 6-значный код. Введите его ниже.
+      </p>
+      <form id="linkDeviceForm" class="device-form">
+        <div class="grid">
+          <label>
+            Код с экрана Lampa
+            <input type="text" id="deviceCode" placeholder="483921" maxlength="6"
+                   class="code-input" autocomplete="off" spellcheck="false"
+                   pattern="[0-9]{6}" inputmode="numeric">
+          </label>
+          <label>
+            Устройство
+            <select id="deviceProfile">
+              {% for p in profiles %}
+              <option value="{{ p.id }}">{{ p.name }}</option>
+              {% endfor %}
+              {% if device_limit is none or profiles|length < device_limit %}
+              <option value="new">+ Создать новое устройство</option>
+              {% endif %}
+            </select>
+          </label>
+        </div>
+        <div id="newDeviceNameRow" style="display:none;">
+          <label>
+            Название нового устройства
+            <input type="text" id="newDeviceName" placeholder="Гостиная ТВ" maxlength="100">
+          </label>
+        </div>
+        <button type="submit" id="linkBtn">Привязать</button>
+        <span id="linkStatus" class="status-text"></span>
+      </form>
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       ПРОФИЛИ LAMPA
+       ═══════════════════════════════════════════ -->
+  <details id="lampaProfilesDetails">
+    <summary><strong>Профили Lampa</strong> — управление профилями просмотра</summary>
+    <div class="details-body">
+      <p class="muted small">Профили позволяют вести отдельную историю для разных пользователей на одном устройстве. Профили создаются автоматически при получении таймкодов или вручную.</p>
+
+      {% if profiles %}
+      <label>Устройство
+        <select id="lpDeviceSelect">
+          {% for p in profiles %}
+          <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div id="lpProfilesList" style="margin: .75rem 0;"></div>
+
+      <form id="lpCreateForm" class="inline-form">
+        <input type="text" id="lpProfileName" placeholder="Название профиля" maxlength="100" required>
+        <input type="text" id="lpProfileIdInput" placeholder="ID профиля (авто если пусто)" maxlength="100"
+               style="font-family:var(--pico-font-family-monospace);font-size:.88rem;">
+        <button type="submit" id="lpCreateBtn">Добавить</button>
+      </form>
+      <small id="lpQuota" class="muted"></small>
+      <span id="lpCreateStatus" class="status-text"></span>
+      {% else %}
+      <p class="muted">Сначала создайте устройство.</p>
+      {% endif %}
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       СИНХРОНИЗАЦИЯ MYSHOWS
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Синхронизация MyShows</strong> — импорт просмотренного</summary>
+    <div class="details-body">
+      {% if user.role == "simple" %}
+      <p>🔒 Синхронизация MyShows доступна только для <strong>Premium</strong> аккаунтов.</p>
+      {% elif not sync_allowed %}
+      <p>⏳ Синхронизация уже выполнялась сегодня. Следующая через
+        <strong id="syncCountdown"></strong>.
+      </p>
+      <script>
+        (function() {
+          var sec = {{ sync_wait_sec | default(0) }};
+          var el = document.getElementById('syncCountdown');
+          function fmt(s) {
+            var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+            if (h > 0) return h + ' ч ' + m + ' мин';
+            if (m > 0) return m + ' мин ' + ss + ' сек';
+            return ss + ' сек';
+          }
+          if (el) {
+            if (sec <= 0) {
+              el.textContent = 'скоро…';
+            } else {
+              el.textContent = fmt(sec);
+              var t = setInterval(function() {
+                sec--;
+                if (sec <= 0) { clearInterval(t); location.reload(); }
+                else el.textContent = fmt(sec);
+              }, 1000);
+            }
+          }
+        })();
+      </script>
+      {% else %}
+      <p>Все просмотренные фильмы и серии будут отмечены как 100% в выбранном устройстве.</p>
+      <form id="myshowsSyncForm">
+        <div class="grid">
+          <label>
+            Устройство
+            <select id="syncProfileId" name="device_id" required>
+              {% for p in profiles %}
+              <option value="{{ p.id }}" data-device-id="{{ p.id }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Профиль Lampa
+            <select id="syncLampaProfile" name="profile_id">
+              <option value="">Основной (без профиля)</option>
+            </select>
+          </label>
+          <label>
+            Логин MyShows
+            <input type="text" id="myshowsLogin" required autocomplete="username">
+          </label>
+        </div>
+        <label>
+          Пароль MyShows
+          <input type="password" id="myshowsPassword" required autocomplete="current-password">
+        </label>
+        <button type="submit" id="syncBtn">Начать синхронизацию</button>
+        <div id="syncProgress" class="status-box" hidden>
+          <span id="syncStatus"></span>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       ИМПОРТ ТАЙМКОДОВ
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Импорт таймкодов</strong> — из Lampa или LampaC</summary>
+    <div class="details-body">
+      {% if import_daily_limit is not none and not import_allowed %}
+      <p>⏳ Лимит импорта исчерпан. Повторите через
+        <strong id="importCountdown"></strong>.
+      </p>
+      <script>
+        (function() {
+          var sec = {{ import_wait_sec | default(0) }};
+          var el = document.getElementById('importCountdown');
+          function fmt(s) {
+            var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+            return h ? h+'ч '+m+'мин' : m ? m+'мин '+ss+'с' : ss+'с';
+          }
+          el.textContent = fmt(sec);
+          var t = setInterval(function() {
+            sec--;
+            if (sec <= 0) { clearInterval(t); el.textContent = '0с'; location.reload(); return; }
+            el.textContent = fmt(sec);
+          }, 1000);
+        })();
+      </script>
+      {% else %}
+      {% if import_daily_limit is not none %}
+      {% set used = import_daily_limit - import_remaining %}
+      {% if used > 0 %}
+      <p class="muted small">⚠️ Использовано {{ used }} из {{ import_daily_limit }} импортов за сутки — осталось <strong>{{ import_remaining }}</strong>.</p>
+      {% else %}
+      <p class="muted small">⚠️ Доступно <strong>{{ import_daily_limit }}</strong> импортов в сутки.</p>
+      {% endif %}
+      {% endif %}
+      <div class="import-grid">
+        <!-- Lampa (file_view) -->
+        <div class="import-card">
+          <header><strong>Из Lampa</strong></header>
+          <div>
+            <p class="muted small"><strong>Примечание:</strong> история для Lampa-формата недоступна — используйте синхронизацию MyShows.</p>
+          </div>
+          <form id="importLampaForm" style="display:contents;">
+            <label>Устройство
+              <select id="importLampaProfile">
+                {% for p in profiles %}<option value="{{ p.token }}" data-device-id="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Профиль Lampa
+              <select id="importLampaProfilePid">
+                <option value="">Основной (без профиля)</option>
+              </select>
+              <button type="button" id="copyLampaCmd" class="outline secondary" style="width:100%;font-family:monospace;font-size:.8rem;margin-top:.4rem;">
+                copy(localStorage.getItem('file_view'))
+              </button>
+            </label>
+            <label>JSON
+              <textarea id="importLampaData" rows="4" placeholder='{"572566331":{"percent":95,...}}'></textarea>
+            </label>
+            <div class="import-actions">
+              <button type="submit" id="importLampaBtn" class="secondary">Импортировать</button>
+              <span id="importLampaStatus" class="status-text"></span>
+            </div>
+          </form>
+        </div>
+
+        <!-- Lampac (all_views) -->
+        <div class="import-card">
+          <header><strong>Из LampaC</strong></header>
+          <div>
+            <p class="muted small">Скопируйте JSON из эндпоинта вашего Lampac и вставьте ниже:</p>
+            <pre style="font-size:.8rem;overflow-x:auto;margin-bottom:.5rem;">/timecode/all_views?uid=…&profile_id=...</pre>
+            <p class="muted small">После импорта карточки загрузятся автоматически и появятся в истории просмотров.</p>
+          </div>
+          <form id="importLampacForm" style="display:contents;">
+            <label>Устройство
+              <select id="importLampacProfile">
+                {% for p in profiles %}<option value="{{ p.token }}" data-device-id="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Профиль LampaC
+              <select id="importLampacProfilePid">
+                <option value="">Основной (без профиля)</option>
+              </select>
+            </label>
+            <label>JSON
+              <textarea id="importLampacData" rows="4" placeholder='{"123_movie":{"hash":"..."}}'></textarea>
+            </label>
+            <div class="import-actions">
+              <button type="submit" id="importLampacBtn" class="secondary">Импортировать</button>
+              <span id="importLampacStatus" class="status-text"></span>
+            </div>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+
+  <!-- ═══════════════════════════════════════════
+       НАСТРОЙКИ АККАУНТА
+       ═══════════════════════════════════════════ -->
+  <details>
+    <summary><strong>Настройки аккаунта</strong> — пароль и удаление</summary>
+    <div class="details-body">
+
+      <h4>Telegram</h4>
+      <p class="muted small">Используется для восстановления пароля.</p>
+      <div id="tgStatus">
+        {% if tg_linked %}
+        <p class="muted small">Привязан{% if tg_username %}: <strong>@{{ tg_username }}</strong>{% endif %}</p>
+        <form method="POST" action="/telegram/unlink">
+          <button type="submit" class="outline secondary btn-sm">Отвязать</button>
+        </form>
+        {% else %}
+        <p class="muted small">Telegram не привязан.</p>
+        <button type="button" id="tgLinkBtn" class="secondary">Привязать Telegram</button>
+        <span id="tgLinkStatus" class="status-text"></span>
+        {% endif %}
+      </div>
+
+      <hr>
+
+      <h4>Уведомления</h4>
+      {% if not tg_linked %}
+      <p class="muted small">Привяжите Telegram, чтобы получать уведомления.</p>
+      {% else %}
+      <form method="POST" action="/profile/notifications" id="notifyForm">
+        <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer">
+          <input type="checkbox" name="notifications_enabled" value="true" role="switch"
+                 id="notifyToggle" {% if notifications_enabled %}checked{% endif %}
+                 onchange="document.getElementById('notifyWarning').style.display = this.checked ? 'none' : 'block'">
+          Получать уведомления в Telegram
+        </label>
+        <p id="notifyWarning" class="muted small" style="color:var(--pico-color-amber-500);{% if notifications_enabled %}display:none{% endif %}">
+          Вы не будете получать уведомления о входе в аккаунт и истечении подписки.
+        </p>
+
+        <div id="notifyWindow" style="{% if not notifications_enabled %}opacity:.4;pointer-events:none{% endif %}">
+          <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:.5rem;margin-top:.75rem;align-items:end">
+            <label>
+              Таймзона
+              <select name="user_timezone">
+                {% set tz_options = [
+                  ("Europe/Moscow",      "Москва (UTC+3)"),
+                  ("Europe/Minsk",       "Минск (UTC+3)"),
+                  ("Europe/Kiev",        "Киев (UTC+2)"),
+                  ("Europe/Istanbul",    "Стамбул (UTC+3)"),
+                  ("Europe/Berlin",      "Берлин (UTC+1/2)"),
+                  ("Europe/London",      "Лондон (UTC+0/1)"),
+                  ("Europe/Paris",       "Париж (UTC+1/2)"),
+                  ("Asia/Yekaterinburg", "Екатеринбург (UTC+5)"),
+                  ("Asia/Novosibirsk",   "Новосибирск (UTC+7)"),
+                  ("Asia/Krasnoyarsk",   "Красноярск (UTC+7)"),
+                  ("Asia/Irkutsk",       "Иркутск (UTC+8)"),
+                  ("Asia/Yakutsk",       "Якутск (UTC+9)"),
+                  ("Asia/Vladivostok",   "Владивосток (UTC+10)"),
+                  ("Asia/Magadan",       "Магадан (UTC+11)"),
+                  ("Asia/Kamchatka",     "Камчатка (UTC+12)"),
+                  ("Asia/Almaty",        "Алматы (UTC+6)"),
+                  ("Asia/Tashkent",      "Ташкент (UTC+5)"),
+                  ("Asia/Baku",          "Баку (UTC+4)"),
+                  ("Asia/Tbilisi",       "Тбилиси (UTC+4)"),
+                  ("Asia/Dubai",         "Дубай (UTC+4)"),
+                  ("America/New_York",   "Нью-Йорк (UTC-5/-4)"),
+                  ("America/Los_Angeles","Лос-Анджелес (UTC-8/-7)"),
+                ] %}
+                {% for val, label in tz_options %}
+                <option value="{{ val }}" {% if user_timezone == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              С (час)
+              <input type="number" name="notify_start" min="0" max="23" value="{{ notify_start }}">
+            </label>
+            <label>
+              До (час)
+              <input type="number" name="notify_end" min="0" max="23" value="{{ notify_end }}">
+            </label>
+          </div>
+          <small class="muted">Уведомления о подписке приходят в выбранном временном окне.</small>
+        </div>
+
+        <button type="submit" class="outline btn-sm" style="margin-top:.75rem">Сохранить</button>
+      </form>
+      <script>
+        document.getElementById('notifyToggle').addEventListener('change', function() {
+          document.getElementById('notifyWindow').style.opacity = this.checked ? '1' : '.4';
+          document.getElementById('notifyWindow').style.pointerEvents = this.checked ? '' : 'none';
+        });
+      </script>
+      {% endif %}
+
+      <hr>
+
+      <h4>Двухфакторная аутентификация (2FA)</h4>
+      {% if totp_enabled %}
+      <p class="muted small">2FA включена. Резервных кодов осталось: <strong>{{ backup_codes_count }}</strong></p>
+      <form method="POST" action="/profile/2fa/disable">
+        <div class="grid">
+          <input type="password" name="password" placeholder="Текущий пароль" required>
+          <input type="text" name="totp_code" placeholder="Код из приложения" autocomplete="off" inputmode="numeric" maxlength="6" required>
+        </div>
+        <small class="muted">Необходимо ввести оба поля.</small>
+        <button type="submit" class="outline secondary btn-sm" style="margin-top:.5rem">Отключить 2FA</button>
+      </form>
+      {% else %}
+      <p class="muted small">Защитите аккаунт кодом из приложения-аутентификатора (Google Authenticator, Aegis и др.).</p>
+      <a href="/profile/2fa/setup" role="button" class="outline btn-sm">Включить 2FA</a>
+      {% endif %}
+
+      <hr>
+
+      <h4>Сменить пароль</h4>
+      <form method="POST" action="/profile/reset-password" id="changePasswordForm">
+        <label>
+          Текущий пароль
+          <input type="password" id="current_password" name="current_password" required>
+        </label>
+        <label>
+          Новый пароль
+          <input type="password" id="new_password" name="new_password" required minlength="8">
+        </label>
+        <div id="newPasswordStrength" class="pwd-feedback"></div>
+        <ul id="newPasswordReqs" class="pwd-reqs">
+          <li id="new-req-length">Минимум 8 символов</li>
+          <li id="new-req-uppercase">Заглавная буква</li>
+          <li id="new-req-lowercase">Строчная буква</li>
+          <li id="new-req-digit">Цифра</li>
+        </ul>
+        <label>
+          Подтвердите новый пароль
+          <input type="password" id="new_password_confirm" name="new_password_confirm" required>
+        </label>
+        <div id="newPasswordMatch" class="pwd-feedback"></div>
+        {% if totp_enabled %}
+        <label>
+          Код 2FA
+          <input type="text" name="totp_code" placeholder="6 цифр из приложения"
+                 autocomplete="off" inputmode="numeric" maxlength="6" required>
+        </label>
+        {% endif %}
+        <button type="submit" id="changePasswordBtn" disabled>Сменить пароль</button>
+      </form>
+
+      <hr>
+
+      <h4 style="color: var(--pico-del-color);">Удалить аккаунт</h4>
+      <p class="muted">Все устройства и таймкоды будут удалены безвозвратно.</p>
+      <form method="POST" action="/profile/delete"
+            onsubmit="return confirm('Удалить аккаунт и все данные? Это необратимо!')">
+        <div class="grid">
+          <input type="password" name="password" placeholder="Введите пароль" required>
+          {% if totp_enabled %}
+          <input type="text" name="totp_code" placeholder="Код 2FA"
+                 autocomplete="off" inputmode="numeric" maxlength="6" required>
+          {% endif %}
+          <button type="submit" class="outline danger-btn">Удалить аккаунт</button>
+        </div>
+      </form>
+    </div>
+  </details>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/password.js"></script>
+<script src="/static/js/profiles.js"></script>
+<script>
+function openLinkForm(deviceId) {
+  // Открываем аккордеон
+  const details = document.getElementById('linkDeviceDetails');
+  if (details) details.open = true;
+  // Выбираем нужное устройство
+  const sel = document.getElementById('deviceProfile');
+  if (sel) {
+    sel.value = String(deviceId);
+    sel.dispatchEvent(new Event('change'));
+  }
+  // Фокус на поле кода
+  const codeInput = document.getElementById('deviceCode');
+  if (codeInput) {
+    codeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => codeInput.focus(), 400);
+  }
+}
+
+async function renameDevice(deviceId, currentName, btn) {
+  const newName = window.prompt('Новое название устройства:', currentName);
+  if (!newName || newName.trim() === currentName) return;
+  btn.disabled = true;
+  const fd = new FormData();
+  fd.append('name', newName.trim());
+  const res = await fetch(`/profiles/${deviceId}/rename`, { method: 'POST', body: fd });
+  if (res.ok || res.redirected) {
+    const td = btn.closest('tr').querySelector('td[data-label="Устройство"] strong');
+    if (td) td.textContent = newName.trim();
+  } else {
+    const data = await res.json().catch(() => ({}));
+    alert(data.detail || 'Ошибка переименования');
+  }
+  btn.disabled = false;
+}
+</script>
+<script>
+  initPasswordValidation({
+    passwordId: 'new_password',
+    confirmId: 'new_password_confirm',
+    strengthId: 'newPasswordStrength',
+    matchId: 'newPasswordMatch',
+    reqIds: {
+      length: 'new-req-length', uppercase: 'new-req-uppercase',
+      lowercase: 'new-req-lowercase', digit: 'new-req-digit',
+    },
+    submitId: 'changePasswordBtn',
+    currentPasswordId: 'current_password',
+  });
+</script>
+{% endblock %}

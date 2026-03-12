@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Пользователи — Админ{% endblock %}
+
+{% block body %}
+{% if not user %}
+<header class="container-fluid site-header">
+  <nav>
+    <ul><li><strong>NUMParser Admin</strong></li></ul>
+    <ul>
+      <li><a href="/admin/logout" role="button" class="outline secondary btn-sm">Выйти</a></li>
+    </ul>
+  </nav>
+</header>
+{% endif %}
+
+<main class="container" style="padding-top:1.5rem;max-width:860px">
+  {% if success %}
+  <div role="alert" class="alert-success" id="adminAlert" style="display:flex;align-items:center;justify-content:space-between;gap:1rem">
+    <span>{{ success }}</span>
+    <button onclick="document.getElementById('adminAlert').remove()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;line-height:1;color:inherit;padding:0">×</button>
+  </div>
+  {% endif %}
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
+    <h2 style="margin:0">Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
+    <div style="display:flex;gap:.4rem">
+      <form method="POST" action="/admin/run-expiry-check" style="margin:0">
+        <button type="submit" class="btn-sm outline secondary" title="Запустить проверку истечения Premium вручную">▶ Проверка Premium</button>
+      </form>
+      <form method="POST" action="/admin/extend-all-premium" style="margin:0"
+            onsubmit="return confirm('Продлить Premium всем активным пользователям?')">
+        <button type="submit" class="btn-sm outline secondary">➕ Продлить всем</button>
+      </form>
+      <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:.6rem">
+    {% for u in users %}
+    <div style="padding:.85rem 1rem;border:1px solid var(--pico-table-border-color);border-radius:var(--pico-border-radius)">
+
+      <!-- Шапка карточки: имя + роль + дата -->
+      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">
+        <strong>{{ u.username }}</strong>
+        <span class="role-badge role-{{ u.role }}">{{ u.role }}</span>
+        {% if u.is_admin %}<span class="role-badge role-admin">admin</span>{% endif %}
+        <span class="muted small" style="margin-left:auto">
+          #{{ u.id }} · {{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}
+        </span>
+      </div>
+
+      <!-- Метрика: устройств + premium info -->
+      <div class="muted small" style="margin-bottom:.75rem;display:flex;flex-wrap:wrap;gap:.5rem .8rem">
+        <span>Устройств: {{ u.device_count }} / {{ u.device_limit }}</span>
+        {% if u.premium_until %}
+        <span>Premium до: {{ u.premium_until.strftime('%d.%m.%Y') }}</span>
+        {% endif %}
+        {% if u.timecode_grace_until %}
+        <span style="color:var(--pico-del-color)">Грейс до: {{ u.timecode_grace_until.strftime('%d.%m.%Y') }}</span>
+        {% endif %}
+      </div>
+
+      <!-- Действия -->
+      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+
+        <!-- Роль -->
+        <form method="POST" action="/admin/user/{{ u.id }}/role" style="margin:0">
+          <select name="role" onchange="this.form.submit()" class="role-select">
+            {% for r in roles %}
+            <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </form>
+
+        <!-- Админ -->
+        <form method="POST" action="/admin/user/{{ u.id }}/toggle-admin" style="margin:0">
+          <button type="submit" class="btn-sm outline {% if u.is_admin %}is-admin{% else %}secondary{% endif %}">
+            {% if u.is_admin %}✅ Снять админа{% else %}Сделать админом{% endif %}
+          </button>
+        </form>
+
+        <!-- Продлить / восстановить Premium +30 дней -->
+        {% if u.role == "premium" or u.timecode_grace_until %}
+        <form method="POST" action="/admin/user/{{ u.id }}/extend-premium" style="margin:0">
+          <button type="submit" class="btn-sm outline {% if u.timecode_grace_until %}primary{% else %}secondary{% endif %}"
+                  title="{% if u.timecode_grace_until %}Восстановить Premium (сбросить grace) на 30 дней{% else %}Продлить Premium на 30 дней{% endif %}">
+            {% if u.timecode_grace_until %}♻ +30 дней{% else %}+30 дней{% endif %}
+          </button>
+        </form>
+        {% endif %}
+
+        <!-- Сброс лимита импорта -->
+        {% if u.role in ("simple", "premium") %}
+        <form method="POST" action="/admin/user/{{ u.id }}/reset-import" style="margin:0">
+          <button type="submit" class="btn-sm outline secondary" title="Сбросить лимит JSON-импорта">↺ импорт</button>
+        </form>
+        {% endif %}
+
+        <!-- Сброс кулдауна MyShows -->
+        {% if u.role in ("premium", "super") %}
+        <form method="POST" action="/admin/user/{{ u.id }}/reset-sync" style="margin:0">
+          <button type="submit" class="btn-sm outline secondary" title="Разрешить повторную синхронизацию MyShows">↺ MyShows</button>
+        </form>
+        {% endif %}
+
+        <!-- Принудительная очистка по лимитам текущей роли -->
+        <form method="POST" action="/admin/user/{{ u.id }}/cleanup-limits" style="margin:0"
+              onsubmit="return confirm('Удалить лишние устройства, профили и таймкоды для {{ u.username }}?')">
+          <button type="submit" class="btn-sm outline secondary" title="Удалить устройства/профили/таймкоды сверх лимита текущей роли">🗑 лимиты</button>
+        </form>
+
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  .role-badge {
+    display: inline-block;
+    padding: .15rem .45rem;
+    border-radius: .25rem;
+    font-size: .78rem;
+    font-weight: 600;
+  }
+  .role-simple  { background: var(--pico-secondary-background); color: var(--pico-secondary-foreground); }
+  .role-premium { background: #2563eb22; color: #2563eb; }
+  .role-super   { background: #d9770622; color: #d97706; }
+  .role-admin   { background: #16a34a22; color: #16a34a; }
+  .role-select  { padding: .2rem .4rem; font-size: .85rem; width: auto; margin: 0; }
+  .is-admin     { color: #16a34a; border-color: #16a34a55; }
+</style>
+{% endblock %}

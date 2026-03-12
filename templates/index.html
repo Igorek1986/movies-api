@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}NUMParser{% endblock %}
+
+{% block body %}
+{% if user %}
+
+<main class="container" style="padding-top: 1.5rem;">
+  <div class="history-controls">
+    {% if devices|length > 1 %}
+    <select id="historyDeviceSelect">
+      {% for d in devices %}
+      <option value="{{ d.id }}">{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="hidden" id="historyDeviceSelect" value="{{ devices[0].id if devices else '' }}">
+    {% endif %}
+
+    <div id="historyProfileTabs"></div>
+
+    <div class="stats-tabs">
+      <button class="tab-btn active" id="historyFilterAll">Все</button>
+      <button class="tab-btn" id="historyFilterMovie">Фильмы</button>
+      <button class="tab-btn" id="historyFilterTv">Сериалы</button>
+      <button class="tab-btn" id="historyFilterWatching">В&nbspпроцессе</button>
+    </div>
+
+      <select id="historySortSelect" class="sort-select">
+      <option value="watched">По дате просмотра</option>
+      <option value="release">По дате выхода</option>
+      <option value="pct_asc">По прогрессу ↑</option>
+      <option value="pct_desc">По прогрессу ↓</option>
+    </select>
+
+    <div style="width: 200px; margin-left: auto;">
+      <input type="search" id="historySearch" placeholder="Поиск…" class="history-search">
+    </div>
+  </div>
+
+  <div id="historyGrid" class="history-grid"></div>
+</main>
+
+<dialog id="cardModal">
+  <article id="cardModalArticle">
+    <button id="cardModalClose" aria-label="Закрыть">✕</button>
+    <div id="modalBody"></div>
+  </article>
+</dialog>
+
+{% else %}
+
+<main class="container" style="max-width: 860px; padding-top: 3rem;">
+  <div style="text-align: center; margin-bottom: 3rem;">
+    <h1 style="margin-bottom: .5rem;">NUMParser</h1>
+    <p class="muted">Мощный источник актуального контента с удобной фильтрацией просмотренного контента!</p>
+  </div>
+
+  <div style="text-align: center; margin-bottom: 2.5rem; display: flex; gap: 1rem; justify-content: center;">
+    <a href="/login" role="button">Войти</a>
+    <a href="/register" role="button" class="outline">Регистрация</a>
+  </div>
+
+  <div class="landing-grid">
+    <article>
+      <header><strong>История просмотров</strong></header>
+      <p>Прогресс просмотра сохраняется и отображается на сайте. Видно что и до какого момента смотрели на каждом устройстве.</p>
+    </article>
+    <article>
+      <header><strong>Фильтрация просмотренного</strong></header>
+      <p>Уже просмотренные фильмы и сериалы убираются из категорий автоматически.</p>
+    </article>
+    <article>
+      <header><strong>Подключение к Lampa</strong></header>
+      <p>Установите плагин NUMParser в Lampa, введите токен устройства — и всё готово.</p>
+    </article>
+    <article style="border: 1px solid var(--pico-muted-border-color);">
+      <header><strong>Базовый</strong> <small class="muted">— бесплатно</small></header>
+      <ul>
+        <li>До {{ simple_device_limit }} {{ simple_device_limit | plural('устройства', 'устройств', 'устройств') }}</li>
+        <li>До {{ simple_tc_limit }} {{ simple_tc_limit | plural('таймкода', 'таймкодов', 'таймкодов') }}</li>
+        <li>Привязка Telegram для восстановления пароля</li>
+      </ul>
+    </article>
+    <article style="border: 1px solid var(--pico-primary);">
+      <header><strong>Премиум</strong> <small class="muted">— по запросу</small></header>
+      <ul>
+        <li>До {{ premium_device_limit }} {{ premium_device_limit | plural('устройства', 'устройств', 'устройств') }}</li>
+        <li>До {{ premium_tc_limit }} {{ premium_tc_limit | plural('таймкода', 'таймкодов', 'таймкодов') }}</li>
+        <li>Синхронизация просмотренного из MyShows</li>
+      </ul>
+    </article>
+    {% if bot_name %}
+    <article style="border: 1px solid var(--pico-muted-border-color);">
+      <header><strong>Telegram</strong> <small class="muted">— бесплатно</small></header>
+      <ul style="list-style:none;padding-left:0">
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔑</span><span>Сброс пароля через бота</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔐</span><span>Уведомления о новых входах</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔔</span><span>Напоминания об истечении подписки</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>⚠️</span><span>Предупреждение за {{ inactive_warn_days }} {{ inactive_warn_days | plural('день', 'дня', 'дней') }} до удаления аккаунта</span></li>
+      </ul>
+      <a href="https://t.me/{{ bot_name }}" target="_blank" role="button" class="outline btn-sm">@{{ bot_name }}</a>
+    </article>
+    {% endif %}
+  </div>
+
+  {% if inactive_delete_days > 0 %}
+  <p class="muted" style="font-size: .85rem; margin-top: .5rem;">
+    * Аккаунты удаляются автоматически при отсутствии активности более {{ inactive_delete_days }} {{ inactive_delete_days | plural('дня', 'дней', 'дней') }}.
+    {% if bot_name %}За {{ inactive_warn_days }} {{ inactive_warn_days | plural('день', 'дня', 'дней') }} до удаления придёт уведомление в Telegram.{% endif %}
+  </p>
+  {% endif %}
+
+  <footer style="text-align:center; margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--pico-muted-border-color);">
+    <small class="muted">
+      Плагин для Lampa: <a href="{{ plugin_url }}">np.js</a>
+      {% if bot_name %} &nbsp;·&nbsp; <a href="https://t.me/{{ bot_name }}">@{{ bot_name }}</a>{% endif %}
+    </small>
+  </footer>
+</main>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if user and devices %}
+<script>window.TMDB_IMAGE_BASE = "{{ image_base }}";</script>
+<script src="/static/js/history.js"></script>
+<script>initHistory({{ devices[0].id }});</script>
+{% endif %}
+{% endblock %}
