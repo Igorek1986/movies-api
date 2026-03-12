@@ -76,25 +76,39 @@
     <article style="border: 1px solid var(--pico-muted-border-color);">
       <header><strong>Базовый</strong> <small class="muted">— бесплатно</small></header>
       <ul>
-        <li>До 3 устройств</li>
-        <li>До 300 таймкодов на устройство</li>
+        <li>До {{ simple_device_limit }} устройств</li>
+        <li>До {{ simple_tc_limit }} таймкодов на профиль</li>
         <li>Привязка Telegram для восстановления пароля</li>
       </ul>
     </article>
     <article style="border: 1px solid var(--pico-primary);">
       <header><strong>Премиум</strong> <small class="muted">— по запросу</small></header>
       <ul>
-        <li>До 8 устройств</li>
-        <li>Без ограничений на таймкоды</li>
+        <li>До {{ premium_device_limit }} устройств</li>
+        <li>До {{ premium_tc_limit }} таймкодов на профиль</li>
         <li>Синхронизация просмотренного из MyShows</li>
       </ul>
     </article>
+    {% if bot_name %}
+    <article style="border: 1px solid var(--pico-muted-border-color);">
+      <header><strong>Telegram</strong> <small class="muted">— бесплатно</small></header>
+      <ul style="list-style:none;padding-left:0">
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔑</span><span>Сброс пароля через бота</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔐</span><span>Уведомления о новых входах</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>🔔</span><span>Напоминания об истечении подписки</span></li>
+        <li style="display:flex;gap:.4rem;align-items:baseline"><span>⚠️</span><span>Предупреждение за {{ inactive_warn_days }} дн. до удаления аккаунта</span></li>
+      </ul>
+      <a href="https://t.me/{{ bot_name }}" target="_blank" role="button" class="outline btn-sm">@{{ bot_name }}</a>
+    </article>
+    {% endif %}
   </div>
 
+  {% if inactive_delete_days > 0 %}
   <p class="muted" style="font-size: .85rem; margin-top: .5rem;">
-    * Аккаунты удаляются автоматически при отсутствии активности более 6 месяцев.
-    За месяц до удаления придёт уведомление в Telegram.
+    * Аккаунты удаляются автоматически при отсутствии активности более {{ inactive_delete_days }} дней.
+    {% if bot_name %}За {{ inactive_warn_days }} дн. до удаления придёт уведомление в Telegram.{% endif %}
   </p>
+  {% endif %}
 
   <footer style="text-align:center; margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--pico-muted-border-color);">
     <small class="muted">

@@ -13,7 +13,7 @@ run_notification_delivery — runs every 10 minutes:
 """
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,54 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
 
         await db.commit()
 
-        # ── 3. Clean up devices / profiles / timecodes after grace period ─────
+        # ── 3. Inactive simple users: warn and delete ─────────────────────────
+        inactive_delete_days = settings_cache.get_int("inactive_delete_days")
+        inactive_warn_days   = settings_cache.get_int("inactive_warn_days")
+
+        if inactive_delete_days > 0:
+            from sqlalchemy import or_
+            today = now.date()
+            warn_threshold   = today - timedelta(days=inactive_delete_days - inactive_warn_days)
+            delete_threshold = today - timedelta(days=inactive_delete_days)
+
+            # Предупреждение
+            result = await db.execute(
+                select(User).where(
+                    User.role == "simple",
+                    User.timecode_grace_until.is_(None),
+                    User.inactive_warned == False,  # noqa: E712
+                    User.last_active_at.isnot(None),
+                    User.last_active_at <= warn_threshold,
+                    User.last_active_at > delete_threshold,
+                )
+            )
+            for user in result.scalars().all():
+                user.inactive_warned = True
+                if user.notifications_enabled:
+                    user.notify_inactive_after = _next_notify_time(user, now)
+                    logger.info(f"User {user.username}: inactive warning scheduled")
+
+            await db.commit()
+
+            # Удаление
+            result = await db.execute(
+                select(User).where(
+                    User.role == "simple",
+                    User.timecode_grace_until.is_(None),
+                    User.last_active_at.isnot(None),
+                    User.last_active_at <= delete_threshold,
+                )
+            )
+            for user in result.scalars().all():
+                logger.info(
+                    f"Auto-deleting inactive user: {user.username} "
+                    f"(last_active: {user.last_active_at})"
+                )
+                await db.delete(user)
+
+            await db.commit()
+
+        # ── 4. Clean up devices / profiles / timecodes after grace period ─────
         result = await db.execute(
             select(User).where(
                 and_(
@@ -164,15 +211,15 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
 async def run_notification_delivery() -> None:
     from app.db.database import async_session_maker
     from app.db.models import User, TelegramUser
-    from sqlalchemy import select, and_
+    from sqlalchemy import select, and_, or_
 
     async with async_session_maker() as db:
         now = datetime.now(timezone.utc)
         result = await db.execute(
             select(User).where(
-                and_(
-                    User.notify_premium_after.isnot(None),
-                    User.notify_premium_after <= now,
+                or_(
+                    and_(User.notify_premium_after.isnot(None),  User.notify_premium_after  <= now),
+                    and_(User.notify_inactive_after.isnot(None), User.notify_inactive_after <= now),
                 )
             )
         )
@@ -187,15 +234,21 @@ async def run_notification_delivery() -> None:
 
             if tg:
                 try:
-                    if user.notify_type == "warning":
-                        await _send_premium_warning(tg.telegram_id, user)
-                    else:
-                        await _send_premium_expired(tg.telegram_id, user)
+                    if user.notify_premium_after and user.notify_premium_after <= now:
+                        if user.notify_type == "warning":
+                            await _send_premium_warning(tg.telegram_id, user)
+                        else:
+                            await _send_premium_expired(tg.telegram_id, user)
+                    if user.notify_inactive_after and user.notify_inactive_after <= now:
+                        await _send_inactive_warning(tg.telegram_id, user)
                 except Exception as e:
                     logger.warning(f"Failed to deliver notification to {user.username}: {e}")
 
-            user.notify_premium_after = None
-            user.notify_type = None
+            if user.notify_premium_after and user.notify_premium_after <= now:
+                user.notify_premium_after = None
+                user.notify_type = None
+            if user.notify_inactive_after and user.notify_inactive_after <= now:
+                user.notify_inactive_after = None
 
         await db.commit()
         logger.info(f"Delivered {len(users)} deferred notification(s)")
@@ -233,6 +286,29 @@ async def _send_premium_expired(telegram_id: int, user) -> None:
         f"• Лимит профилей на устройство: <b>{s_prof}</b>\n"
         f"• Лимит таймкодов на профиль: <b>{s_tc}</b>"
         f"{grace_note}",
+        parse_mode="HTML",
+    )
+
+
+async def _send_inactive_warning(telegram_id: int, user) -> None:
+    from app.bot import get_bot
+    from app import settings_cache
+
+    bot = get_bot()
+    if not bot:
+        return
+
+    delete_days = settings_cache.get_int("inactive_delete_days")
+    warn_days   = settings_cache.get_int("inactive_warn_days")
+    delete_date = (user.last_active_at + timedelta(days=delete_days)).strftime("%d.%m.%Y") \
+                  if user.last_active_at else "—"
+
+    await bot.send_message(
+        telegram_id,
+        f"⚠️ <b>Ваш аккаунт будет удалён {delete_date}.</b>\n\n"
+        f"Аккаунт: <b>{user.username}</b>\n"
+        f"Причина: нет активности более {delete_days - warn_days} дней.\n\n"
+        f"Чтобы сохранить аккаунт — войдите на сайт или откройте подборку NUMParser в Lampa с привязанного устройства.",
         parse_mode="HTML",
     )
 

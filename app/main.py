@@ -1032,6 +1032,7 @@ async def index(
         from app.api.devices import _devices_with_stats
 
         devices = await _devices_with_stats(current_user.id, db)
+    from app import settings_cache as sc
     return _templates.TemplateResponse(
         "index.html",
         {
@@ -1041,6 +1042,12 @@ async def index(
             "plugin_url": plugin_url,
             "bot_name": settings.TELEGRAM_BOT_NAME,
             "image_base": image_base,
+            "simple_device_limit":   sc.get_int("simple_device_limit"),
+            "premium_device_limit":  sc.get_int("premium_device_limit"),
+            "simple_tc_limit":       sc.get_int("simple_timecode_limit"),
+            "premium_tc_limit":      sc.get_int("premium_timecode_limit"),
+            "inactive_delete_days":  sc.get_int("inactive_delete_days"),
+            "inactive_warn_days":    sc.get_int("inactive_warn_days"),
         },
     )
 

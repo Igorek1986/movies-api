@@ -33,6 +33,9 @@ DEFAULTS: dict[str, str] = {
     "timecode_grace_days":        "3",
     "premium_warn_days":          "3",
     "premium_extend_all_days":    "3",
+    # ── Inactive user auto-deletion (0 = disabled) ────────────────────────────
+    "inactive_delete_days":       "180",
+    "inactive_warn_days":         "7",
     # ── Notifications ──────────────────────────────────────────────────────────
     "default_timezone":           "Europe/Moscow",
     # ── General ────────────────────────────────────────────────────────────────
@@ -72,6 +75,8 @@ LABELS: dict[str, str] = {
     "super_timecode_limit":       "Super — таймкодов на профиль (0=∞)",
     "super_import_daily":         "Super — импортов в сутки (0=∞)",
     "super_myshows_daily":        "Super — MyShows синков в сутки (0=∞)",
+    "inactive_delete_days":       "Автоудаление неактивных аккаунтов (дней, 0 = выкл)",
+    "inactive_warn_days":         "Предупреждение об удалении аккаунта (дней до удаления)",
     "timecode_grace_days":        "Грейс-период таймкодов (дней)",
     "premium_warn_days":          "Предупреждение об истечении Premium (дней)",
     "premium_extend_all_days":    "Продлить всем Premium (дней)",
@@ -110,6 +115,7 @@ GROUPS: list[tuple[str, list[str]]] = [
         "super_timecode_limit", "super_import_daily", "super_myshows_daily",
     ]),
     ("Общие настройки", [
+        "inactive_delete_days", "inactive_warn_days",
         "timecode_grace_days", "premium_warn_days", "premium_extend_all_days", "watched_threshold",
         "session_ttl_days", "session_renew_days",
         "device_code_ttl_minutes", "telegram_link_ttl_minutes",

@@ -61,6 +61,9 @@ async def _create_session(db: AsyncSession, user_id: int, request: Request) -> s
     await db.commit()
     base_url = str(request.base_url).rstrip("/")
     asyncio.create_task(_notify_new_session(user_id, ip, ua, base_url))
+    from app.api.dependencies import _should_update_active, _update_last_active
+    if _should_update_active(user_id):
+        asyncio.create_task(_update_last_active(user_id))
     return key
 
 

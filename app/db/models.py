@@ -5,6 +5,7 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
+    Date,
     Float,
     ForeignKey,
     UniqueConstraint,
@@ -67,6 +68,10 @@ class User(Base):
     notify_end   = Column(Integer, nullable=False, default=22, server_default="22")
     # Master switch: False = no Telegram notifications at all (including login alerts)
     notifications_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    # Inactive user auto-deletion
+    last_active_at        = Column(Date, nullable=True)
+    inactive_warned       = Column(Boolean, nullable=False, default=False, server_default="false")
+    notify_inactive_after = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

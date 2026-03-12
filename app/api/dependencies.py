@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone, date
 
 from fastapi import Depends, Request, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,37 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.db.models import User, Device, Session
 from app import settings_cache
+
+# ─── Inactive tracking ────────────────────────────────────────────────────────
+# In-memory set of user_ids already updated today — prevents redundant DB writes
+# when the same user sends multiple concurrent requests.
+_active_today: set[int] = set()
+_active_date: date = date.today()
+
+
+def _should_update_active(user_id: int) -> bool:
+    """Returns True (and marks) if this user_id hasn't been recorded today yet."""
+    global _active_today, _active_date
+    today = date.today()
+    if _active_date != today:
+        _active_today = set()
+        _active_date = today
+    if user_id in _active_today:
+        return False
+    _active_today.add(user_id)
+    return True
+
+
+async def _update_last_active(user_id: int) -> None:
+    from app.db.database import async_session_maker
+    today = date.today()
+    async with async_session_maker() as db:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user and user.last_active_at != today:
+            user.last_active_at = today
+            user.inactive_warned = False
+            await db.commit()
 
 
 async def get_current_user(
@@ -55,4 +87,7 @@ async def get_device_by_token(
         return None
 
     result = await db.execute(select(Device).where(Device.token == token))
-    return result.scalar_one_or_none()
+    device = result.scalar_one_or_none()
+    if device and _should_update_active(device.user_id):
+        asyncio.create_task(_update_last_active(device.user_id))
+    return device
