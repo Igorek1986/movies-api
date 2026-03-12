@@ -106,40 +106,6 @@
 
       </div>
 
-      <!-- ═══ [TEST] Сценарии подписки — удалить после проверки ═══ -->
-      <details style="margin-top:.4rem">
-        <summary style="font-size:.78rem;color:var(--pico-muted-color);cursor:pointer">🧪 тест сценариев</summary>
-        <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem;padding:.4rem .5rem;border:1px dashed var(--pico-muted-border-color);border-radius:.375rem">
-          <form method="POST" action="/admin/user/{{ u.id }}/test/activate" style="margin:0"
-                title="simple → premium, уведомление: активирована">
-            <button type="submit" class="btn-sm outline secondary" style="font-size:.72rem"
-                    {% if u.role == "premium" %}disabled{% endif %}>🎉 активация</button>
-          </form>
-          <form method="POST" action="/admin/user/{{ u.id }}/test/extend" style="margin:0"
-                title="Продлить premium на 30 дней, уведомление: продлена">
-            <button type="submit" class="btn-sm outline secondary" style="font-size:.72rem">➕ продление</button>
-          </form>
-          <form method="POST" action="/admin/user/{{ u.id }}/test/restore" style="margin:0"
-                title="Симулировать grace → восстановить premium, уведомление: восстановлена">
-            <button type="submit" class="btn-sm outline secondary" style="font-size:.72rem">♻ восстановление</button>
-          </form>
-          <form method="POST" action="/admin/user/{{ u.id }}/test/warning" style="margin:0"
-                title="Поставить premium_until=now+2д, запустить expiry check → уведомление: истекает">
-            <button type="submit" class="btn-sm outline secondary" style="font-size:.72rem">⏰ предупреждение</button>
-          </form>
-          <form method="POST" action="/admin/user/{{ u.id }}/test/expire" style="margin:0"
-                title="Поставить premium_until в прошлое, запустить expiry check → уведомление: истекла + очистка"
-                onsubmit="return confirm('Симулировать истечение для {{ u.username }}? Данные сверх лимитов simple будут удалены.')">
-            <button type="submit" class="btn-sm outline secondary" style="font-size:.72rem;color:var(--pico-color-red-500)">❌ истечение</button>
-          </form>
-          <form method="POST" action="/admin/user/{{ u.id }}/test/revoke" style="margin:0"
-                title="Сбросить в simple без уведомления (для повторных тестов)"
-                onsubmit="return confirm('Удалить подписку {{ u.username }}?')">
-            <button type="submit" class="btn-sm outline secondary" style="font-size:.72rem;color:var(--pico-muted-color)">🗑 удалить подписку</button>
-          </form>
-        </div>
-      </details>
-      <!-- ═══ /TEST ═══ -->
     </div>
     {% endfor %}
   </div>
