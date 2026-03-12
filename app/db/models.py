@@ -54,12 +54,19 @@ class User(Base):
     premium_until       = Column(DateTime(timezone=True), nullable=True)
     # Grace period: timecodes kept N days after premium expiry if over simple limit
     timecode_grace_until = Column(DateTime(timezone=True), nullable=True)
-    # Deferred Telegram notification (quiet hours)
+    # Deferred Telegram notification: deliver at this UTC time
     notify_premium_after = Column(DateTime(timezone=True), nullable=True)
+    # Type of deferred notification: "warning" (3 days before expiry) or "expired"
+    notify_type = Column(String(20), nullable=True)
     # Whether the 3-day advance warning has been sent (reset when premium is re-granted)
     premium_warned = Column(Boolean, nullable=False, default=False, server_default="false")
     # User's preferred timezone (e.g. "Europe/Moscow"); None = use server default
     timezone = Column(String(50), nullable=True)
+    # Notification delivery window (local hours, inclusive start, exclusive end)
+    notify_start = Column(Integer, nullable=False, default=9,  server_default="9")
+    notify_end   = Column(Integer, nullable=False, default=22, server_default="22")
+    # Master switch: False = no Telegram notifications at all (including login alerts)
+    notifications_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

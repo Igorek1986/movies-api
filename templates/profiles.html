@@ -361,6 +361,79 @@
 
       <hr>
 
+      <h4>Уведомления</h4>
+      {% if not tg_linked %}
+      <p class="muted small">Привяжите Telegram, чтобы получать уведомления.</p>
+      {% else %}
+      <form method="POST" action="/profile/notifications" id="notifyForm">
+        <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer">
+          <input type="checkbox" name="notifications_enabled" value="true" role="switch"
+                 id="notifyToggle" {% if notifications_enabled %}checked{% endif %}
+                 onchange="document.getElementById('notifyWarning').style.display = this.checked ? 'none' : 'block'">
+          Получать уведомления в Telegram
+        </label>
+        <p id="notifyWarning" class="muted small" style="color:var(--pico-color-amber-500);{% if notifications_enabled %}display:none{% endif %}">
+          Вы не будете получать уведомления о входе в аккаунт и истечении подписки.
+        </p>
+
+        <div id="notifyWindow" style="{% if not notifications_enabled %}opacity:.4;pointer-events:none{% endif %}">
+          <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:.5rem;margin-top:.75rem;align-items:end">
+            <label>
+              Таймзона
+              <select name="user_timezone">
+                {% set tz_options = [
+                  ("Europe/Moscow",      "Москва (UTC+3)"),
+                  ("Europe/Minsk",       "Минск (UTC+3)"),
+                  ("Europe/Kiev",        "Киев (UTC+2)"),
+                  ("Europe/Istanbul",    "Стамбул (UTC+3)"),
+                  ("Europe/Berlin",      "Берлин (UTC+1/2)"),
+                  ("Europe/London",      "Лондон (UTC+0/1)"),
+                  ("Europe/Paris",       "Париж (UTC+1/2)"),
+                  ("Asia/Yekaterinburg", "Екатеринбург (UTC+5)"),
+                  ("Asia/Novosibirsk",   "Новосибирск (UTC+7)"),
+                  ("Asia/Krasnoyarsk",   "Красноярск (UTC+7)"),
+                  ("Asia/Irkutsk",       "Иркутск (UTC+8)"),
+                  ("Asia/Yakutsk",       "Якутск (UTC+9)"),
+                  ("Asia/Vladivostok",   "Владивосток (UTC+10)"),
+                  ("Asia/Magadan",       "Магадан (UTC+11)"),
+                  ("Asia/Kamchatka",     "Камчатка (UTC+12)"),
+                  ("Asia/Almaty",        "Алматы (UTC+6)"),
+                  ("Asia/Tashkent",      "Ташкент (UTC+5)"),
+                  ("Asia/Baku",          "Баку (UTC+4)"),
+                  ("Asia/Tbilisi",       "Тбилиси (UTC+4)"),
+                  ("Asia/Dubai",         "Дубай (UTC+4)"),
+                  ("America/New_York",   "Нью-Йорк (UTC-5/-4)"),
+                  ("America/Los_Angeles","Лос-Анджелес (UTC-8/-7)"),
+                ] %}
+                {% for val, label in tz_options %}
+                <option value="{{ val }}" {% if user_timezone == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              С (час)
+              <input type="number" name="notify_start" min="0" max="23" value="{{ notify_start }}">
+            </label>
+            <label>
+              До (час)
+              <input type="number" name="notify_end" min="0" max="23" value="{{ notify_end }}">
+            </label>
+          </div>
+          <small class="muted">Уведомления о подписке приходят в выбранном временном окне.</small>
+        </div>
+
+        <button type="submit" class="outline btn-sm" style="margin-top:.75rem">Сохранить</button>
+      </form>
+      <script>
+        document.getElementById('notifyToggle').addEventListener('change', function() {
+          document.getElementById('notifyWindow').style.opacity = this.checked ? '1' : '.4';
+          document.getElementById('notifyWindow').style.pointerEvents = this.checked ? '' : 'none';
+        });
+      </script>
+      {% endif %}
+
+      <hr>
+
       <h4>Двухфакторная аутентификация (2FA)</h4>
       {% if totp_enabled %}
       <p class="muted small">2FA включена. Резервных кодов осталось: <strong>{{ backup_codes_count }}</strong></p>

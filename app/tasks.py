@@ -1,12 +1,15 @@
 """
 Background tasks.
 
-premium_expiry_check — runs daily at 05:00 server local time:
+run_premium_expiry_check — runs daily at 05:00 server local time:
   1. Finds users with expired premium_until → demotes to simple
-  2. If user's timecodes exceed simple_timecode_limit → sets grace period
-  3. Sends Telegram notification (deferred if within quiet hours)
-  4. Sends deferred notifications when quiet hours end
-  5. Cleans up timecodes after grace_period expires
+  2. Finds users whose premium expires within 3 days → schedules warning
+  3. Sets notify_premium_after to next allowed delivery time in user's timezone
+  4. Cleans up devices / profiles / timecodes after grace_period expires
+
+run_notification_delivery — runs every 10 minutes:
+  Sends pending Telegram notifications where notify_premium_after <= now.
+  Respects notify_type ("warning" / "expired").
 """
 import asyncio
 import logging
@@ -15,7 +18,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
-_task: asyncio.Task | None = None
+_check_task: asyncio.Task | None = None
+_delivery_task: asyncio.Task | None = None
 
 
 # ─── Timezone helpers ──────────────────────────────────────────────────────────
@@ -29,21 +33,29 @@ def _get_tz(tz_str: str | None) -> ZoneInfo:
         return ZoneInfo("Europe/Moscow")
 
 
-def _is_quiet_hour(user_tz: str | None, quiet_start: int, quiet_end: int) -> bool:
-    """True if current local time is within quiet hours [quiet_start, midnight) ∪ [0, quiet_end)."""
-    hour = datetime.now(_get_tz(user_tz)).hour
-    if quiet_start > quiet_end:   # wraps midnight, e.g. 22–9
-        return hour >= quiet_start or hour < quiet_end
-    return quiet_start <= hour < quiet_end
+def _next_notify_time(user, now: datetime) -> datetime:
+    """Return UTC datetime when to deliver notification to this user.
 
+    Rules (applied in user's local timezone):
+    - Current hour in [notify_start, notify_end) → send now
+    - Current hour < notify_start              → today at notify_start
+    - Current hour >= notify_end               → tomorrow at notify_start
+    """
+    tz = _get_tz(user.timezone)
+    now_local = now.astimezone(tz)
+    start = (user.notify_start if user.notify_start is not None else 9)
+    end   = (user.notify_end   if user.notify_end   is not None else 22)
 
-def _next_morning_utc(user_tz: str | None, quiet_end: int) -> datetime:
-    """Return next quiet_end:00 in user timezone as UTC-aware datetime."""
-    tz = _get_tz(user_tz)
-    now_local = datetime.now(tz)
-    candidate = now_local.replace(hour=quiet_end, minute=0, second=0, microsecond=0)
-    if now_local >= candidate:
-        candidate += timedelta(days=1)
+    hour = now_local.hour
+    if start <= hour < end:
+        return now  # within window — deliver immediately
+
+    if hour < start:
+        candidate = now_local.replace(hour=start, minute=0, second=0, microsecond=0)
+    else:
+        candidate = (now_local + timedelta(days=1)).replace(
+            hour=start, minute=0, second=0, microsecond=0
+        )
     return candidate.astimezone(timezone.utc)
 
 
@@ -56,22 +68,19 @@ def _seconds_until_next_5am() -> float:
     return (target - now).total_seconds()
 
 
-# ─── Core check ───────────────────────────────────────────────────────────────
+# ─── Business logic (daily at 05:00) ─────────────────────────────────────────
 
 async def run_premium_expiry_check(_now: datetime | None = None) -> None:
     from app.db.database import async_session_maker
-    from app.db.models import User, Device, Timecode, TelegramUser
+    from app.db.models import User, TelegramUser
     from app import settings_cache
-    from sqlalchemy import select, func, delete, and_
+    from sqlalchemy import select, and_
 
     logger.info("Running premium expiry check...")
 
     async with async_session_maker() as db:
         now = _now or datetime.now(timezone.utc)
-        quiet_start      = settings_cache.get_int("quiet_hours_start")
-        quiet_end        = settings_cache.get_int("quiet_hours_end")
-        simple_tc_limit  = settings_cache.get_int("simple_timecode_limit")
-        grace_days       = settings_cache.get_int("timecode_grace_days")
+        grace_days = settings_cache.get_int("timecode_grace_days")
 
         # ── 1. Demote expired premium users ───────────────────────────────────
         result = await db.execute(
@@ -83,39 +92,26 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
                 )
             )
         )
-        expired = result.scalars().all()
-
-        for user in expired:
+        for user in result.scalars().all():
             user.role = "simple"
             user.premium_until = None
 
-            # Устанавливаем grace-период для всей очистки (устройства, профили, таймкоды).
-            # Если пользователь продлит premium до истечения grace — данные не удаляются.
             if grace_days == 0:
-                user.timecode_grace_until = now  # немедленная очистка в шаге 5
+                user.timecode_grace_until = now
             else:
                 user.timecode_grace_until = now + timedelta(days=grace_days)
 
-            # Telegram notification
-            tg = (await db.execute(
-                select(TelegramUser).where(TelegramUser.user_id == user.id)
-            )).scalar_one_or_none()
-
-            if tg:
-                if _is_quiet_hour(user.timezone, quiet_start, quiet_end):
-                    user.notify_premium_after = _next_morning_utc(user.timezone, quiet_end)
-                    logger.info(f"User {user.username}: notification deferred (quiet hours)")
-                else:
-                    await _send_premium_expired(tg.telegram_id, user)
-
-            logger.info(f"User {user.username}: premium expired → simple")
+            if user.notifications_enabled:
+                user.notify_premium_after = _next_notify_time(user, now)
+                user.notify_type = "expired"
+                logger.info(f"User {user.username}: premium expired → simple, notify at {user.notify_premium_after}")
+            else:
+                logger.info(f"User {user.username}: premium expired → simple (notifications disabled)")
 
         await db.commit()
 
         # ── 2. Advance warning: 3 days before expiry ──────────────────────────
-        warn_days    = 3
-        warn_horizon = now + timedelta(days=warn_days)
-
+        warn_horizon = now + timedelta(days=3)
         result = await db.execute(
             select(User).where(
                 and_(
@@ -123,43 +119,20 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
                     User.premium_until.isnot(None),
                     User.premium_until > now,
                     User.premium_until <= warn_horizon,
-                    User.premium_warned == False,  # noqa: E712 — ещё не предупреждали
+                    User.premium_warned == False,  # noqa: E712
                 )
             )
         )
         for user in result.scalars().all():
-            tg = (await db.execute(
-                select(TelegramUser).where(TelegramUser.user_id == user.id)
-            )).scalar_one_or_none()
-            if tg:
-                if _is_quiet_hour(user.timezone, quiet_start, quiet_end):
-                    user.notify_premium_after = _next_morning_utc(user.timezone, quiet_end)
-                else:
-                    await _send_premium_warning(tg.telegram_id, user)
-            user.premium_warned = True  # не отправлять повторно
+            user.premium_warned = True
+            if user.notifications_enabled:
+                user.notify_premium_after = _next_notify_time(user, now)
+                user.notify_type = "warning"
+                logger.info(f"User {user.username}: premium warning scheduled at {user.notify_premium_after}")
 
         await db.commit()
 
-        # ── 4. Send deferred notifications ────────────────────────────────────
-        result = await db.execute(
-            select(User).where(
-                and_(
-                    User.notify_premium_after.isnot(None),
-                    User.notify_premium_after <= now,
-                )
-            )
-        )
-        for user in result.scalars().all():
-            tg = (await db.execute(
-                select(TelegramUser).where(TelegramUser.user_id == user.id)
-            )).scalar_one_or_none()
-            if tg:
-                await _send_premium_expired(tg.telegram_id, user)
-            user.notify_premium_after = None
-
-        await db.commit()
-
-        # ── 5. Clean up devices / profiles / timecodes after grace period ────────
+        # ── 3. Clean up devices / profiles / timecodes after grace period ─────
         result = await db.execute(
             select(User).where(
                 and_(
@@ -185,6 +158,50 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
     logger.info("Premium expiry check complete.")
 
 
+# ─── Notification delivery (every 10 minutes) ─────────────────────────────────
+
+async def run_notification_delivery() -> None:
+    from app.db.database import async_session_maker
+    from app.db.models import User, TelegramUser
+    from sqlalchemy import select, and_
+
+    async with async_session_maker() as db:
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            select(User).where(
+                and_(
+                    User.notify_premium_after.isnot(None),
+                    User.notify_premium_after <= now,
+                )
+            )
+        )
+        users = result.scalars().all()
+        if not users:
+            return
+
+        for user in users:
+            tg = (await db.execute(
+                select(TelegramUser).where(TelegramUser.user_id == user.id)
+            )).scalar_one_or_none()
+
+            if tg:
+                try:
+                    if user.notify_type == "warning":
+                        await _send_premium_warning(tg.telegram_id, user)
+                    else:
+                        await _send_premium_expired(tg.telegram_id, user)
+                except Exception as e:
+                    logger.warning(f"Failed to deliver notification to {user.username}: {e}")
+
+            user.notify_premium_after = None
+            user.notify_type = None
+
+        await db.commit()
+        logger.info(f"Delivered {len(users)} deferred notification(s)")
+
+
+# ─── Telegram message senders ─────────────────────────────────────────────────
+
 async def _send_premium_expired(telegram_id: int, user) -> None:
     from app.bot import get_bot
     from app import settings_cache
@@ -196,7 +213,6 @@ async def _send_premium_expired(telegram_id: int, user) -> None:
     s_dev  = settings_cache.get_int("simple_device_limit")
     s_prof = settings_cache.get_int("simple_profile_limit")
     s_tc   = settings_cache.get_int("simple_timecode_limit")
-    grace_days = settings_cache.get_int("timecode_grace_days")
 
     grace_note = ""
     if user.timecode_grace_until:
@@ -206,24 +222,38 @@ async def _send_premium_expired(telegram_id: int, user) -> None:
             f"Продлите подписку до этой даты, чтобы сохранить историю."
         )
 
-    try:
-        await bot.send_message(
-            telegram_id,
-            f"❌ <b>Подписка Premium истекла.</b>\n\n"
-            f"Аккаунт переведён на <b>Simple</b>:\n"
-            f"• Синхронизация с MyShows — недоступна\n"
-            f"• Лимит устройств: <b>{s_dev}</b>\n"
-            f"• Лимит профилей на устройство: <b>{s_prof}</b>\n"
-            f"• Лимит таймкодов на профиль: <b>{s_tc}</b>"
-            f"{grace_note}",
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.warning(f"Failed to send premium expiry notification to {telegram_id}: {e}")
+    await bot.send_message(
+        telegram_id,
+        f"❌ <b>Подписка Premium истекла.</b>\n\n"
+        f"Аккаунт: <b>{user.username}</b>\n"
+        f"Переведён на <b>Simple</b>:\n"
+        f"• Синхронизация с MyShows — недоступна\n"
+        f"• Лимит устройств: <b>{s_dev}</b>\n"
+        f"• Лимит профилей на устройство: <b>{s_prof}</b>\n"
+        f"• Лимит таймкодов на профиль: <b>{s_tc}</b>"
+        f"{grace_note}",
+        parse_mode="HTML",
+    )
+
+
+async def _send_premium_activated(telegram_id: int, user) -> None:
+    from app.bot import get_bot
+
+    bot = get_bot()
+    if not bot:
+        return
+
+    expires_str = user.premium_until.strftime("%d.%m.%Y") if user.premium_until else "—"
+    await bot.send_message(
+        telegram_id,
+        f"🎉 <b>Подписка Premium активирована!</b>\n\n"
+        f"Аккаунт: <b>{user.username}</b>\n"
+        f"<b>Premium</b> до {expires_str}.",
+        parse_mode="HTML",
+    )
 
 
 async def _send_premium_renewed(telegram_id: int, user, was_grace: bool) -> None:
-    """Уведомление об успешном продлении / восстановлении Premium."""
     from app.bot import get_bot
 
     bot = get_bot()
@@ -235,19 +265,18 @@ async def _send_premium_renewed(telegram_id: int, user, was_grace: bool) -> None
     if was_grace:
         text = (
             f"✅ <b>Подписка Premium восстановлена!</b>\n\n"
-            f"Аккаунт снова <b>Premium</b> до {expires_str}.\n"
+            f"Аккаунт: <b>{user.username}</b>\n"
+            f"Снова <b>Premium</b> до {expires_str}.\n"
             f"Все данные сохранены — история, устройства, профили."
         )
     else:
         text = (
             f"✅ <b>Подписка Premium продлена.</b>\n\n"
-            f"Аккаунт <b>Premium</b> до {expires_str}."
+            f"Аккаунт: <b>{user.username}</b>\n"
+            f"<b>Premium</b> до {expires_str}."
         )
 
-    try:
-        await bot.send_message(telegram_id, text, parse_mode="HTML")
-    except Exception as e:
-        logger.warning(f"Failed to send premium renewed notification to {telegram_id}: {e}")
+    await bot.send_message(telegram_id, text, parse_mode="HTML")
 
 
 async def _send_premium_warning(telegram_id: int, user) -> None:
@@ -258,32 +287,28 @@ async def _send_premium_warning(telegram_id: int, user) -> None:
     if not bot:
         return
 
-    # Показываем дату как в админке — UTC-дата (premium_until = 23:59:59 UTC нужного дня)
     expires_str = user.premium_until.strftime("%d.%m.%Y")
-
     s_dev  = settings_cache.get_int("simple_device_limit")
     s_prof = settings_cache.get_int("simple_profile_limit")
     s_tc   = settings_cache.get_int("simple_timecode_limit")
 
-    try:
-        await bot.send_message(
-            telegram_id,
-            f"⏰ <b>Подписка Premium истекает {expires_str}.</b>\n\n"
-            f"После истечения аккаунт будет переведён на <b>Simple</b>:\n"
-            f"• Синхронизация с MyShows — недоступна\n"
-            f"• Лишние устройства будут удалены (оставлено {s_dev} старейших)\n"
-            f"• Лишние профили на устройство будут удалены (оставлено {s_prof})\n"
-            f"• Лишние таймкоды на профиль будут удалены (лимит {s_tc})\n\n"
-            f"Обратитесь к администратору для продления.",
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.warning(f"Failed to send premium warning to {telegram_id}: {e}")
+    await bot.send_message(
+        telegram_id,
+        f"⏰ <b>Подписка Premium истекает {expires_str}.</b>\n\n"
+        f"Аккаунт: <b>{user.username}</b>\n"
+        f"После истечения будет переведён на <b>Simple</b>:\n"
+        f"• Синхронизация с MyShows — недоступна\n"
+        f"• Лишние устройства будут удалены (оставлено {s_dev} старейших)\n"
+        f"• Лишние профили на устройство будут удалены (оставлено {s_prof})\n"
+        f"• Лишние таймкоды на профиль будут удалены (лимит {s_tc})\n\n"
+        f"Обратитесь к администратору для продления.",
+        parse_mode="HTML",
+    )
 
+
+# ─── Cleanup helpers ──────────────────────────────────────────────────────────
 
 async def _cleanup_devices(db, user_id: int, device_limit: int, username: str) -> int:
-    """Удаляет самые новые устройства сверх лимита. Таймкоды удаляются каскадно.
-    Возвращает количество удалённых устройств."""
     from app.db.models import Device
     from sqlalchemy import select, delete
 
@@ -303,8 +328,6 @@ async def _cleanup_devices(db, user_id: int, device_limit: int, username: str) -
 
 
 async def _cleanup_profiles(db, user_id: int, profile_limit: int, username: str) -> int:
-    """Для каждого устройства удаляет самые новые профили сверх лимита + их таймкоды.
-    Возвращает суммарное количество удалённых профилей."""
     from app.db.models import Device, LampaProfile, Timecode
     from sqlalchemy import select, delete
 
@@ -342,7 +365,6 @@ async def _cleanup_profiles(db, user_id: int, profile_limit: int, username: str)
 
 
 async def _cleanup_timecodes(db, user_id: int, limit: int, username: str) -> None:
-    """Удаляет старейшие таймкоды по каждому профилю отдельно до лимита per-profile."""
     from app.db.models import Device, Timecode
     from sqlalchemy import select, func, delete
 
@@ -391,9 +413,9 @@ async def _cleanup_timecodes(db, user_id: int, limit: int, username: str) -> Non
         logger.info(f"User {username}: deleted {total_deleted} old timecodes (limit={limit}/profile)")
 
 
-# ─── Task lifecycle ───────────────────────────────────────────────────────────
+# ─── Task loops ───────────────────────────────────────────────────────────────
 
-async def _task_loop() -> None:
+async def _check_loop() -> None:
     while True:
         wait = _seconds_until_next_5am()
         logger.info(f"Next premium check in {wait / 3600:.1f}h (at 05:00 server time)")
@@ -404,14 +426,25 @@ async def _task_loop() -> None:
             logger.error(f"Premium expiry check failed: {e}", exc_info=True)
 
 
+async def _delivery_loop() -> None:
+    while True:
+        await asyncio.sleep(600)  # every 10 minutes
+        try:
+            await run_notification_delivery()
+        except Exception as e:
+            logger.error(f"Notification delivery failed: {e}", exc_info=True)
+
+
 def start_tasks() -> None:
-    global _task
-    _task = asyncio.create_task(_task_loop())
+    global _check_task, _delivery_task
+    _check_task    = asyncio.create_task(_check_loop())
+    _delivery_task = asyncio.create_task(_delivery_loop())
     logger.info("Background tasks started")
 
 
 def stop_tasks() -> None:
-    global _task
-    if _task:
-        _task.cancel()
-        _task = None
+    global _check_task, _delivery_task
+    for t in (_check_task, _delivery_task):
+        if t:
+            t.cancel()
+    _check_task = _delivery_task = None

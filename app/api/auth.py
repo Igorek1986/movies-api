@@ -42,9 +42,11 @@ async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
         async with async_session_maker() as db:
             result = await db.execute(select(TelegramUser).where(TelegramUser.user_id == user_id))
             tg = result.scalar_one_or_none()
-        if tg:
+            user_result = await db.execute(select(User).where(User.id == user_id))
+            user = user_result.scalar_one_or_none()
+        if tg and user and user.notifications_enabled:
             change_password_url = f"{base_url}/profiles"
-            await send_new_session_notification(tg.telegram_id, ip, parse_user_agent(ua), change_password_url)
+            await send_new_session_notification(tg.telegram_id, ip, parse_user_agent(ua), change_password_url, user.username)
     except Exception as e:
         logger.warning(f"Session notification failed for user {user_id}: {e}")
 
@@ -92,6 +94,10 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": user.totp_enabled,
         "backup_codes_count": backup_codes_count(user.backup_codes),
+        "notifications_enabled": user.notifications_enabled,
+        "notify_start": user.notify_start if user.notify_start is not None else 9,
+        "notify_end":   user.notify_end   if user.notify_end   is not None else 22,
+        "user_timezone": user.timezone or "",
         **_import_ctx(user),
         **extra,
     }
@@ -307,6 +313,53 @@ async def delete_account(
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key=COOKIE_NAME)
     return response
+
+
+# ─── Notification settings ────────────────────────────────────────────────────
+
+VALID_TIMEZONES = {
+    "Europe/Moscow", "Europe/London", "Europe/Berlin", "Europe/Paris",
+    "Europe/Kiev", "Europe/Minsk", "Europe/Istanbul", "Asia/Yekaterinburg",
+    "Asia/Novosibirsk", "Asia/Krasnoyarsk", "Asia/Irkutsk", "Asia/Yakutsk",
+    "Asia/Vladivostok", "Asia/Magadan", "Asia/Kamchatka", "Asia/Almaty",
+    "Asia/Tashkent", "Asia/Dubai", "Asia/Baku", "Asia/Tbilisi",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+}
+
+
+@router.post("/profile/notifications")
+async def save_notifications(
+    request: Request,
+    notifications_enabled: bool = Form(False),
+    notify_start: int = Form(9),
+    notify_end: int = Form(22),
+    user_timezone: str = Form(""),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    notify_start = max(0, min(23, notify_start))
+    notify_end   = max(0, min(23, notify_end))
+    if notify_start >= notify_end:
+        return templates.TemplateResponse(
+            "profiles.html",
+            await _profiles_ctx(request, current_user, db, error="Начало окна уведомлений должно быть раньше конца"),
+        )
+
+    tz = user_timezone.strip() if user_timezone.strip() in VALID_TIMEZONES else None
+
+    current_user.notifications_enabled = notifications_enabled
+    current_user.notify_start = notify_start
+    current_user.notify_end   = notify_end
+    current_user.timezone     = tz
+    await db.commit()
+
+    return templates.TemplateResponse(
+        "profiles.html",
+        await _profiles_ctx(request, current_user, db, success="Настройки уведомлений сохранены"),
+    )
 
 
 # ─── Forgot password ──────────────────────────────────────────────────────────

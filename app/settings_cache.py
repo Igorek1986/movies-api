@@ -31,9 +31,7 @@ DEFAULTS: dict[str, str] = {
     "super_myshows_daily":        "0",
     # ── Grace period after premium expiry ──────────────────────────────────────
     "timecode_grace_days":        "3",
-    # ── Telegram quiet hours (no notifications between start and end) ──────────
-    "quiet_hours_start":          "22",
-    "quiet_hours_end":            "9",
+    # ── Notifications ──────────────────────────────────────────────────────────
     "default_timezone":           "Europe/Moscow",
     # ── General ────────────────────────────────────────────────────────────────
     "watched_threshold":          "90",
@@ -73,9 +71,7 @@ LABELS: dict[str, str] = {
     "super_import_daily":         "Super — импортов в сутки (0=∞)",
     "super_myshows_daily":        "Super — MyShows синков в сутки (0=∞)",
     "timecode_grace_days":        "Грейс-период таймкодов (дней)",
-    "quiet_hours_start":          "Тихий час — начало",
-    "quiet_hours_end":            "Тихий час — конец",
-    "default_timezone":           "Таймзона по умолчанию",
+    "default_timezone":           "Таймзона по умолчанию (fallback)",
     "watched_threshold":          "Порог «просмотрено» (%)",
     "session_ttl_days":           "Срок сессии (дней)",
     "session_renew_days":         "Продление сессии (дней до истечения)",
@@ -115,8 +111,8 @@ GROUPS: list[tuple[str, list[str]]] = [
         "device_code_ttl_minutes", "telegram_link_ttl_minutes",
         "reset_code_ttl_minutes", "pending_2fa_ttl_sec",
     ]),
-    ("Уведомления (тихий час)", [
-        "quiet_hours_start", "quiet_hours_end", "default_timezone",
+    ("Уведомления", [
+        "default_timezone",
     ]),
     ("Rate Limits", [
         "rate_login_max", "rate_login_window_sec",
