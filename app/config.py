@@ -1,5 +1,7 @@
+import json
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, field_validator
 from functools import lru_cache
 
 
@@ -22,6 +24,15 @@ class Settings(BaseSettings):
     TMDB_TOKEN: str
     MYSHOWS_API: str
     MYSHOWS_AUTH_URL: str
+
+    # Директория с релизами (абсолютный путь или относительно $HOME)
+    RELEASES_DIR: str = "NUMParser/public"
+    # JSON-массив паттернов для блокировки по Origin
+    BANNED_PATTERNS: str = "[]"
+    # Пароль для очистки кеша TMDB
+    CACHE_CLEAR_PASSWORD: str = ""
+    # Уровень логирования
+    DEBUG: bool = False
 
     # Базовый URL сайта (для формирования webhook и ссылок)
     BASE_URL: str = "http://localhost:8000"
@@ -46,6 +57,18 @@ class Settings(BaseSettings):
     IMAGE_PROXY_URL: str = ""
     IMAGE_PROXY_USER: str = ""
     IMAGE_PROXY_PASS: str = ""
+
+    @property
+    def releases_dir_path(self) -> Path:
+        p = Path(self.RELEASES_DIR)
+        return p if p.is_absolute() else Path.home() / p
+
+    @property
+    def banned_patterns_list(self) -> list[str]:
+        try:
+            return json.loads(self.BANNED_PATTERNS)
+        except Exception:
+            return []
 
     @property
     def admin_username_list(self) -> list[str]:

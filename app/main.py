@@ -2,7 +2,6 @@ import asyncio
 import gzip
 import json
 import logging
-import os
 import re
 import httpx
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +13,6 @@ from typing import Any, Dict, Tuple
 from logging import DEBUG, INFO
 
 import requests
-from dotenv import load_dotenv
 from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -47,18 +45,9 @@ settings = get_settings()
 from app import myshows
 from app import stats
 
-# Загрузка переменных окружения
-load_dotenv()
-TMDB_TOKEN = os.getenv("TMDB_TOKEN")
-releases_dir_env = os.getenv("RELEASES_DIR", "NUMParser/public")
-BANNED_PATTERNS = json.loads(os.getenv("BANNED_PATTERNS", "[]"))
-
-
-# Проверяем, абсолютный ли путь
-if os.path.isabs(releases_dir_env):
-    RELEASES_DIR = Path(releases_dir_env)
-else:
-    RELEASES_DIR = Path.home() / releases_dir_env
+TMDB_TOKEN = settings.TMDB_TOKEN
+RELEASES_DIR = settings.releases_dir_path
+BANNED_PATTERNS = settings.banned_patterns_list
 
 # Получаем путь к директории, где находится текущий скрипт
 BASE_DIR = Path(__file__).parent.parent
@@ -71,11 +60,10 @@ STATIC_DIR = BASE_DIR / "static"
 PLUGINS_DIR = BASE_DIR / "lampa-plugins"
 PLUGINS_DIR.mkdir(exist_ok=True)
 # Настройка логирования
-DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
 logging.basicConfig(
-    level=DEBUG if DEBUG_MODE else INFO,  # Уровень логирования
+    level=DEBUG if settings.DEBUG else INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()],  # Вывод в консоль
+    handlers=[logging.StreamHandler()],
 )
 
 logger = logging.getLogger(__name__)
@@ -529,7 +517,7 @@ def enhance_with_tmdb(item: dict, tmdb_data: dict) -> dict:
 
 def get_clear_cache_password():
     """Получает пароль из переменных окружения"""
-    password = os.getenv("CACHE_CLEAR_PASSWORD")
+    password = get_settings().CACHE_CLEAR_PASSWORD
     if not password:
         logger.error("Пароль для очистки кэша не задан в переменных окружения")
         raise RuntimeError("Не настроен пароль для очистки кэша")
@@ -1068,7 +1056,7 @@ async def get_cache_path():
 @app.post("/cache/clear")
 async def clear_cache(x_password: str = Header(..., alias="X-Password")):
     """Очистка in-memory кэша с проверкой пароля"""
-    correct_password = os.getenv("CACHE_CLEAR_PASSWORD")
+    correct_password = get_settings().CACHE_CLEAR_PASSWORD
 
     if not correct_password or x_password != correct_password:
         return PlainTextResponse(
