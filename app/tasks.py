@@ -110,8 +110,9 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
 
         await db.commit()
 
-        # ── 2. Advance warning: 3 days before expiry ──────────────────────────
-        warn_horizon = now + timedelta(days=3)
+        # ── 2. Advance warning N days before expiry ───────────────────────────
+        warn_days    = settings_cache.get_int("premium_warn_days") or 3
+        warn_horizon = now + timedelta(days=warn_days)
         result = await db.execute(
             select(User).where(
                 and_(
