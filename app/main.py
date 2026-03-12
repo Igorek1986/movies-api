@@ -636,7 +636,8 @@ def _tv_show_watched(
 
 
 def _item_watched(
-    item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str]
+    item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str],
+    threshold: int | None = None,
 ) -> bool:
     """True если элемент уже полностью просмотрен и должен быть скрыт."""
     card_id = _item_card_id(item)
@@ -651,7 +652,7 @@ def _item_watched(
                 f"[filter] {card_id} не найден в таймкодах (всего tv-ключей: {sum(1 for k in timecodes if k.endswith('_tv'))})"
             )
             return False
-        result = _tv_show_watched(item, timecodes[card_id])
+        result = _tv_show_watched(item, timecodes[card_id], threshold=threshold)
         logger.debug(
             f"[filter] {card_id} → _tv_show_watched={result}, "
             f"original_name={item.get('original_name') or item.get('original_title')!r}, "
@@ -717,6 +718,7 @@ async def get_category(
     language: str = "ru",
     token: str = Query(None),
     profile_id: str = Query(None),
+    min_progress: int = Query(None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     if not re.match(r"^[\w\-]+$", category):
@@ -734,7 +736,7 @@ async def get_category(
             device = await get_device_by_token(token=token, db=db)
             if device:
                 timecodes = await load_device_timecodes(db, device.id, profile_id or "")
-                watched_movies = get_watched_movie_ids(timecodes)
+                watched_movies = get_watched_movie_ids(timecodes, threshold=min_progress)
                 logger.debug(
                     f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
                     f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах"
@@ -817,11 +819,13 @@ async def get_category(
                                 s_air = s.get("air_date") or ""
                                 if s_air and s_air <= today_str:
                                     total_aired += ep_count
-                        watched = sum(1 for p in v["items"].values() if p >= _sc.get_int("watched_threshold"))
+                        _thr = min_progress if min_progress is not None else _sc.get_int("watched_threshold")
+                        watched = sum(1 for p in v["items"].values() if p >= _thr)
                         return watched < total_aired
                     except Exception:
                         pass
-                return v["max_pct"] < _sc.get_int("watched_threshold")
+                _thr = min_progress if min_progress is not None else _sc.get_int("watched_threshold")
+                return v["max_pct"] < _thr
 
             unfinished = [
                 (cid, v["max_pct"], v["last_watched"])
@@ -918,7 +922,7 @@ async def get_category(
                 items = [
                     i
                     for i in map(_enrich_lampac_item, items)
-                    if not _item_watched(i, timecodes, watched_movies)
+                    if not _item_watched(i, timecodes, watched_movies, threshold=min_progress)
                 ]
 
             total = len(items)

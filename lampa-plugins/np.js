@@ -173,6 +173,8 @@
                 url += '&token=' + encodeURIComponent(token);
                 var profileId = getProfileId();
                 if (profileId) url += '&profile_id=' + encodeURIComponent(profileId);
+                var minProgress = getProfileSetting('numparser_min_progress', DEFAULT_MIN_PROGRESS);
+                url += '&min_progress=' + encodeURIComponent(minProgress);
             }
 
             self.get(url, params, function (json) {
@@ -428,6 +430,8 @@
                     url += '&token=' + encodeURIComponent(token);
                     var profileId = getProfileId();
                     if (profileId) url += '&profile_id=' + encodeURIComponent(profileId);
+                    var minProgress = getProfileSetting('numparser_min_progress', DEFAULT_MIN_PROGRESS);
+                    url += '&min_progress=' + encodeURIComponent(minProgress);
                 }
 
                 self.get(url, params, function (json) {
