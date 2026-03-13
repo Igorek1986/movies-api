@@ -130,6 +130,10 @@ async def profiles_page(
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": current_user.totp_enabled,
         "backup_codes_count": backup_codes_count(current_user.backup_codes),
+        "notifications_enabled": current_user.notifications_enabled is not False,
+        "notify_start": current_user.notify_start if current_user.notify_start is not None else 9,
+        "notify_end":   current_user.notify_end   if current_user.notify_end   is not None else 22,
+        "user_timezone": current_user.timezone or "",
         "success": request.query_params.get("success"),
         **_import_ctx(current_user),
     })
