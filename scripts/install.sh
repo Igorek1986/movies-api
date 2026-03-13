@@ -246,10 +246,11 @@ function setup_env_file {
 
     header "Configuring environment variables"
     if $is_fresh; then
-        warn "Fresh install — please fill in all required values."
+        warn "Fresh install — заполните все переменные."
     else
-        warn "Checking for missing or placeholder values..."
+        warn "Проверка пропущенных и незаполненных переменных..."
     fi
+    echo -e "  \033[2mПустой ввод (Enter) = используется значение по умолчанию\033[0m"
     echo ""
 
     local last_comment=""
@@ -305,13 +306,19 @@ function setup_env_file {
 
         if $need_prompt; then
             [ -n "$last_comment" ] && echo -e "  ${BLUE}${last_comment}${NC}"
+            local hint=""
+            [ "$key" = "TMDB_TOKEN" ] && hint="  \033[2m(Bearer добавится автоматически)\033[0m"
             if [ -n "$final_val" ]; then
-                printf "  \033[1;33m%s\033[0m [%s]: " "$key" "$final_val"
+                printf "  \033[1;33m%s\033[0m (по умолчанию: \033[2m%s\033[0m)%b: " "$key" "$final_val" "$hint"
             else
-                printf "  \033[1;33m%s\033[0m: " "$key"
+                printf "  \033[1;33m%s\033[0m%b: " "$key" "$hint"
             fi
             read -r user_val </dev/tty
             [ -n "$user_val" ] && final_val="$user_val"
+            # Auto-add Bearer prefix for TMDB_TOKEN
+            if [ "$key" = "TMDB_TOKEN" ] && [ -n "$final_val" ]; then
+                [[ "$final_val" != Bearer* ]] && final_val="Bearer ${final_val}"
+            fi
             (( prompted++ )) || true
         fi
 
