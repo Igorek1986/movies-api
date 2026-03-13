@@ -816,6 +816,9 @@ function do_install {
             info "Access URL: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):${svc_port}"
             info "Manage:     sudo systemctl {status|restart|stop} ${SERVICE_NAME}"
             info "Logs:       sudo journalctl -u ${SERVICE_NAME} -f"
+            info "Nginx HTTPS: ${PROJECT_DIR}/nginx/numparser.conf"
+            echo ""
+            warn "Парсер данных NUMParser: https://github.com/Igorek1986/NUMParser"
             ;;
         2)
             install_docker_mode
@@ -829,6 +832,9 @@ function do_install {
             header "Installation complete"
             info "Access URL: http://${host_ip}:${port}"
             info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
+            info "Nginx HTTPS: ${PROJECT_DIR}/nginx/numparser.conf"
+            echo ""
+            warn "Парсер данных NUMParser: https://github.com/Igorek1986/NUMParser"
             ;;
         *)
             error_exit "Invalid choice."
