@@ -766,7 +766,10 @@ function install_docker_mode {
         run_cmd "Starting containers" \
             docker compose -f docker-compose.prod.yml up -d
     fi
-    wait_for_app "$DEFAULT_PORT" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+    local docker_port
+    docker_port=$(_get_env_val "PORT" || true)
+    docker_port="${docker_port:-$DEFAULT_PORT}"
+    wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
     echo ""
     docker compose -f docker-compose.prod.yml ps
     info "Docker stack started."
@@ -804,7 +807,8 @@ function do_install {
             setup_env_file
             setup_postgres
 
-            read -rp "Port to listen on [${DEFAULT_PORT}]: " svc_port
+            local svc_port
+            svc_port=$(_get_env_val "PORT" || true)
             svc_port="${svc_port:-$DEFAULT_PORT}"
 
             install_python_deps
@@ -991,10 +995,13 @@ function do_switch {
 
             run_cmd "Starting containers" \
                 docker compose -f docker-compose.prod.yml up -d
-            wait_for_app "$DEFAULT_PORT" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+            local sw_port
+            sw_port=$(_get_env_val "PORT" || true)
+            sw_port="${sw_port:-$DEFAULT_PORT}"
+            wait_for_app "$sw_port" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
             local host_ip; host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
             header "Switch complete"
-            info "Access URL: http://${host_ip}:${DEFAULT_PORT}"
+            info "Access URL: http://${host_ip}:${sw_port}"
             info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
             ;;
 
