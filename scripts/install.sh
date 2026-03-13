@@ -246,10 +246,11 @@ function setup_env_file {
 
     header "Configuring environment variables"
     if $is_fresh; then
-        warn "Fresh install — please fill in all required values."
+        warn "Fresh install — заполните все переменные."
     else
-        warn "Checking for missing or placeholder values..."
+        warn "Проверка пропущенных и незаполненных переменных..."
     fi
+    echo -e "  \033[2mПустой ввод (Enter) = используется значение по умолчанию\033[0m"
     echo ""
 
     local last_comment=""
@@ -305,13 +306,19 @@ function setup_env_file {
 
         if $need_prompt; then
             [ -n "$last_comment" ] && echo -e "  ${BLUE}${last_comment}${NC}"
+            local hint=""
+            [ "$key" = "TMDB_TOKEN" ] && hint="  \033[2m(Bearer добавится автоматически)\033[0m"
             if [ -n "$final_val" ]; then
-                printf "  \033[1;33m%s\033[0m [%s]: " "$key" "$final_val"
+                printf "  \033[1;33m%s\033[0m (по умолчанию: \033[2m%s\033[0m)%b: " "$key" "$final_val" "$hint"
             else
-                printf "  \033[1;33m%s\033[0m: " "$key"
+                printf "  \033[1;33m%s\033[0m%b: " "$key" "$hint"
             fi
             read -r user_val </dev/tty
             [ -n "$user_val" ] && final_val="$user_val"
+            # Auto-add Bearer prefix for TMDB_TOKEN
+            if [ "$key" = "TMDB_TOKEN" ] && [ -n "$final_val" ]; then
+                [[ "$final_val" != Bearer* ]] && final_val="Bearer ${final_val}"
+            fi
             (( prompted++ )) || true
         fi
 
@@ -759,7 +766,10 @@ function install_docker_mode {
         run_cmd "Starting containers" \
             docker compose -f docker-compose.prod.yml up -d
     fi
-    wait_for_app "$DEFAULT_PORT" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+    local docker_port
+    docker_port=$(_get_env_val "PORT" || true)
+    docker_port="${docker_port:-$DEFAULT_PORT}"
+    wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
     echo ""
     docker compose -f docker-compose.prod.yml ps
     info "Docker stack started."
@@ -797,7 +807,8 @@ function do_install {
             setup_env_file
             setup_postgres
 
-            read -rp "Port to listen on [${DEFAULT_PORT}]: " svc_port
+            local svc_port
+            svc_port=$(_get_env_val "PORT" || true)
             svc_port="${svc_port:-$DEFAULT_PORT}"
 
             install_python_deps
@@ -809,6 +820,9 @@ function do_install {
             info "Access URL: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):${svc_port}"
             info "Manage:     sudo systemctl {status|restart|stop} ${SERVICE_NAME}"
             info "Logs:       sudo journalctl -u ${SERVICE_NAME} -f"
+            info "Nginx HTTPS: ${PROJECT_DIR}/nginx/numparser.conf"
+            echo ""
+            warn "Парсер данных NUMParser: https://github.com/Igorek1986/NUMParser"
             ;;
         2)
             install_docker_mode
@@ -822,6 +836,9 @@ function do_install {
             header "Installation complete"
             info "Access URL: http://${host_ip}:${port}"
             info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
+            info "Nginx HTTPS: ${PROJECT_DIR}/nginx/numparser.conf"
+            echo ""
+            warn "Парсер данных NUMParser: https://github.com/Igorek1986/NUMParser"
             ;;
         *)
             error_exit "Invalid choice."
@@ -978,10 +995,13 @@ function do_switch {
 
             run_cmd "Starting containers" \
                 docker compose -f docker-compose.prod.yml up -d
-            wait_for_app "$DEFAULT_PORT" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+            local sw_port
+            sw_port=$(_get_env_val "PORT" || true)
+            sw_port="${sw_port:-$DEFAULT_PORT}"
+            wait_for_app "$sw_port" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
             local host_ip; host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
             header "Switch complete"
-            info "Access URL: http://${host_ip}:${DEFAULT_PORT}"
+            info "Access URL: http://${host_ip}:${sw_port}"
             info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
             ;;
 

@@ -1,146 +1,111 @@
-####  Установка (Дополнительно устанавливается pyenv и poetry)
+# movies-api
+
+Бэкенд для медиаплеера [Lampa](https://lampa.mx/) / NUMParser. Управление аккаунтами, таймкодами, историей просмотров, интеграция с TMDB и MyShows. Уведомления через Telegram.
+
+## Установка
+
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/install-movies-api.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/install.sh)
 ```
 
-1. Поместите JSON-файлы в ~/releases/
-```bash
-cd ~/releases/
-```
-#### Удаление
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/movies-api/main/scripts/uninstall-movies-api.sh)
-```
+Скрипт предложит выбрать режим установки (systemd-сервис или Docker), задаст вопросы по настройке `.env` и настроит базу данных.
 
-#### Переменные создаются автоматически. 
-Токен предлагает ввести при выполнении скрипта.  
-Пароль создается случайный.  
-По умолчанию путь к папке ~/release
-```bash
-TMDB_TOKEN='Bearer TOKEN'
-RELEASES_DIR=release/
-DEBUG=False
-CACHE_CLEAR_PASSWORD=PASSWORD
+После установки откроется ссылка на сайт. Пример конфига nginx для HTTPS — в папке `nginx/`.
 
-```
+## Удаление / переключение режима
 
-#### Изменение папки в env. Перейти в нужную папку и выполнить команду. Поле перезагрузить приложение. 
-```bash
-RELEASES_DIR=$(pwd | sed "s|$HOME/||") && \
-if [ -f ~/movies-api/.env ]; then \
-    if grep -q "^RELEASES_DIR=" ~/movies-api/.env; then \
-        sed -i "s|^RELEASES_DIR=.*|RELEASES_DIR=$RELEASES_DIR|" ~/movies-api/.env; \
-    else \
-        echo "RELEASES_DIR=$RELEASES_DIR" >> ~/movies-api/.env; \
-    fi; \
-else \
-    echo "RELEASES_DIR=$RELEASES_DIR" > ~/movies-api/.env; \
-fi
-```
+Повторно запустите тот же скрипт — он предложит удалить или переключиться между systemd и Docker.
 
-##### Опцианально
+## Требования
 
-Установка NUMParser (movies-api устанавливается по умолчанию)
+- Debian / Ubuntu
+- PostgreSQL 14+ (устанавливается автоматически)
+- Python 3.11+ (устанавливается через pyenv, для режима systemd)
+- Docker (устанавливается автоматически, для режима Docker)
+
+## Настройка `.env`
+
+Скрипт установки заполняет `.env` интерактивно. Обязательные поля:
+
+| Переменная | Описание |
+|---|---|
+| `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Реквизиты PostgreSQL |
+| `TMDB_TOKEN` | Bearer-токен [TMDB API](https://www.themoviedb.org/settings/api) |
+| `MYSHOWS_AUTH_URL`, `MYSHOWS_API` | Эндпоинты MyShows |
+| `RELEASES_DIR` | Путь к папке с gzip-файлами категорий (относительно `$HOME`), заполняется через NUMParser |
+| `ADMIN_PASSWORD` | Пароль к панели `/admin` |
+| `BASE_URL` | Публичный URL сервера, например `https://example.com` |
+
+Дополнительные поля (опционально):
+
+| Переменная | Описание |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Токен Telegram-бота |
+| `TELEGRAM_BOT_NAME` | Имя бота (для ссылок `t.me/...`) |
+| `TELEGRAM_ADMIN_IDS` | JSON-массив Telegram ID администраторов: `[123456789]` |
+| `DEBUG` | `True` — включает `/docs` (Swagger UI). По умолчанию `False` |
+
+## Наполнение каталога — NUMParser
+
+movies-api раздаёт фильмы и сериалы из gzip-файлов в `RELEASES_DIR`. Чтобы эти файлы автоматически обновлялись, установите **NUMParser**:
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Igorek1986/NUMParser/refs/heads/main/install-numparser.sh)
 ```
 
-Настройка Nginx
+NUMParser собирает каталог с торрент-трекеров и раскладывает файлы в нужную папку. movies-api читает их и отдаёт клиенту с обогащением через TMDB.
+
+> Установить NUMParser можно до или после movies-api — скрипты не зависят друг от друга.
+
+## Подключение к Lampa
+
+1. Зарегистрируйтесь на сайте, создайте устройство.
+2. Добавьте плагин в Lampa:
+   `https://ваш-сервер/np.js`
+3. В настройках плагина укажите API-ключ устройства.
+
+## Telegram-бот
+
+- `/start` — главное меню
+- `/status` — информация об аккаунте и подписке
+
+Привязка аккаунта: в настройках на сайте нажмите «Привязать Telegram» — откроется deep link, бот получит код автоматически.
+
+После привязки бот отправляет уведомления о входе, истечении подписки и неактивности.
+
+## Панели
+
+| URL | Доступ |
+|---|---|
+| `/` | История просмотров (авторизованные пользователи) |
+| `/profiles` | Настройки аккаунта, устройства, таймкоды |
+| `/admin` | Управление пользователями (`ADMIN_PASSWORD`) |
+| `/stats` | Статистика использования (`ADMIN_PASSWORD`) |
+
+## Обновление с предыдущей версии
+
+### Миграция статистики из SQLite в PostgreSQL
+
+Если вы использовали старую версию, где статистика хранилась в `stats.sqlite`, перенесите данные в PostgreSQL:
+
 ```bash
-sudo cp nginx/numparser.conf /etc/nginx/sites-available/
-sudo ln -sf /etc/nginx/sites-available/numparser.conf /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl restart nginx
-# Добавить сертификат через certbot
+cd ~/movies-api
+poetry run python migrate_stats.py
 ```
 
-### Использование API
-#### Основные эндпоинты
-##### Получение данных по категории
+Скрипт сам найдёт `stats.sqlite` рядом с собой, создаст нужные таблицы в PostgreSQL и перенесёт все данные. После успешной миграции файл `stats.sqlite` можно удалить.
 
+## Разработка
 
-```
-curl http://localhost:8888/movies_id_2025?page=1&per_page=20&language=ru
-```
-Параметры:
+```bash
+# Установить зависимости
+poetry install
 
-* category - название категории (например: movies_id_2025)
-* page - номер страницы (по умолчанию: 1)
-* per_page - элементов на странице (по умолчанию: 20)
-* language - язык (по умолчанию: ru)
+# Запустить PostgreSQL
+docker-compose up -d
 
-Пример ответа:
-
-```json
-{
-  "page": 1,
-  "results": ["..."],
-  "total_pages": 10,
-  "total_results": 200
-}
-```
-##### Проверка здоровья API
-
-
-```
-curl http://localhost:8888/
-```  
-Ответ:
-
-```json
-{"status": "ok", "message": "NUMParser API работает"}
-```  
-
-#### Управление кэшем
-##### Очистка кэша
-
-
-```
-curl -X POST http://localhost:8888/cache/clear -H "X-Password: ваш_пароль"
+# Запустить сервер с авто-перезагрузкой
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8888 --reload
 ```
 
-Ответ при успехе:
-
-```
-Кэш успешно очищен
-
-```
-
-При ошибке:
-
-
-```
-Неверный пароль для очистки кэша
-```
-
-
-##### Информация о кэше
-
-text
-```
-curl -X GET http://localhost:8888/cache/info
-```
-Пример ответа:
-
-```json
-{
-  "cache_size": 754,
-  "cache_size_mb": 2.34,
-  "sample_keys": [["movie", 123], ["tv", 456]]
-}
-```
-
-##### Путь к файлу кэша
-
-
-```
-GET curl -X GET http://localhost:8888/cache/path
-```
-Ответ:
-
-```json
-{
-  "cache_path": "/path/to/tmdb_cache.json",
-  "exists": true,
-  "size": 2456789
-}
-```
+Для работы Swagger UI (`/docs`) установите `DEBUG=True` в `.env`.
