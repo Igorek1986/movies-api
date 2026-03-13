@@ -97,7 +97,7 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "tg_username": tg.username if (tg and tg.username) else None,
         "totp_enabled": user.totp_enabled,
         "backup_codes_count": backup_codes_count(user.backup_codes),
-        "notifications_enabled": user.notifications_enabled,
+        "notifications_enabled": user.notifications_enabled is not False,
         "notify_start": user.notify_start if user.notify_start is not None else 9,
         "notify_end":   user.notify_end   if user.notify_end   is not None else 22,
         "user_timezone": user.timezone or "",
