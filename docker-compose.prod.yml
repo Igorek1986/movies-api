@@ -26,7 +26,7 @@ services:
     ports:
       - "${PORT:-8888}:8888"
     volumes:
-      - ${RELEASES_HOST_DIR:-~/releases}:/releases:ro
+      - ${RELEASES_DIR}:/releases:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -13,6 +13,10 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REPO="Igorek1986/movies-api"
 BRANCH="main"
+# Set VERBOSE=1 to see full output of long-running commands
+VERBOSE="${VERBOSE:-0}"
+# Set DEBUG_INSTALL=1 to skip git branch/update checks
+DEBUG_INSTALL="${DEBUG_INSTALL:-0}"
 SERVICE_NAME="movies-api"
 DEFAULT_PORT=8888
 PYTHON_MIN_VERSION="3.10"
@@ -49,7 +53,7 @@ else
     IS_ROOT=false
 fi
 
-PROJECT_DIR="$USER_HOME/movies-api"
+PROJECT_DIR="${PROJECT_DIR:-$USER_HOME/movies-api}"
 
 # ---------------------------------------------------------------------------
 # Helper: run sudo only when not already root
@@ -71,6 +75,41 @@ function error_exit { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 
 function header {
     echo -e "\n${BLUE}=== $* ===${NC}"
+}
+
+# Run a command with spinner (quiet mode) or full output (verbose mode).
+# Usage: run_cmd "Description" cmd arg1 arg2 ...
+function run_cmd {
+    local desc="$1"; shift
+    if [ "$VERBOSE" = "1" ]; then
+        echo -e "${YELLOW}▶ ${desc}${NC}"
+        "$@" || return $?
+    else
+        local spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        local i=0
+        local logfile
+        logfile=$(mktemp /tmp/movies-api-install.XXXXXX)
+        "$@" >"$logfile" 2>&1 &
+        local pid=$!
+        while kill -0 "$pid" 2>/dev/null; do
+            printf "\r  ${spin[$i]} ${desc}..."
+            i=$(( (i+1) % 10 ))
+            sleep 0.3
+        done
+        wait "$pid"
+        local rc=$?
+        printf "\r"
+        if [ $rc -ne 0 ]; then
+            echo -e "  ${RED}✗ ${desc} — FAILED${NC}"
+            echo -e "${RED}--- Output ---${NC}"
+            cat "$logfile"
+            rm -f "$logfile"
+            return $rc
+        else
+            echo -e "  ${GREEN}✓ ${desc}${NC}"
+        fi
+        rm -f "$logfile"
+    fi
 }
 
 # Prompt y/N — default N unless second arg is "y"
@@ -99,18 +138,16 @@ function get_shell_config {
 # Detect current install type: "service", "docker", or "none"
 # ---------------------------------------------------------------------------
 function detect_install_type {
-    # Check systemd service — check the unit file directly (no sudo needed)
+    # Check systemd service
     if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ] || \
        systemctl list-unit-files 2>/dev/null | grep -q "${SERVICE_NAME}.service"; then
         echo "service"
         return
     fi
-    # Check docker compose stack
-    if [ -f "$PROJECT_DIR/docker-compose.prod.yml" ]; then
-        if docker compose -f "$PROJECT_DIR/docker-compose.prod.yml" ps 2>/dev/null | grep -q "movies-api-app"; then
-            echo "docker"
-            return
-        fi
+    # Check Docker — any containers (running or stopped) named movies-api
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "movies-api"; then
+        echo "docker"
+        return
     fi
     echo "none"
 }
@@ -119,6 +156,10 @@ function detect_install_type {
 # GitHub version check
 # ---------------------------------------------------------------------------
 function check_updates {
+    if [ "$DEBUG_INSTALL" = "1" ]; then
+        warn "[DEBUG] Skipping git update check."
+        return 1
+    fi
     if [ ! -d "$PROJECT_DIR/.git" ]; then
         warn "Project directory not found — cannot check for updates."
         return 1
@@ -152,80 +193,157 @@ function check_updates {
 # ENV management
 # ---------------------------------------------------------------------------
 
-# Sync keys from .env.template into .env — prompts for any missing key.
-# Prints count of added vars.
-function sync_env_vars {
-    local template="$PROJECT_DIR/.env.template"
+function _is_placeholder {
+    local val="$1"
+    case "$val" in
+        ""|"TOKEN"|"Bearer TOKEN"|"PASSWORD"|"password"|"your_password"|"CHANGE_ME") return 0 ;;
+        "The path to the directory relative to the home directory") return 0 ;;
+        *"example"*) return 0 ;;
+    esac
+    return 1
+}
+
+function _get_env_val {
+    local key="$1"
+    local envfile="${2:-$PROJECT_DIR/.env}"
+    grep "^${key}=" "$envfile" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | sed "s/^['\"]//;s/['\"]$//" || true
+}
+
+function setup_env_file {
     local envfile="$PROJECT_DIR/.env"
-    local added=0
+    local template="$PROJECT_DIR/.env.template"
 
     if [ ! -f "$template" ]; then
-        warn ".env.template not found — skipping sync."
-        return 0
+        warn ".env.template not found — skipping env setup."
+        return
     fi
 
-    header "Checking for new environment variables"
+    local is_fresh=false
+    if [ ! -f "$envfile" ]; then
+        is_fresh=true
+        info "Creating new .env file..."
+    else
+        info "Updating existing .env file..."
+    fi
 
-    while IFS= read -r line; do
-        # Skip comments and blank lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${line// }" ]] && continue
-        # Only process KEY=value lines
-        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)= ]] || continue
+    # Load ALL existing values from .env into associative array
+    declare -A existing_vals
+    if [ -f "$envfile" ]; then
+        while IFS= read -r eline; do
+            eline="${eline%$'\r'}"
+            [[ "$eline" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+            local ekey="${BASH_REMATCH[1]}"
+            local evalue="${BASH_REMATCH[2]}"
+            # Strip surrounding quotes
+            evalue="${evalue#\'}" ; evalue="${evalue%\'}"
+            evalue="${evalue#\"}" ; evalue="${evalue%\"}"
+            existing_vals["$ekey"]="$evalue"
+        done < "$envfile"
+    fi
 
-        local key="${BASH_REMATCH[1]}"
-        local template_val="${line#*=}"
-        # Strip surrounding quotes from template value for display
-        local display_val="${template_val//\'/}"
-        display_val="${display_val//\"/}"
+    local tmpfile="${envfile}.tmp"
+    > "$tmpfile"
 
-        # If key already exists in .env, skip
-        if grep -q "^${key}=" "$envfile" 2>/dev/null; then
+    header "Configuring environment variables"
+    if $is_fresh; then
+        warn "Fresh install — please fill in all required values."
+    else
+        warn "Checking for missing or placeholder values..."
+    fi
+    echo ""
+
+    local last_comment=""
+    local prompted=0
+
+    # Open template on fd 3 so that interactive `read -rp` inside the loop
+    # still reads from the terminal (fd 0), not from the template file.
+    while IFS= read -r line <&3; do
+        # Strip carriage return (CRLF support)
+        line="${line%$'\r'}"
+
+        # Pass comments and blank lines through as-is
+        if [[ "$line" =~ ^[[:space:]]*#(.*)$ ]]; then
+            echo "$line" >> "$tmpfile"
+            last_comment="${BASH_REMATCH[1]# }"
+            continue
+        fi
+        if [[ -z "${line// }" ]]; then
+            echo "$line" >> "$tmpfile"
+            last_comment=""
+            continue
+        fi
+        # Only handle KEY=value lines
+        if ! [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)= ]]; then
+            echo "$line" >> "$tmpfile"
             continue
         fi
 
-        warn "Missing variable: ${key}"
-        warn "  Template default: ${display_val}"
-        read -rp "  Enter value for ${key} [${display_val}]: " user_val
-        local final_val="${user_val:-$display_val}"
+        local key="${BASH_REMATCH[1]}"
+        local template_raw="${line#*=}"
+        # Strip quotes from template default for display
+        local template_val="${template_raw#\'}" ; template_val="${template_val%\'}"
+        template_val="${template_val#\"}" ; template_val="${template_val%\"}"
 
-        echo "${key}=${final_val}" >> "$envfile"
-        info "  Added: ${key}"
-        (( added++ )) || true
-    done < "$template"
+        local final_val=""
+        local need_prompt=false
 
-    if [ "$added" -eq 0 ]; then
-        info "All environment variables are up to date."
+        if [ "${existing_vals[$key]+isset}" = "isset" ]; then
+            local cur="${existing_vals[$key]}"
+            if $is_fresh || _is_placeholder "$cur"; then
+                need_prompt=true
+                # Show current value as suggestion if not a placeholder
+                _is_placeholder "$cur" && final_val="$template_val" || final_val="$cur"
+            else
+                # Existing valid value — keep it silently
+                final_val="$cur"
+            fi
+        else
+            # Missing key
+            need_prompt=true
+            final_val="$template_val"
+        fi
+
+        if $need_prompt; then
+            [ -n "$last_comment" ] && echo -e "  ${BLUE}${last_comment}${NC}"
+            if [ -n "$final_val" ]; then
+                printf "  \033[1;33m%s\033[0m [%s]: " "$key" "$final_val"
+            else
+                printf "  \033[1;33m%s\033[0m: " "$key"
+            fi
+            read -r user_val </dev/tty
+            [ -n "$user_val" ] && final_val="$user_val"
+            (( prompted++ )) || true
+        fi
+
+        echo "${key}=${final_val}" >> "$tmpfile"
+        last_comment=""
+    done 3< "$template"
+
+    mv "$tmpfile" "$envfile"
+
+    if [ "$prompted" -gt 0 ]; then
+        info "✓ .env saved ($prompted value(s) configured)."
     else
-        info "Added ${added} new variable(s) to .env."
+        info "✓ .env is up to date."
     fi
-
-    return "$added"
 }
 
-# Validate required env keys are not placeholders.
 function validate_env {
     local envfile="$PROJECT_DIR/.env"
     [ -f "$envfile" ] || { warn ".env not found."; return 1; }
 
     local ok=true
     local required_keys=(TMDB_TOKEN DB_USER DB_PASSWORD DB_NAME ADMIN_PASSWORD)
-    local bad_values=("" "Bearer TOKEN" "PASSWORD" "your_password")
 
     for key in "${required_keys[@]}"; do
         local val
-        val=$(grep "^${key}=" "$envfile" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'\"")
-        local is_bad=false
-        for bad in "${bad_values[@]}"; do
-            [ "$val" = "$bad" ] && is_bad=true && break
-        done
-        if $is_bad; then
-            warn "  WARNING: ${key} appears to be unset or using a placeholder value."
+        val=$(_get_env_val "$key" "$envfile")
+        if _is_placeholder "$val"; then
+            warn "  ⚠  ${key} still has placeholder/empty value"
             ok=false
         fi
     done
-
-    $ok && return 0 || return 1
+    $ok
 }
 
 # ---------------------------------------------------------------------------
@@ -233,18 +351,15 @@ function validate_env {
 # ---------------------------------------------------------------------------
 function install_system_deps {
     header "Installing system dependencies"
-    warn "Updating package lists (may take a moment)..."
     # Ignore errors from 3rd-party repos (e.g. syncthing, broken PPAs)
-    _sudo apt-get update -o Acquire::ForceIPv4=true 2>&1 \
-        | grep -v "^Hit\|^Get\|^Ign\|^Fetched\|^Reading" || true
-    warn "Installing packages..."
-    _sudo apt-get install -y --no-install-recommends \
-        git curl make build-essential \
-        libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-        libsqlite3-dev wget llvm libncurses5-dev libncursesw5-dev \
-        xz-utils tk-dev libffi-dev liblzma-dev python3-openssl \
+    _sudo apt-get update -o Acquire::ForceIPv4=true 2>/dev/null || true
+    run_cmd "Installing packages" \
+        _sudo apt-get install -y --no-install-recommends \
+            git curl make build-essential \
+            libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
+            libsqlite3-dev wget llvm libncurses5-dev libncursesw5-dev \
+            xz-utils tk-dev libffi-dev liblzma-dev python3-openssl \
         || error_exit "Failed to install system dependencies"
-    info "System dependencies installed."
 }
 
 # ---------------------------------------------------------------------------
@@ -391,8 +506,17 @@ function install_poetry {
 # Repository
 # ---------------------------------------------------------------------------
 function clone_or_update_repo {
-    if [ ! -d "$PROJECT_DIR" ]; then
-        info "Cloning repository..."
+    # In debug mode, always use the existing directory as-is
+    if [ "$DEBUG_INSTALL" = "1" ]; then
+        if [ -d "$PROJECT_DIR" ] && [ -n "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]; then
+            warn "[DEBUG] Skipping clone/pull — using existing ${PROJECT_DIR}"
+            return
+        fi
+    fi
+
+    # Clone only if directory doesn't exist or is empty
+    if [ ! -d "$PROJECT_DIR" ] || [ -z "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]; then
+        info "Cloning repository into ${PROJECT_DIR}..."
         mkdir -p "$PROJECT_DIR"
         git clone "https://github.com/${REPO}.git" "$PROJECT_DIR" \
             || error_exit "Failed to clone repository"
@@ -410,56 +534,98 @@ function clone_or_update_repo {
 }
 
 # ---------------------------------------------------------------------------
+# PostgreSQL setup
+# ---------------------------------------------------------------------------
+function setup_postgres {
+    header "PostgreSQL Setup"
+
+    local db_user db_pass db_name db_host db_port
+    db_user=$(_get_env_val "DB_USER")
+    db_pass=$(_get_env_val "DB_PASSWORD")
+    db_name=$(_get_env_val "DB_NAME")
+    db_host=$(_get_env_val "DB_HOST")
+    db_port=$(_get_env_val "DB_PORT")
+    db_host="${db_host:-localhost}"
+    db_port="${db_port:-5432}"
+
+    if [ -z "$db_user" ] || [ -z "$db_name" ]; then
+        warn "DB_USER or DB_NAME not set in .env — skipping PostgreSQL setup."
+        return
+    fi
+
+    # Install PostgreSQL if missing
+    if ! command -v psql &>/dev/null; then
+        warn "PostgreSQL client not found."
+        if confirm "Install PostgreSQL now? (Y/n) " "y"; then
+            run_cmd "Installing PostgreSQL" \
+                _sudo apt-get install -y postgresql postgresql-contrib \
+                || { warn "Failed to install PostgreSQL — skipping DB setup."; return; }
+        else
+            warn "Skipping PostgreSQL setup — make sure it's running before starting the app."
+            return
+        fi
+    fi
+
+    # Start if not running
+    if ! pg_isready -h "$db_host" -p "$db_port" -q 2>/dev/null; then
+        warn "PostgreSQL is not running. Starting..."
+        _sudo systemctl start postgresql 2>/dev/null \
+            || { warn "Failed to start PostgreSQL — skipping DB setup."; return; }
+        sleep 2
+        if ! pg_isready -h "$db_host" -p "$db_port" -q 2>/dev/null; then
+            warn "PostgreSQL still not ready — skipping DB setup."
+            return
+        fi
+    fi
+
+    # Enable on boot
+    _sudo systemctl enable postgresql 2>/dev/null || true
+
+    # Create role if not exists
+    local role_exists
+    role_exists=$(_sudo -u postgres psql -tAc \
+        "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" 2>/dev/null || echo "")
+    if [ "$role_exists" != "1" ]; then
+        info "Creating PostgreSQL role: ${db_user}"
+        _sudo -u postgres psql -c \
+            "CREATE USER \"${db_user}\" WITH PASSWORD '${db_pass}';" 2>/dev/null \
+            || warn "Could not create role ${db_user} — it may already exist."
+    else
+        info "Role '${db_user}' already exists — updating password."
+        _sudo -u postgres psql -c \
+            "ALTER USER \"${db_user}\" WITH PASSWORD '${db_pass}';" 2>/dev/null || true
+    fi
+
+    # Create database if not exists
+    local db_exists
+    db_exists=$(_sudo -u postgres psql -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='${db_name}'" 2>/dev/null || echo "")
+    if [ "$db_exists" != "1" ]; then
+        info "Creating database: ${db_name}"
+        _sudo -u postgres psql -c \
+            "CREATE DATABASE \"${db_name}\" OWNER \"${db_user}\";" 2>/dev/null \
+            || { warn "Failed to create database ${db_name}."; return; }
+        _sudo -u postgres psql -c \
+            "GRANT ALL PRIVILEGES ON DATABASE \"${db_name}\" TO \"${db_user}\";" 2>/dev/null || true
+        info "Database '${db_name}' created."
+    else
+        info "Database '${db_name}' already exists."
+    fi
+
+    info "PostgreSQL ready."
+}
+
+# ---------------------------------------------------------------------------
 # Python deps
 # ---------------------------------------------------------------------------
 function install_python_deps {
     header "Installing Python dependencies"
     export PATH="$USER_HOME/.local/bin:$PATH"
     cd "$PROJECT_DIR"
-    poetry install --no-root --no-interaction \
+
+    run_cmd "Installing Python packages (poetry)" \
+        poetry install --no-root --no-interaction \
         || error_exit "Failed to install Python dependencies"
-    info "Dependencies installed."
-}
-
-# ---------------------------------------------------------------------------
-# .env setup
-# ---------------------------------------------------------------------------
-function setup_env_file {
-    local envfile="$PROJECT_DIR/.env"
-    local template="$PROJECT_DIR/.env.template"
-
-    if [ ! -f "$envfile" ]; then
-        header "Creating .env file"
-        if [ -f "$template" ]; then
-            cp "$template" "$envfile"
-            info "Copied .env.template → .env"
-        else
-            warn ".env.template not found — creating empty .env"
-            touch "$envfile"
-        fi
-    else
-        info "Using existing .env file."
-    fi
-
-    # Auto-generate CACHE_CLEAR_PASSWORD if it's missing/placeholder
-    local cache_pass
-    cache_pass=$(grep "^CACHE_CLEAR_PASSWORD=" "$envfile" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'\"")
-    if [ -z "$cache_pass" ] || [ "$cache_pass" = "PASSWORD" ]; then
-        local new_pass
-        new_pass=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 12)
-        if grep -q "^CACHE_CLEAR_PASSWORD=" "$envfile"; then
-            sed -i "s|^CACHE_CLEAR_PASSWORD=.*|CACHE_CLEAR_PASSWORD=${new_pass}|" "$envfile"
-        else
-            echo "CACHE_CLEAR_PASSWORD=${new_pass}" >> "$envfile"
-        fi
-        info "Auto-generated CACHE_CLEAR_PASSWORD: ${new_pass}"
-    fi
-
-    # Sync any new keys from template
-    sync_env_vars
-
-    warn "Review your configuration:"
-    warn "  ${envfile}"
 }
 
 # ---------------------------------------------------------------------------
@@ -501,26 +667,76 @@ EOF
 # ---------------------------------------------------------------------------
 # Docker helpers
 # ---------------------------------------------------------------------------
+# Wait for app HTTP endpoint to respond
+# Usage: wait_for_app PORT "logs hint"
+# ---------------------------------------------------------------------------
+function wait_for_app {
+    local port="${1:-$DEFAULT_PORT}"
+    local logs_hint="${2:-}"
+    printf "  Waiting for app to start"
+    local i=0
+    while [ $i -lt 30 ]; do
+        if curl -sf "http://localhost:${port}/" >/dev/null 2>&1; then
+            echo " OK"
+            return 0
+        fi
+        printf "."
+        sleep 1
+        i=$(( i + 1 ))
+    done
+    echo ""
+    warn "App did not respond within 30s."
+    [ -n "$logs_hint" ] && warn "Check logs: ${logs_hint}"
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 function check_docker {
-    command -v docker &>/dev/null \
-        || error_exit "Docker is not installed. Install Docker first: https://docs.docker.com/engine/install/"
-    docker compose version &>/dev/null \
-        || error_exit "Docker Compose plugin not found. Install it: https://docs.docker.com/compose/install/"
+    if ! command -v docker &>/dev/null; then
+        warn "Docker not found."
+        if confirm "Install Docker now? (Y/n) " "y"; then
+            header "Installing Docker"
+            run_cmd "Downloading Docker install script" \
+                curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+            run_cmd "Installing Docker" \
+                _sudo sh /tmp/get-docker.sh
+            rm -f /tmp/get-docker.sh
+            # Add current user to docker group so sudo isn't needed
+            if ! $IS_ROOT; then
+                _sudo usermod -aG docker "$USER_NAME" || true
+                warn "Added ${USER_NAME} to docker group — re-login required for group to take effect."
+                warn "For now, continuing with sudo..."
+                # Use sudo docker for the rest of this session
+                DOCKER_CMD="sudo docker"
+            fi
+        else
+            error_exit "Docker is required for Docker install mode."
+        fi
+    fi
+    if ! docker compose version &>/dev/null && ! sudo docker compose version &>/dev/null 2>/dev/null; then
+        error_exit "Docker Compose plugin not found. It should be included with Docker — try reinstalling."
+    fi
     info "Docker and Docker Compose are available."
 }
 
-function ensure_releases_dir_in_env {
+function ensure_releases_dir_absolute {
+    # Docker volumes require an absolute path — expand RELEASES_DIR if relative
     local envfile="$PROJECT_DIR/.env"
     local val
-    val=$(grep "^RELEASES_HOST_DIR=" "$envfile" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'\"")
+    val=$(_get_env_val "RELEASES_DIR")
     if [ -z "$val" ]; then
-        local default_dir="$USER_HOME/releases"
-        read -rp "  Host path to releases directory [${default_dir}]: " user_dir
-        local final_dir="${user_dir:-$default_dir}"
-        echo "RELEASES_HOST_DIR=${final_dir}" >> "$envfile"
-        info "Set RELEASES_HOST_DIR=${final_dir}"
-        mkdir -p "$final_dir" || true
+        val="NUMParser/public"
     fi
+    local abs_val
+    if [[ "$val" = /* ]]; then
+        abs_val="$val"
+    else
+        abs_val="$USER_HOME/$val"
+    fi
+    # Update .env with absolute path
+    sed -i "s|^RELEASES_DIR=.*|RELEASES_DIR=${abs_val}|" "$envfile"
+    mkdir -p "$abs_val" || true
+    info "RELEASES_DIR=${abs_val}"
 }
 
 function install_docker_mode {
@@ -528,11 +744,24 @@ function install_docker_mode {
     clone_or_update_repo
     cd "$PROJECT_DIR"
     setup_env_file
-    ensure_releases_dir_in_env
+    ensure_releases_dir_absolute
 
     header "Building and starting Docker containers"
-    docker compose -f docker-compose.prod.yml up -d --build \
-        || error_exit "docker compose up failed"
+    warn "Building Docker image — это может занять несколько минут..."
+    if [ "$VERBOSE" = "1" ]; then
+        docker compose -f docker-compose.prod.yml build \
+            || error_exit "docker compose build failed"
+        docker compose -f docker-compose.prod.yml up -d \
+            || error_exit "docker compose up failed"
+    else
+        run_cmd "Building Docker image" \
+            docker compose -f docker-compose.prod.yml build
+        run_cmd "Starting containers" \
+            docker compose -f docker-compose.prod.yml up -d
+    fi
+    wait_for_app "$DEFAULT_PORT" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+    echo ""
+    docker compose -f docker-compose.prod.yml ps
     info "Docker stack started."
 }
 
@@ -540,35 +769,23 @@ function install_docker_mode {
 # Main install flow
 # ---------------------------------------------------------------------------
 function do_install {
-    header "Movies API Installation"
-
     local existing
     existing=$(detect_install_type)
     if [ "$existing" != "none" ]; then
-        warn "Movies API is already installed (${existing} mode)."
-        echo ""
-        echo "  1) Update existing installation"
-        echo "  2) Switch install mode"
-        echo "  3) Uninstall first, then reinstall"
-        echo "  0) Cancel"
-        echo ""
-        read -rp "Choice: " already_choice
-        case "$already_choice" in
-            1) do_update;   return ;;
-            2) do_switch;   return ;;
-            3) do_uninstall
-               echo ""
-               warn "Re-running installation..."
-               ;;
-            *) info "Cancelled."; return ;;
+        local already_items=("Update existing installation" "Switch install mode" "Uninstall, then reinstall" "Cancel")
+        arrow_menu "Already installed (${existing} mode)" "${already_items[@]}"
+        case $MENU_RESULT in
+            0) do_update;   return ;;
+            1) do_switch;   return ;;
+            2) do_uninstall
+               warn "Re-running installation..." ;;
+            3) info "Cancelled."; return ;;
         esac
     fi
 
-    echo "Select install mode:"
-    echo "  1) Systemd service  (Python + Poetry on the host)"
-    echo "  2) Docker           (requires Docker + Docker Compose)"
-    read -rp "Choice [1]: " mode_choice
-    mode_choice="${mode_choice:-1}"
+    local mode_items=("Systemd service  (Python + Poetry on the host)" "Docker  (requires Docker + Docker Compose)")
+    arrow_menu "Select install mode" "${mode_items[@]}"
+    local mode_choice=$(( MENU_RESULT + 1 ))
 
     case "$mode_choice" in
         1)
@@ -578,12 +795,15 @@ function do_install {
             clone_or_update_repo
             cd "$PROJECT_DIR"
             setup_env_file
+            setup_postgres
 
             read -rp "Port to listen on [${DEFAULT_PORT}]: " svc_port
             svc_port="${svc_port:-$DEFAULT_PORT}"
 
             install_python_deps
             setup_systemd_service "$svc_port"
+
+            wait_for_app "$svc_port" "sudo journalctl -u ${SERVICE_NAME} -f"
 
             header "Installation complete"
             info "Access URL: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):${svc_port}"
@@ -596,7 +816,7 @@ function do_install {
             local host_ip
             host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
             local port
-            port=$(grep "^PORT=" "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d "'\"")
+            port=$(grep "^PORT=" "$PROJECT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d "'\"" || true)
             port="${port:-$DEFAULT_PORT}"
 
             header "Installation complete"
@@ -630,7 +850,7 @@ function do_update {
     fi
 
     clone_or_update_repo
-    sync_env_vars
+    setup_env_file
 
     case "$install_type" in
         service)
@@ -640,8 +860,17 @@ function do_update {
             ;;
         docker)
             cd "$PROJECT_DIR"
-            docker compose -f docker-compose.prod.yml up -d --build \
-                || error_exit "docker compose up failed"
+            if [ "$VERBOSE" = "1" ]; then
+                docker compose -f docker-compose.prod.yml build \
+                    || error_exit "docker compose build failed"
+                docker compose -f docker-compose.prod.yml up -d \
+                    || error_exit "docker compose up failed"
+            else
+                run_cmd "Rebuilding Docker image" \
+                    docker compose -f docker-compose.prod.yml build
+                run_cmd "Restarting containers" \
+                    docker compose -f docker-compose.prod.yml up -d
+            fi
             info "Docker stack rebuilt."
             ;;
         none)
@@ -662,37 +891,175 @@ function do_switch {
     case "$install_type" in
         service)
             header "Switching service → Docker"
-            confirm "Stop and disable the systemd service and start Docker stack? (y/N) " "n" \
+            confirm "Stop systemd service and start Docker stack? (y/N) " "n" \
                 || { info "Cancelled."; return; }
 
+            local db_user db_name dump_file
+            db_user=$(_get_env_val "DB_USER")
+            db_name=$(_get_env_val "DB_NAME")
+            dump_file="/tmp/movies_api_dump_$$.sql"
+
+            # Dump host database before stopping service
+            local do_migrate=false
+            if command -v pg_dump &>/dev/null && [ -n "$db_name" ]; then
+                if confirm "Перенести базу данных в Docker? (Y/n) " "y"; then
+                    do_migrate=true
+                    local dump_log; dump_log=$(mktemp)
+                    printf "  ⠋ Создаём дамп базы данных..."
+                    if ( cd /tmp && _sudo -u postgres pg_dump "$db_name" ) > "$dump_file" 2>"$dump_log"; then
+                        printf "\r  ✓ Дамп создан\n"
+                    else
+                        printf "\r  ✗ Не удалось создать дамп\n"
+                        [ "$VERBOSE" = "1" ] && cat "$dump_log"
+                        do_migrate=false
+                    fi
+                    rm -f "$dump_log"
+                fi
+            fi
+
+            # Stop and remove service
             _sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
             _sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+            _sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+            _sudo systemctl daemon-reload 2>/dev/null || true
+            info "Systemd service removed."
+
+            # Offer to remove host PostgreSQL
+            if command -v psql &>/dev/null; then
+                if confirm "Удалить PostgreSQL с хоста? (y/N) " "n"; then
+                    [ -n "$db_name" ] && _sudo -u postgres psql -c "DROP DATABASE IF EXISTS \"${db_name}\";" 2>/dev/null || true
+                    [ -n "$db_user" ] && _sudo -u postgres psql -c "DROP ROLE IF EXISTS \"${db_user}\";" 2>/dev/null || true
+                    run_cmd "Removing PostgreSQL" \
+                        _sudo apt-get remove -y --purge postgresql postgresql-contrib
+                    _sudo apt-get autoremove -y 2>/dev/null || true
+                    info "PostgreSQL удалён."
+                fi
+            fi
 
             check_docker
             cd "$PROJECT_DIR"
-            # .env already exists, just make sure RELEASES_HOST_DIR is set
-            ensure_releases_dir_in_env
-            docker compose -f docker-compose.prod.yml up -d --build \
-                || error_exit "docker compose up failed"
-            info "Switched to Docker mode."
+            ensure_releases_dir_absolute
+
+            if [ "$VERBOSE" = "1" ]; then
+                docker compose -f docker-compose.prod.yml build \
+                    || error_exit "docker compose build failed"
+            else
+                run_cmd "Building Docker image" \
+                    docker compose -f docker-compose.prod.yml build
+            fi
+
+            # Start only postgres first so we can restore dump
+            if $do_migrate; then
+                run_cmd "Starting postgres container" \
+                    docker compose -f docker-compose.prod.yml up -d postgres
+                # Wait for postgres container to be ready
+                local i=0
+                printf "  Waiting for postgres"
+                while [ $i -lt 20 ]; do
+                    if docker compose -f docker-compose.prod.yml exec -T postgres \
+                            pg_isready -U "$db_user" >/dev/null 2>&1; then
+                        echo " OK"
+                        break
+                    fi
+                    printf "."; sleep 1; i=$(( i + 1 ))
+                done
+                local restore_log; restore_log=$(mktemp)
+                printf "  ⠋ Restoring database..."
+                if docker compose -f docker-compose.prod.yml exec -T postgres \
+                        psql -U "$db_user" "$db_name" < "$dump_file" >"$restore_log" 2>&1; then
+                    printf "\r  ✓ База данных перенесена\n"
+                else
+                    printf "\r  ✗ Ошибка восстановления\n"
+                    [ "$VERBOSE" = "1" ] && cat "$restore_log"
+                    warn "Проверьте данные вручную."
+                fi
+                rm -f "$dump_file" "$restore_log"
+            fi
+
+            run_cmd "Starting containers" \
+                docker compose -f docker-compose.prod.yml up -d
+            wait_for_app "$DEFAULT_PORT" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+            local host_ip; host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+            header "Switch complete"
+            info "Access URL: http://${host_ip}:${DEFAULT_PORT}"
+            info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
             ;;
+
         docker)
             header "Switching Docker → systemd service"
             confirm "Stop Docker stack and install as systemd service? (y/N) " "n" \
                 || { info "Cancelled."; return; }
 
             cd "$PROJECT_DIR"
-            docker compose -f docker-compose.prod.yml down || true
+
+            local db_user db_name dump_file
+            db_user=$(_get_env_val "DB_USER")
+            db_name=$(_get_env_val "DB_NAME")
+            dump_file="/tmp/movies_api_dump_$$.sql"
+
+            # Dump from Docker postgres before stopping
+            local do_migrate=false
+            if [ -n "$db_name" ] && docker compose -f docker-compose.prod.yml ps postgres 2>/dev/null | grep -q "running\|Up"; then
+                if confirm "Перенести базу данных из Docker на хост? (Y/n) " "y"; then
+                    do_migrate=true
+                    local dump_log; dump_log=$(mktemp)
+                    printf "  ⠋ Создаём дамп из Docker postgres..."
+                    if docker compose -f docker-compose.prod.yml exec -T postgres \
+                            pg_dump -U "$db_user" "$db_name" > "$dump_file" 2>"$dump_log"; then
+                        printf "\r  ✓ Дамп создан\n"
+                    else
+                        printf "\r  ✗ Не удалось создать дамп\n"
+                        [ "$VERBOSE" = "1" ] && cat "$dump_log"
+                        do_migrate=false
+                    fi
+                    rm -f "$dump_log"
+                fi
+            fi
+
+            # Stop containers (keep volumes)
+            docker compose -f docker-compose.prod.yml down 2>/dev/null || true
+            info "Контейнеры остановлены. Docker volumes сохранены."
+
+            # Offer to remove containers and images
+            if confirm "Удалить Docker образы? (y/N) " "n"; then
+                docker rmi "movies-api-app" "${SERVICE_NAME}-app" 2>/dev/null || true
+                local pg_image
+                pg_image=$(grep "image:" "$PROJECT_DIR/docker-compose.prod.yml" 2>/dev/null | grep postgres | awk '{print $2}' | tr -d '\r' || true)
+                [ -n "$pg_image" ] && docker rmi "$pg_image" 2>/dev/null || true
+                info "Docker образы удалены."
+            fi
+
+            # Setup host PostgreSQL and restore dump
+            setup_postgres
+            if $do_migrate && [ -f "$dump_file" ]; then
+                local restore_log; restore_log=$(mktemp)
+                printf "  ⠋ Restoring database..."
+                if ( cd /tmp && _sudo -u postgres psql "$db_name" ) < "$dump_file" >"$restore_log" 2>&1; then
+                    printf "\r  ✓ База данных перенесена\n"
+                else
+                    printf "\r  ✗ Ошибка восстановления\n"
+                    [ "$VERBOSE" = "1" ] && cat "$restore_log"
+                    warn "Проверьте данные вручную."
+                fi
+                rm -f "$dump_file" "$restore_log"
+            fi
 
             check_or_install_python
             install_poetry
             install_python_deps
 
-            read -rp "Port to listen on [${DEFAULT_PORT}]: " svc_port
+            printf "  Port to listen on [${DEFAULT_PORT}]: "
+            read -r svc_port </dev/tty
             svc_port="${svc_port:-$DEFAULT_PORT}"
             setup_systemd_service "$svc_port"
-            info "Switched to systemd service mode."
+            wait_for_app "$svc_port" "sudo journalctl -u ${SERVICE_NAME} -f"
+            local host_ip; host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+            header "Switch complete"
+            info "Access URL: http://${host_ip}:${svc_port}"
+            info "Manage:     sudo systemctl {status|restart|stop} ${SERVICE_NAME}"
+            info "Logs:       sudo journalctl -u ${SERVICE_NAME} -f"
             ;;
+
         none)
             warn "No installation detected. Run install first."
             ;;
@@ -707,6 +1074,9 @@ function do_uninstall {
 
     confirm "This will remove the service/containers and optionally project files. Continue? (y/N) " "n" \
         || { info "Cancelled."; return; }
+
+    # Move out of project dir before any deletion to avoid getcwd errors
+    cd "$USER_HOME" 2>/dev/null || true
 
     local install_type
     install_type=$(detect_install_type)
@@ -729,11 +1099,47 @@ function do_uninstall {
                 docker compose -f docker-compose.prod.yml down 2>/dev/null || true
                 info "Docker stack removed (volumes kept)."
             fi
+            if confirm "Remove Docker images for this project? (y/N) " "n"; then
+                # Remove app image (built locally)
+                docker rmi "movies-api-app" "${SERVICE_NAME}-app" 2>/dev/null || true
+                # Remove postgres image used by compose
+                local pg_image
+                pg_image=$(grep "image:" "$PROJECT_DIR/docker-compose.prod.yml" 2>/dev/null | grep postgres | awk '{print $2}' | tr -d '\r' || true)
+                [ -n "$pg_image" ] && docker rmi "$pg_image" 2>/dev/null || true
+                info "Docker images removed."
+            fi
             ;;
         none)
             warn "No active installation found."
             ;;
     esac
+
+    # PostgreSQL database and user
+    if command -v psql &>/dev/null; then
+        local db_user db_name
+        db_user=$(_get_env_val "DB_USER")
+        db_name=$(_get_env_val "DB_NAME")
+        if [ -n "$db_name" ]; then
+            if confirm "Drop PostgreSQL database '${db_name}'? (y/N) " "n"; then
+                _sudo -u postgres psql -c "DROP DATABASE IF EXISTS \"${db_name}\";" 2>/dev/null \
+                    && info "Database '${db_name}' dropped." \
+                    || warn "Could not drop database '${db_name}'."
+            fi
+        fi
+        if [ -n "$db_user" ]; then
+            if confirm "Drop PostgreSQL role '${db_user}'? (y/N) " "n"; then
+                _sudo -u postgres psql -c "DROP ROLE IF EXISTS \"${db_user}\";" 2>/dev/null \
+                    && info "Role '${db_user}' dropped." \
+                    || warn "Could not drop role '${db_user}'."
+            fi
+        fi
+        if confirm "Uninstall PostgreSQL from the system? (y/N) " "n"; then
+            run_cmd "Removing PostgreSQL" \
+                _sudo apt-get remove -y --purge postgresql postgresql-contrib
+            _sudo apt-get autoremove -y 2>/dev/null || true
+            info "PostgreSQL uninstalled."
+        fi
+    fi
 
     # Project directory
     if [ -d "$PROJECT_DIR" ]; then
@@ -743,35 +1149,35 @@ function do_uninstall {
         fi
     fi
 
-    # Optional: remove Poetry
-    if command -v poetry &>/dev/null || [ -f "$USER_HOME/.local/bin/poetry" ]; then
-        if confirm "Remove Poetry? (y/N) " "n"; then
-            rm -f "$USER_HOME/.local/bin/poetry"
-            rm -rf "$USER_HOME/.local/share/pypoetry"
-            info "Poetry removed."
+    # Poetry and pyenv only relevant for systemd (service) installs
+    if [ "$install_type" = "service" ]; then
+        if command -v poetry &>/dev/null || [ -f "$USER_HOME/.local/bin/poetry" ]; then
+            if confirm "Remove Poetry? (y/N) " "n"; then
+                rm -f "$USER_HOME/.local/bin/poetry"
+                rm -rf "$USER_HOME/.local/share/pypoetry"
+                info "Poetry removed."
 
-            # Clean shell configs
-            local shell_files=("$USER_HOME/.bashrc" "$USER_HOME/.bash_profile"
-                               "$USER_HOME/.profile" "$USER_HOME/.zshrc" "$USER_HOME/.zprofile")
-            for f in "${shell_files[@]}"; do
-                [ -f "$f" ] && sed -i '/poetry/d' "$f" 2>/dev/null || true
-            done
-            NEED_RELOAD=true
+                local shell_files=("$USER_HOME/.bashrc" "$USER_HOME/.bash_profile"
+                                   "$USER_HOME/.profile" "$USER_HOME/.zshrc" "$USER_HOME/.zprofile")
+                for f in "${shell_files[@]}"; do
+                    [ -f "$f" ] && sed -i '/poetry/d' "$f" 2>/dev/null || true
+                done
+                NEED_RELOAD=true
+            fi
         fi
-    fi
 
-    # Optional: remove pyenv
-    if [ -d "$USER_HOME/.pyenv" ]; then
-        if confirm "Remove pyenv (and all Python versions installed via it)? (y/N) " "n"; then
-            rm -rf "$USER_HOME/.pyenv"
-            info "pyenv removed."
+        if [ -d "$USER_HOME/.pyenv" ]; then
+            if confirm "Remove pyenv (and all Python versions installed via it)? (y/N) " "n"; then
+                rm -rf "$USER_HOME/.pyenv"
+                info "pyenv removed."
 
-            local shell_files=("$USER_HOME/.bashrc" "$USER_HOME/.bash_profile"
-                               "$USER_HOME/.profile" "$USER_HOME/.zshrc" "$USER_HOME/.zprofile")
-            for f in "${shell_files[@]}"; do
-                [ -f "$f" ] && sed -i '/# Pyenv configuration/d;/PYENV_ROOT/d;/pyenv init/d;/pyenv virtualenv-init/d;/\/\.pyenv/d' "$f" 2>/dev/null || true
-            done
-            NEED_RELOAD=true
+                local shell_files=("$USER_HOME/.bashrc" "$USER_HOME/.bash_profile"
+                                   "$USER_HOME/.profile" "$USER_HOME/.zshrc" "$USER_HOME/.zprofile")
+                for f in "${shell_files[@]}"; do
+                    [ -f "$f" ] && sed -i '/# Pyenv configuration/d;/PYENV_ROOT/d;/pyenv init/d;/pyenv virtualenv-init/d;/\/\.pyenv/d' "$f" 2>/dev/null || true
+                done
+                NEED_RELOAD=true
+            fi
         fi
     fi
 
@@ -817,55 +1223,89 @@ function do_status {
 }
 
 # ---------------------------------------------------------------------------
+# Arrow-key menu
+# ---------------------------------------------------------------------------
+
+# arrow_menu TITLE item1 item2 ... — returns selected index in MENU_RESULT
+function arrow_menu {
+    local title="$1"; shift
+    local items=("$@")
+    local count=${#items[@]}
+    local selected=0
+
+    # Hide cursor
+    tput civis 2>/dev/null || true
+    trap 'tput cnorm 2>/dev/null || true' EXIT INT TERM
+
+    while true; do
+        clear
+        echo ""
+        echo -e "${BLUE}================================================${NC}"
+        printf "${BLUE}  %-44s${NC}\n" "$title"
+        echo -e "${BLUE}================================================${NC}"
+        echo ""
+
+        for i in "${!items[@]}"; do
+            if [ "$i" -eq "$selected" ]; then
+                echo -e "  ${GREEN}▶ ${items[$i]}${NC}"
+            else
+                echo -e "    ${items[$i]}"
+            fi
+        done
+        echo ""
+        echo -e "  ${YELLOW}↑↓ — navigate   Enter — select${NC}"
+
+        # Read key
+        local key
+        IFS= read -rsn1 key
+        if [[ "$key" == $'\x1b' ]]; then
+            IFS= read -rsn2 key
+            case "$key" in
+                '[A') selected=$(( (selected - 1 + count) % count )) ;;  # Up
+                '[B') selected=$(( (selected + 1) % count ))          ;;  # Down
+            esac
+        elif [[ "$key" == "" ]]; then
+            # Enter
+            tput cnorm 2>/dev/null || true
+            MENU_RESULT=$selected
+            return 0
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Interactive menu
 # ---------------------------------------------------------------------------
 function show_menu {
     local install_type
     install_type=$(detect_install_type)
 
-    echo ""
-    echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}         Movies API — Management Menu           ${NC}"
-    echo -e "${BLUE}================================================${NC}"
-
+    clear
     if [ "$install_type" = "none" ]; then
-        warn "Movies API is not installed."
-        echo ""
-        echo "  1) Install"
-        echo "  0) Exit"
-        echo ""
-        read -rp "Choice: " choice
-        case "$choice" in
-            1) do_install ;;
-            0) exit 0 ;;
-            *) warn "Invalid choice." ;;
+        local items=("Install" "Exit")
+        arrow_menu "Movies API — Not Installed" "${items[@]}"
+        case $MENU_RESULT in
+            0) do_install ;;
+            1) exit 0 ;;
         esac
     else
         local status_line
         case "$install_type" in
-            service) status_line="systemd service" ;;
-            docker)  status_line="Docker (docker-compose.prod.yml)" ;;
+            service) status_line="Installed: systemd service" ;;
+            docker)  status_line="Installed: Docker" ;;
         esac
-        info "Installed as: ${status_line}"
-        echo ""
 
         local switch_label
         [ "$install_type" = "service" ] && switch_label="Switch to Docker" || switch_label="Switch to systemd service"
 
-        echo "  1) Update"
-        echo "  2) ${switch_label}"
-        echo "  3) Status"
-        echo "  4) Uninstall"
-        echo "  0) Exit"
-        echo ""
-        read -rp "Choice: " choice
-        case "$choice" in
-            1) do_update ;;
-            2) do_switch ;;
-            3) do_status ;;
-            4) do_uninstall ;;
-            0) exit 0 ;;
-            *) warn "Invalid choice." ;;
+        local items=("Update" "$switch_label" "Status" "Uninstall" "Exit")
+        arrow_menu "Movies API — ${status_line}" "${items[@]}"
+        case $MENU_RESULT in
+            0) do_update ;;
+            1) do_switch ;;
+            2) do_status ;;
+            3) do_uninstall ;;
+            4) exit 0 ;;
         esac
     fi
 }
