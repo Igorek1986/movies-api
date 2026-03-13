@@ -204,6 +204,33 @@ button.danger-btn {
 .import-card .import-actions { align-self: end; }
 #copyLampaCmd { white-space: normal; word-break: break-all; }
 
+/* Password show/hide toggle */
+.pw-wrap {
+  position: relative;
+  margin-bottom: var(--pico-spacing);
+}
+.pw-wrap input {
+  margin-bottom: 0 !important;
+  padding-right: 2.6rem !important;
+}
+.pw-eye {
+  position: absolute;
+  right: .55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: .25rem;
+  color: var(--pico-muted-color);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+.pw-eye:hover { color: var(--pico-color); }
+.pw-eye:focus { outline: none; }
+
 /* Password strength feedback */
 .pwd-feedback {
   font-size: 0.82rem;
