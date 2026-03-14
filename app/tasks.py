@@ -62,6 +62,19 @@ def _next_notify_time(user, now: datetime) -> datetime:
     return candidate.astimezone(timezone.utc)
 
 
+def _fmt_date(dt, user) -> str:
+    """Format datetime in user's local timezone as dd.mm.YYYY."""
+    if dt is None:
+        return "—"
+    if not hasattr(dt, "hour"):
+        # date object — just format as-is
+        return dt.strftime("%d.%m.%Y")
+    tz = _get_tz(getattr(user, "timezone", None))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz).strftime("%d.%m.%Y")
+
+
 def _seconds_until_next_run() -> float:
     """Seconds until next daily task run (hour from settings, default 2)."""
     from app import settings_cache
@@ -298,7 +311,7 @@ async def _send_premium_expired(telegram_id: int, user) -> None:
 
     grace_note = ""
     if user.timecode_grace_until:
-        deadline = user.timecode_grace_until.strftime("%d.%m.%Y")
+        deadline = _fmt_date(user.timecode_grace_until, user)
         grace_note = (
             f"\n\n⏳ Лишние данные будут удалены <b>{deadline}</b>.\n"
             f"Продлите подписку до этой даты, чтобы сохранить историю."
@@ -328,10 +341,9 @@ async def _send_inactive_warning(telegram_id: int, user) -> None:
 
     delete_days = settings_cache.get_int("inactive_delete_days")
     warn_days = settings_cache.get_int("inactive_warn_days")
-    delete_date = (
-        (user.last_active_at + timedelta(days=delete_days)).strftime("%d.%m.%Y")
-        if user.last_active_at
-        else "—"
+    delete_date = _fmt_date(
+        user.last_active_at + timedelta(days=delete_days) if user.last_active_at else None,
+        user,
     )
 
     await bot.send_message(
@@ -351,7 +363,7 @@ async def _send_premium_activated(telegram_id: int, user) -> None:
     if not bot:
         return
 
-    expires_str = user.premium_until.strftime("%d.%m.%Y") if user.premium_until else "—"
+    expires_str = user.premium_until.strftime("%d.%m.%Y")
     await bot.send_message(
         telegram_id,
         f"🎉 <b>Подписка Premium активирована!</b>\n\n"
@@ -368,7 +380,7 @@ async def _send_premium_renewed(telegram_id: int, user, was_grace: bool) -> None
     if not bot:
         return
 
-    expires_str = user.premium_until.strftime("%d.%m.%Y") if user.premium_until else "—"
+    expires_str = user.premium_until.strftime("%d.%m.%Y")
 
     if was_grace:
         text = (

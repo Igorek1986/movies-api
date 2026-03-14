@@ -46,7 +46,7 @@ async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
             user = user_result.scalar_one_or_none()
         if tg and user and user.notifications_enabled:
             change_password_url = f"{base_url}/profiles"
-            await send_new_session_notification(tg.telegram_id, ip, parse_user_agent(ua), change_password_url, user.username)
+            await send_new_session_notification(tg.telegram_id, ip, parse_user_agent(ua), change_password_url, user.username, user.timezone or "")
     except Exception as e:
         logger.warning(f"Session notification failed for user {user_id}: {e}")
 
