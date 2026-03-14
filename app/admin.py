@@ -42,15 +42,6 @@ async def _get_admin_user(
     return user if (user and user.is_admin) else None
 
 
-def _grace_days_used(user, now: datetime) -> int:
-    """Количество дней проведённых в grace-периоде (0 если не в grace)."""
-    grace_days = settings_cache.get_int("timecode_grace_days")
-    if not user.timecode_grace_until or grace_days == 0:
-        return 0
-    expired_at = user.timecode_grace_until - timedelta(days=grace_days)
-    days_used = (now - expired_at).days
-    return max(0, min(days_used, grace_days))
-
 
 async def _check_admin(
     request: Request,
@@ -174,10 +165,11 @@ async def change_user_role(
     if role == "premium":
         now = datetime.now(timezone.utc)
         duration_days = settings_cache.get_int("premium_duration_days")
-        if was_in_grace:
-            duration_days = max(1, duration_days - _grace_days_used(user, now))
-        # Истекает в конец (23:59:59) дня через N дней — не зависит от времени выдачи
-        expiry_day = (now + timedelta(days=duration_days)).replace(
+        if was_in_grace and user.premium_until:
+            base, days = user.premium_until, duration_days
+        else:
+            base, days = now, duration_days - 1
+        expiry_day = (base + timedelta(days=days)).replace(
             hour=23, minute=59, second=59, microsecond=0
         )
         user.premium_until = expiry_day
@@ -261,12 +253,8 @@ async def extend_premium(
     if user.role != "premium" and not in_grace:
         raise HTTPException(status_code=400, detail="Пользователь не является Premium и не в grace-периоде")
 
-    extend_days = 30
-    if in_grace:
-        extend_days = max(1, extend_days - _grace_days_used(user, now))
-
-    base = user.premium_until if (user.premium_until and user.premium_until > now) else now
-    user.premium_until = (base + timedelta(days=extend_days)).replace(hour=23, minute=59, second=59, microsecond=0)
+    base = user.premium_until if user.premium_until else now
+    user.premium_until = (base + timedelta(days=30)).replace(hour=23, minute=59, second=59, microsecond=0)
     user.premium_warned = False
 
     if in_grace:

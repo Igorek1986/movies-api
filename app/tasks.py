@@ -114,7 +114,7 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
         )
         for user in result.scalars().all():
             user.role = "simple"
-            user.premium_until = None
+            # premium_until сохраняем — нужен как база при продлении в grace-периоде
 
             if grace_days == 0:
                 user.timecode_grace_until = now
@@ -229,6 +229,7 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
             if tc_limit is not None:
                 await _cleanup_timecodes(db, user.id, tc_limit, user.username)
             user.timecode_grace_until = None
+            user.premium_until = None  # грейс истёк, база для продления больше не нужна
 
         await db.commit()
 
