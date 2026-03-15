@@ -189,6 +189,7 @@ async def _get_tg_user(db, telegram_id: int) -> TelegramUser | None:
 
 async def _process_link_code(message: types.Message, code: str):
     """Привязывает Telegram-аккаунт к коду из БД."""
+    logger.info(f"Link code attempt: tg_id={message.from_user.id} code={repr(code)}")
     async with async_session_maker() as db:
         now = datetime.now(timezone.utc)
 
@@ -198,6 +199,9 @@ async def _process_link_code(message: types.Message, code: str):
         link_code = result.scalar_one_or_none()
 
         if not link_code:
+            all_codes = await db.execute(select(TelegramLinkCode))
+            existing = [c.code for c in all_codes.scalars().all()]
+            logger.warning(f"Link code not found: {repr(code)}, codes in DB: {existing}")
             await message.answer("Код не найден. Запросите новый на сайте.")
             return
 
