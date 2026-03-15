@@ -9,6 +9,17 @@ from app.db.database import get_db
 from app.db.models import User, Device, Session
 from app import settings_cache
 
+def _is_fully_blocked(user: User, now: datetime) -> bool:
+    """Полная блокировка: blocked_at задан и premium уже истёк (или его нет)."""
+    if not user.blocked_at:
+        return False
+    premium_until = user.premium_until
+    if premium_until:
+        if premium_until.tzinfo is None:
+            premium_until = premium_until.replace(tzinfo=timezone.utc)
+        return premium_until <= now
+    return True
+
 # ─── Inactive tracking ────────────────────────────────────────────────────────
 # In-memory set of user_ids already updated today — prevents redundant DB writes
 # when the same user sends multiple concurrent requests.
@@ -88,6 +99,13 @@ async def get_device_by_token(
 
     result = await db.execute(select(Device).where(Device.token == token))
     device = result.scalar_one_or_none()
-    if device and _should_update_active(device.user_id):
+    if not device:
+        return None
+
+    user = await db.get(User, device.user_id)
+    if user and _is_fully_blocked(user, datetime.now(timezone.utc)):
+        return None
+
+    if _should_update_active(device.user_id):
         asyncio.create_task(_update_last_active(device.user_id))
     return device

@@ -141,6 +141,12 @@ async def login_submit(
             "error": "Неверное имя пользователя или пароль",
         })
 
+    if user.blocked_at:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Аккаунт заблокирован. Обратитесь к администратору.",
+        })
+
     rate_limit.clear_login(ip)
 
     # Если включена 2FA — перенаправляем на страницу проверки кода

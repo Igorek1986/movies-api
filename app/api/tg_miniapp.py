@@ -30,6 +30,7 @@ from app.db.database import get_db
 from app.db.models import (
     Device,
     LampaProfile,
+    Session,
     SupportMessage,
     Timecode,
     TelegramUser,
@@ -621,6 +622,8 @@ async def miniapp_users(
             "tg_username": tg.username if tg else None,
             "tg_id": tg.telegram_id if tg else None,
             "created_at": u.created_at.strftime("%d.%m.%Y") if u.created_at else None,
+            "blocked_at": u.blocked_at.strftime("%d.%m.%Y") if u.blocked_at else None,
+            "block_reason": u.block_reason,
         })
 
     return {"users": users_data}
@@ -654,6 +657,57 @@ async def miniapp_set_role(
         f"user {user.username} role {old_role} → {body.role}"
     )
     return {"ok": True, "username": user.username, "role": body.role}
+
+
+class BlockBody(BaseModel):
+    reason: str = ""
+
+
+@router.post("/api/users/{user_id}/block")
+async def miniapp_block_user(
+    user_id: int,
+    body: BlockBody,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(_require_admin),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from sqlalchemy import delete as sa_delete
+    user.blocked_at = datetime.now(timezone.utc)
+    user.block_reason = body.reason.strip() or None
+    await db.execute(sa_delete(Session).where(Session.user_id == user_id))
+    await db.commit()
+
+    logger.info(
+        f"Mini App admin {admin.get('username', admin.get('id'))}: "
+        f"user {user.username} blocked, reason={body.reason!r}"
+    )
+    return {"ok": True, "username": user.username}
+
+
+@router.post("/api/users/{user_id}/unblock")
+async def miniapp_unblock_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(_require_admin),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.blocked_at = None
+    user.block_reason = None
+    await db.commit()
+
+    logger.info(
+        f"Mini App admin {admin.get('username', admin.get('id'))}: "
+        f"user {user.username} unblocked"
+    )
+    return {"ok": True, "username": user.username}
 
 
 # ─── Support messages (admin) ─────────────────────────────────────────────────

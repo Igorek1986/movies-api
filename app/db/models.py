@@ -72,6 +72,9 @@ class User(Base):
     last_active_at        = Column(Date, nullable=True)
     inactive_warned       = Column(Boolean, nullable=False, default=False, server_default="false")
     notify_inactive_after = Column(DateTime(timezone=True), nullable=True)
+    # Account block (admin action)
+    blocked_at   = Column(DateTime(timezone=True), nullable=True)
+    block_reason = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

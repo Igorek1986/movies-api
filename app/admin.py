@@ -10,7 +10,8 @@ from sqlalchemy import select, func
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import User, Device, Timecode, USER_ROLES
+from app.db.models import User, Device, Timecode, Session, TelegramUser, USER_ROLES
+from sqlalchemy import delete as sa_delete
 from app.api.dependencies import get_current_user
 from app import rate_limit, settings_cache
 
@@ -124,6 +125,8 @@ async def admin_dashboard(
             "premium_until": u.premium_until,
             "timecode_grace_until": u.timecode_grace_until,
             "created_at": u.created_at,
+            "blocked_at": u.blocked_at,
+            "block_reason": u.block_reason,
         })
 
     return templates.TemplateResponse("admin_dashboard.html", {
@@ -441,6 +444,64 @@ async def extend_all_premium(
     from urllib.parse import quote
     msg = quote(f"Premium продлён на {days} дн. для {len(users)} пользователей")
     logger.info(f"Admin: extended premium by {days} days for {len(users)} users")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Блокировка / разблокировка пользователя
+# ---------------------------------------------------------------------------
+
+@router.post("/user/{user_id}/block")
+async def block_user(
+    request: Request,
+    response: Response,
+    user_id: int,
+    reason: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.blocked_at = datetime.now(timezone.utc)
+    user.block_reason = reason.strip() or None
+
+    # Удаляем все активные сессии
+    await db.execute(sa_delete(Session).where(Session.user_id == user_id))
+    await db.commit()
+
+    logger.info(f"Admin: user {user.username} blocked, reason={reason!r}")
+    from urllib.parse import quote
+    msg = quote(f"Пользователь {user.username} заблокирован")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+@router.post("/user/{user_id}/unblock")
+async def unblock_user(
+    request: Request,
+    response: Response,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.blocked_at = None
+    user.block_reason = None
+    await db.commit()
+
+    logger.info(f"Admin: user {user.username} unblocked")
+    from urllib.parse import quote
+    msg = quote(f"Пользователь {user.username} разблокирован")
     return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
 
 

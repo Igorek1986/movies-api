@@ -233,6 +233,44 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
 
         await db.commit()
 
+        # ── 5. Cleanup data for blocked users after 30 days of full block ──────
+        from app.db.models import Session, TelegramUser
+        from sqlalchemy import delete as sa_delete
+
+        block_cleanup_days = 30
+        blocked_result = await db.execute(
+            select(User).where(User.blocked_at.isnot(None))
+        )
+        for user in blocked_result.scalars().all():
+            blocked_at = user.blocked_at
+            if blocked_at.tzinfo is None:
+                blocked_at = blocked_at.replace(tzinfo=timezone.utc)
+
+            # Определяем момент полной блокировки (нет premium или он истёк)
+            premium_until = user.premium_until
+            if premium_until:
+                if premium_until.tzinfo is None:
+                    premium_until = premium_until.replace(tzinfo=timezone.utc)
+                if premium_until > now:
+                    continue  # ещё мягкая блокировка, пропускаем
+                full_block_start = max(blocked_at, premium_until)
+            else:
+                full_block_start = blocked_at
+
+            if full_block_start + timedelta(days=block_cleanup_days) > now:
+                continue  # ещё не прошло 30 дней
+
+            # Очищаем данные аккаунта
+            await db.execute(sa_delete(Device).where(Device.user_id == user.id))
+            await db.execute(sa_delete(Session).where(Session.user_id == user.id))
+            await db.execute(sa_delete(TelegramUser).where(TelegramUser.user_id == user.id))
+            user.totp_secret = None
+            user.totp_enabled = False
+            user.backup_codes = None
+            logger.info(f"Cleaned up blocked user data: {user.username}")
+
+        await db.commit()
+
     logger.info("Premium expiry check complete.")
 
 
