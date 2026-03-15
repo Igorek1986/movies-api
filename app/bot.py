@@ -105,32 +105,35 @@ async def _on_startup(bot: Bot) -> None:
     from app.config import get_settings
 
     settings = get_settings()
-    if not settings.TELEGRAM_USE_POLLING:
-        webhook_url = f"{settings.BASE_URL}/bot/webhook"
-        secret = settings.TELEGRAM_BOT_TOKEN.split(":")[1]
-        await bot.set_webhook(
-            webhook_url,
-            secret_token=secret,
-            allowed_updates=["message", "callback_query"],
-        )
-        logger.info(f"Telegram webhook set: {webhook_url}")
+    try:
+        if not settings.TELEGRAM_USE_POLLING:
+            webhook_url = f"{settings.BASE_URL}/bot/webhook"
+            secret = settings.TELEGRAM_BOT_TOKEN.split(":")[1]
+            await bot.set_webhook(
+                webhook_url,
+                secret_token=secret,
+                allowed_updates=["message", "callback_query"],
+            )
+            logger.info(f"Telegram webhook set: {webhook_url}")
 
-    # Команды бота (видны в меню «/»)
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="status", description="Статус аккаунта"),
-        ]
-    )
-
-    # Глобальная кнопка меню — открывает Mini App (для привязанных пользователей)
-    await bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(
-            text="📱 Управление",
-            web_app=WebAppInfo(url=f"{settings.BASE_URL}/tg-app"),
+        # Команды бота (видны в меню «/»)
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start", description="Главное меню"),
+                BotCommand(command="status", description="Статус аккаунта"),
+            ]
         )
-    )
-    logger.info("Bot commands and menu button set")
+
+        # Глобальная кнопка меню — открывает Mini App (для привязанных пользователей)
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="📱 Управление",
+                web_app=WebAppInfo(url=f"{settings.BASE_URL}/tg-app"),
+            )
+        )
+        logger.info("Bot commands and menu button set")
+    except Exception as e:
+        logger.warning(f"Telegram bot startup failed (API unavailable?): {e}")
 
 
 async def _on_shutdown(bot: Bot) -> None:
