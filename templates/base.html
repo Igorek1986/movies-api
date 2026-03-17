@@ -101,7 +101,8 @@
         <li><a href="/stats" role="button" class="outline btn-sm {% if request.url.path.startswith('/stats') %}secondary{% endif %}">📊 Статистика</a></li>
         <li><a href="/admin" role="button" class="outline btn-sm {% if request.url.path.startswith('/admin') %}secondary{% endif %}">⚙️ Админ</a></li>
         {% endif %}
-        <li><a href="/" role="button" class="outline btn-sm {% if request.url.path == '/' %}secondary{% endif %}">История</a></li>
+        <li><a href="/" role="button" class="outline btn-sm {% if request.url.path == '/' or request.url.path.startswith('/catalog') %}secondary{% endif %}">Каталог</a></li>
+        <li><a href="/history" role="button" class="outline btn-sm {% if request.url.path == '/history' %}secondary{% endif %}">История</a></li>
         <li><a href="/profiles" role="button" class="outline btn-sm {% if request.url.path.startswith('/profiles') %}secondary{% endif %}">Настройки</a></li>
         <li><a href="/sessions" role="button" class="outline btn-sm {% if request.url.path == '/sessions' %}secondary{% endif %}">Сессии</a></li>
         {% block header_actions %}{% endblock %}

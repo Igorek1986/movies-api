@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ category_name }} — NUMParser{% endblock %}
+
+{% block body %}
+<main class="container" style="padding-top: 1.5rem; max-width: 1200px;">
+  <a href="/" class="catalog-back">← Каталог</a>
+  <h2 style="margin-bottom: 1.25rem;">{{ category_name }}</h2>
+
+  <div id="gridLoading" class="muted small" style="text-align:center; padding: 2rem 0;">Загрузка...</div>
+  <div id="gridEmpty" class="history-empty" style="display:none">Нет данных</div>
+  <div id="catalogGrid" class="catalog-grid"></div>
+  <div id="loadSentinel" style="height:1px; margin-top:1.5rem;"></div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const CATEGORY_ID = {{ category | tojson }};
+  const IMAGE_BASE  = {{ image_base | tojson }};
+  let _page = 1, _totalPages = 1, _loading = false;
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function createCard(item) {
+    const mediaType = item.media_type || (item.name ? 'tv' : 'movie');
+    const title     = item.title || item.name || '';
+    const year      = (item.release_date || item.first_air_date || '').slice(0, 4);
+    const poster    = item.poster_path ? `${IMAGE_BASE}/t/p/w300${item.poster_path}` : '';
+    const cardId    = `${item.id}_${mediaType}`;
+    const back      = encodeURIComponent('/catalog/' + CATEGORY_ID);
+
+    const a = document.createElement('a');
+    a.className = 'catalog-poster-card';
+    a.href = `/card/${encodeURIComponent(cardId)}?back=${back}`;
+
+    if (poster) {
+      a.innerHTML = `<img src="${esc(poster)}" alt="${esc(title)}" loading="lazy">`;
+    } else {
+      a.innerHTML = `<div class="card-no-poster">${esc(title)}</div>`;
+    }
+    a.innerHTML += `
+      <div class="catalog-poster-info">
+        <div class="catalog-poster-title">${esc(title)}</div>
+        ${year ? `<div class="catalog-poster-year">${esc(year)}</div>` : ''}
+      </div>`;
+    return a;
+  }
+
+  async function loadPage(page) {
+    if (_loading) return;
+    _loading = true;
+
+    try {
+      const resp = await fetch(`/${encodeURIComponent(CATEGORY_ID)}?per_page=20&page=${page}`);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+
+      _totalPages = data.total_pages || 1;
+
+      if (page === 1) document.getElementById('gridLoading').style.display = 'none';
+
+      const items = data.results || [];
+      if (items.length === 0 && page === 1) {
+        document.getElementById('gridEmpty').style.display = 'block';
+        return;
+      }
+
+      const grid = document.getElementById('catalogGrid');
+      for (const item of items) grid.appendChild(createCard(item));
+    } catch (e) {
+      document.getElementById('gridLoading').textContent = 'Ошибка загрузки';
+    } finally {
+      _loading = false;
+    }
+  }
+
+  const sentinel = document.getElementById('loadSentinel');
+  const observer = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && _page < _totalPages && !_loading) {
+      loadPage(++_page);
+    }
+  }, { rootMargin: '300px' });
+
+  (async function init() {
+    await loadPage(1);
+    if (_page < _totalPages) await loadPage(++_page);
+    observer.observe(sentinel);
+  })();
+})();
+</script>
+{% endblock %}
