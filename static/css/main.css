@@ -827,6 +827,27 @@ figure { overflow-x: auto; }
   margin-bottom: .6rem;
 }
 
+.catalog-row-header-left {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.catalog-drag-handle {
+  cursor: grab;
+  color: var(--pico-muted-color);
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  user-select: none;
+  opacity: .4;
+  transition: opacity .15s;
+}
+.catalog-drag-handle:hover { opacity: .9; }
+.catalog-row--dragging { opacity: .4; }
+.catalog-row--over { outline: 2px dashed var(--pico-primary); outline-offset: 2px; border-radius: 6px; }
+
 .catalog-row-title {
   margin: 0;
   font-size: 1.05rem;

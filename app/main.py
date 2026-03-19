@@ -160,6 +160,7 @@ async def favicon():
     return FileResponse("static/favicon/favicon.ico", media_type="image/x-icon")
 
 
+
 app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(sessions_router.router)

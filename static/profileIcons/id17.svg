@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Пират -->
+  <circle cx="100" cy="100" r="100" fill="#FFF8E8"/>
+
+  <!-- Тело -->
+  <rect x="58" y="148" width="84" height="56" rx="8" fill="#CC6600"/>
+  <!-- Жилетка -->
+  <path d="M70,148 L70,200 L130,200 L130,148 Q100,140 70,148 Z" fill="#8B4000"/>
+  <!-- Пуговицы -->
+  <circle cx="100" cy="156" r="2.5" fill="#FFD700"/>
+  <circle cx="100" cy="166" r="2.5" fill="#FFD700"/>
+  <circle cx="100" cy="176" r="2.5" fill="#FFD700"/>
+  <!-- Пояс -->
+  <rect x="58" y="158" width="84" height="9" rx="2" fill="#4A2800"/>
+  <rect x="88" y="156" width="24" height="13" rx="2" fill="#FFD700"/>
+  <rect x="92" y="159" width="16" height="7" rx="1" fill="#CC8800"/>
+
+  <!-- Шея -->
+  <rect x="86" y="128" width="28" height="24" rx="6" fill="#E8C090"/>
+
+  <!-- Голова -->
+  <ellipse cx="100" cy="100" rx="40" ry="42" fill="#E8C090"/>
+
+  <!-- Бандана -->
+  <path d="M60,88 Q100,70 140,88 L138,100 Q118,92 100,93 Q82,92 62,100 Z" fill="#CC0000"/>
+  <!-- Полосы -->
+  <path d="M60,93 Q100,76 140,93" fill="none" stroke="#AA0000" stroke-width="3"/>
+  <!-- Узел слева -->
+  <path d="M62,88 Q48,82 44,90 Q48,98 62,96 Z" fill="#CC0000"/>
+  <path d="M54,84 Q44,82 42,90 Q44,98 54,94 Z" fill="#AA0000"/>
+
+  <!-- Повязка на правом глазу -->
+  <ellipse cx="116" cy="98" rx="14" ry="12" fill="#2A1A0A"/>
+  <!-- Ремешок повязки -->
+  <path d="M102,92 L130,90" stroke="#2A1A0A" stroke-width="3"/>
+
+  <!-- Левый глаз -->
+  <ellipse cx="83" cy="98" rx="9" ry="8.5" fill="white"/>
+  <circle cx="84" cy="99" r="5" fill="#4A7A30"/>
+  <circle cx="84" cy="97" r="2.2" fill="#111"/>
+  <circle cx="86" cy="96" r="1.1" fill="white"/>
+
+  <!-- Нос -->
+  <ellipse cx="100" cy="110" rx="6" ry="4.5" fill="#D4906A"/>
+  <!-- Серьга -->
+  <circle cx="62" cy="106" r="4.5" fill="none" stroke="#FFD700" stroke-width="2.5"/>
+
+  <!-- Усы -->
+  <path d="M76,118 Q92,115 100,119 Q108,115 124,118" fill="none" stroke="#2A1A0A" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- Рот (ухмылка) -->
+  <path d="M82,124 Q100,134 118,124" fill="#CC5544"/>
+  <path d="M82,124 Q100,128 118,124" fill="#FF7766"/>
+  <!-- Золотой зуб -->
+  <rect x="97" y="124" width="6" height="7" rx="1" fill="#FFD700"/>
+  <!-- Щетина -->
+  <circle cx="76" cy="122" r="1.2" fill="#8B6040" opacity="0.6"/>
+  <circle cx="82" cy="126" r="1.2" fill="#8B6040" opacity="0.6"/>
+  <circle cx="120" cy="122" r="1.2" fill="#8B6040" opacity="0.6"/>
+  <circle cx="114" cy="126" r="1.2" fill="#8B6040" opacity="0.6"/>
+</svg>
