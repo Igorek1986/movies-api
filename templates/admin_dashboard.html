@@ -43,6 +43,7 @@
         <strong>{{ u.username }}</strong>
         <span class="role-badge role-{{ u.role }}">{{ u.role }}</span>
         {% if u.is_admin %}<span class="role-badge role-admin">admin</span>{% endif %}
+        {% if u.blocked_at %}<span class="role-badge role-blocked">заблокирован</span>{% endif %}
         <span class="muted small" style="margin-left:auto">
           #{{ u.id }} · {{ u.created_at.strftime('%d.%m.%Y') if u.created_at else '—' }}
         </span>
@@ -56,6 +57,9 @@
         {% endif %}
         {% if u.timecode_grace_until %}
         <span style="color:var(--pico-del-color)">Грейс до: {{ u.timecode_grace_until.strftime('%d.%m.%Y') }}</span>
+        {% endif %}
+        {% if u.blocked_at %}
+        <span style="color:var(--pico-del-color)">Блок с {{ u.blocked_at.strftime('%d.%m.%Y') }}{% if u.block_reason %}: {{ u.block_reason }}{% endif %}</span>
         {% endif %}
       </div>
 
@@ -108,6 +112,17 @@
           <button type="submit" class="btn-sm outline secondary" title="Удалить устройства/профили/таймкоды сверх лимита текущей роли">🗑 лимиты</button>
         </form>
 
+        <!-- Блокировка / разблокировка -->
+        {% if u.blocked_at %}
+        <form method="POST" action="/admin/user/{{ u.id }}/unblock" style="margin:0"
+              onsubmit="return confirm('Разблокировать {{ u.username }}?')">
+          <button type="submit" class="btn-sm outline" style="color:#16a34a;border-color:#16a34a55">✅ Разблок</button>
+        </form>
+        {% else %}
+        <button type="button" class="btn-sm outline" style="color:#dc2626;border-color:#dc262644"
+                onclick="blockUser({{ u.id }}, '{{ u.username }}')">🚫 Блок</button>
+        {% endif %}
+
       </div>
 
     </div>
@@ -129,7 +144,22 @@
   .role-premium { background: #2563eb22; color: #2563eb; }
   .role-super   { background: #d9770622; color: #d97706; }
   .role-admin   { background: #16a34a22; color: #16a34a; }
+  .role-blocked { background: #dc262622; color: #dc2626; }
   .role-select  { padding: .2rem .4rem; font-size: .85rem; width: auto; margin: 0; }
   .is-admin     { color: #16a34a; border-color: #16a34a55; }
 </style>
+<script>
+function blockUser(uid, username) {
+  const reason = prompt('Причина блокировки ' + username + ':');
+  if (reason === null) return;
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/admin/user/' + uid + '/block';
+  const inp = document.createElement('input');
+  inp.type = 'hidden'; inp.name = 'reason'; inp.value = reason;
+  form.appendChild(inp);
+  document.body.appendChild(form);
+  form.submit();
+}
+</script>
 {% endblock %}

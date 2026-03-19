@@ -118,9 +118,16 @@ function _renderCards(cards) {
   }).join('');
 
   grid.querySelectorAll('.media-card[data-card-id]').forEach(el => {
-    el.addEventListener('click', () => openCardModal(el.dataset.cardId));
-    el.addEventListener('keydown', e => { if (e.key === 'Enter') openCardModal(el.dataset.cardId); });
+    el.addEventListener('click', () => _navigateToCard(el.dataset.cardId));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') _navigateToCard(el.dataset.cardId); });
   });
+}
+
+function _navigateToCard(cardId) {
+  const p = new URLSearchParams({ back: location.pathname + location.search });
+  if (_currentDevice)       p.set('device_id', _currentDevice);
+  if (_currentProfile != null) p.set('profile_id', _currentProfile);
+  location.href = `/card/${encodeURIComponent(cardId)}?${p}`;
 }
 
 function _profileLabel(p) {
@@ -518,8 +525,6 @@ function initHistory(defaultDeviceId) {
       _renderCards(_allCards);
     });
   }
-
-  _initModal();
 
   const savedDevice = prefs.device_id
     && deviceSelect?.querySelector(`option[value="${prefs.device_id}"]`)

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Тхэквондист -->
+  <circle cx="100" cy="100" r="100" fill="#F0F8FF"/>
+
+  <!-- Тело (добок — белая форма) -->
+  <rect x="58" y="148" width="84" height="56" rx="8" fill="white" stroke="#DDD" stroke-width="1.5"/>
+  <!-- V-образный ворот -->
+  <path d="M78,148 L100,168 L122,148" fill="none" stroke="#111" stroke-width="5" stroke-linejoin="round"/>
+  <!-- Чёрный пояс -->
+  <rect x="58" y="158" width="84" height="9" rx="2" fill="#111"/>
+  <!-- Концы пояса -->
+  <rect x="88" y="167" width="9" height="20" rx="2" fill="#111"/>
+  <rect x="103" y="167" width="9" height="20" rx="2" fill="#111"/>
+
+  <!-- Шея -->
+  <rect x="86" y="128" width="28" height="24" rx="6" fill="#FFDDAA"/>
+
+  <!-- Голова -->
+  <ellipse cx="100" cy="102" rx="38" ry="40" fill="#FFDDAA"/>
+
+  <!-- Волосы (короткие, тёмные) -->
+  <ellipse cx="100" cy="72" rx="38" ry="22" fill="#2A1A0A"/>
+  <ellipse cx="100" cy="76" rx="36" ry="16" fill="#3A2A10"/>
+
+  <!-- Повязка хэчи -->
+  <rect x="62" y="78" width="76" height="13" rx="6" fill="#CC0000"/>
+  <!-- Узел сбоку -->
+  <path d="M138,78 Q150,76 153,84 Q150,92 138,91 Z" fill="#CC0000"/>
+  <path d="M148,80 Q156,78 158,84 Q156,90 148,88 Z" fill="#AA0000"/>
+  <!-- Иероглиф -->
+  <text x="100" y="88" text-anchor="middle" font-size="9" font-family="serif" font-weight="bold" fill="white">태권도</text>
+
+  <!-- Брови нахмурены -->
+  <path d="M80,92 Q88,88 96,92" fill="none" stroke="#2A1A0A" stroke-width="3" stroke-linecap="round"/>
+  <path d="M104,92 Q112,88 120,92" fill="none" stroke="#2A1A0A" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Глаза -->
+  <ellipse cx="87" cy="99" rx="7.5" ry="7" fill="white"/>
+  <ellipse cx="113" cy="99" rx="7.5" ry="7" fill="white"/>
+  <circle cx="88" cy="100" r="4.5" fill="#2A1A0A"/>
+  <circle cx="114" cy="100" r="4.5" fill="#2A1A0A"/>
+  <circle cx="88" cy="98" r="1.8" fill="#111"/>
+  <circle cx="114" cy="98" r="1.8" fill="#111"/>
+  <circle cx="90" cy="97" r="0.9" fill="white"/>
+  <circle cx="116" cy="97" r="0.9" fill="white"/>
+
+  <!-- Нос -->
+  <path d="M96,108 Q100,113 104,108" fill="none" stroke="#D4906A" stroke-width="2"/>
+  <!-- Рот (серьёзный) -->
+  <line x1="90" y1="117" x2="110" y2="117" stroke="#C06040" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Поднятая рука -->
+  <path d="M138,150 Q156,134 160,116 Q163,104 156,96" fill="none" stroke="#FFDDAA" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Кулак -->
+  <ellipse cx="154" cy="93" rx="11" ry="10" fill="#FFDDAA"/>
+  <line x1="145" y1="91" x2="163" y2="91" stroke="#D4906A" stroke-width="1.5"/>
+  <line x1="145" y1="96" x2="163" y2="96" stroke="#D4906A" stroke-width="1.5"/>
+  <!-- Манжета добока на руке -->
+  <path d="M136,152 Q138,156 142,154" fill="none" stroke="white" stroke-width="3"/>
+</svg>

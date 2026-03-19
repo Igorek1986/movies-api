@@ -733,3 +733,231 @@ figure { overflow-x: auto; }
   }
   .mobile-cards tbody td.actions-cell::before { display: none; }
 }
+
+/* ============================================================
+   CARD DETAIL PAGE
+   ============================================================ */
+
+.card-detail-backdrop {
+  width: 100%;
+  height: 260px;
+  object-fit: cover;
+  object-position: center 30%;
+  display: block;
+}
+@media (min-width: 600px) {
+  .card-detail-backdrop { height: 380px; }
+}
+
+.card-detail-back {
+  position: absolute;
+  top: .75rem;
+  left: .75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  background: rgba(0,0,0,.55);
+  color: #fff;
+  text-decoration: none;
+  font-size: .85rem;
+  padding: .3rem .7rem;
+  border-radius: 2em;
+  backdrop-filter: blur(4px);
+  transition: background .15s;
+}
+.card-detail-back:hover { background: rgba(0,0,0,.75); color: #fff; }
+
+.card-detail-body {
+  padding: 1.25rem var(--pico-spacing) 2rem;
+}
+
+.card-detail-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 .25rem;
+}
+@media (min-width: 600px) {
+  .card-detail-title { font-size: 1.9rem; }
+}
+
+.card-detail-orig {
+  font-size: .9rem;
+  color: var(--pico-muted-color);
+  margin: 0 0 .65rem;
+}
+
+.card-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-bottom: .9rem;
+}
+
+.card-detail-tag {
+  font-size: .78rem;
+  padding: .15em .6em;
+  border-radius: 2em;
+  background: var(--pico-code-background-color);
+  color: var(--pico-muted-color);
+}
+.card-detail-tag.accent {
+  background: var(--pico-primary);
+  color: #fff;
+}
+
+.card-detail-overview {
+  font-size: .92rem;
+  line-height: 1.65;
+  color: var(--pico-color);
+  margin-bottom: 1rem;
+}
+
+/* ============================================================
+   CATALOG — horizontal category rows
+   ============================================================ */
+
+.catalog-row {
+  margin-bottom: 2rem;
+}
+
+.catalog-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .6rem;
+}
+
+.catalog-row-header-left {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.catalog-drag-handle {
+  cursor: grab;
+  color: var(--pico-muted-color);
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  user-select: none;
+  opacity: .4;
+  transition: opacity .15s;
+}
+.catalog-drag-handle:hover { opacity: .9; }
+.catalog-row--dragging { opacity: .4; }
+.catalog-row--over { outline: 2px dashed var(--pico-primary); outline-offset: 2px; border-radius: 6px; }
+
+.catalog-row-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.catalog-row-more {
+  font-size: .82rem;
+  color: var(--pico-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.catalog-row-more:hover { text-decoration: underline; }
+
+.catalog-row-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: .4rem;
+}
+
+.catalog-row-inner {
+  display: flex;
+  gap: .5rem;
+  width: max-content;
+}
+
+.catalog-poster-card {
+  display: block;
+  position: relative;
+  width: 200px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  aspect-ratio: 2/3;
+  background: var(--pico-card-background-color);
+  text-decoration: none;
+  transition: transform .15s;
+}
+@media (min-width: 480px) { .catalog-poster-card { width: 230px; } }
+@media (min-width: 768px) { .catalog-poster-card { width: 180px; } }
+
+.catalog-poster-card:hover { transform: scale(1.04); }
+
+.catalog-poster-card img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.catalog-poster-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1.8rem .45rem .4rem;
+  background: linear-gradient(transparent, rgba(0,0,0,.85));
+}
+
+.catalog-poster-title {
+  font-size: .67rem;
+  color: #fff;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.catalog-poster-year {
+  font-size: .6rem;
+  color: rgba(255,255,255,.6);
+  margin-top: .1rem;
+}
+
+.catalog-row-loading,
+.catalog-row-empty {
+  color: var(--pico-muted-color);
+  font-size: .82rem;
+  padding: .5rem;
+  height: 210px;
+  display: flex;
+  align-items: center;
+}
+
+/* Catalog category page grid */
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: .75rem;
+}
+@media (min-width: 480px) { .catalog-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 700px) { .catalog-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); } }
+
+/* In grid context: override fixed row-width so card fills the column */
+.catalog-grid .catalog-poster-card {
+  width: 100%;
+}
+
+.catalog-back {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  color: var(--pico-muted-color);
+  text-decoration: none;
+  font-size: .88rem;
+  margin-bottom: 1rem;
+}
+.catalog-back:hover { color: var(--pico-color); }

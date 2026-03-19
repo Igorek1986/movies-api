@@ -603,17 +603,24 @@
 
     // === Поддержка профилей ===
     function getProfileId() {
-        // var profileId = '';
-        var profileId = Lampa.Storage.get('lampac_profile_id', '');
+
+        if (window._np_profiles_started) {
+            var npId = Lampa.Storage.get('np_profile_id', '');
+            if (npId) return String(npId);
+        }
+
+        if (window.profiles_plugin) {
+            var profileId = Lampa.Storage.get('lampac_profile_id', '');
+            if (profileId) return String(profileId);
+        }
+
         try {
             if (Lampa.Account.Permit.account && Lampa.Account.Permit.account.profile && Lampa.Account.Permit.account.profile.id) {
-                profileId = '_' + Lampa.Account.Permit.account.profile.id;
+                return String(Lampa.Account.Permit.account.profile.id);
             }
         } catch (e) {}
-        if (profileId && profileId.charAt(0) === '_') {
-            profileId = profileId.substring(1);
-        }
-        return profileId;
+
+        return '';
     }
 
     function getProfileKey(baseKey) {
@@ -626,15 +633,17 @@
     }
 
     function getProfileName() {
-        var profileName = '';
+
+        var npName = Lampa.Storage.get('np_profile_name', '');
+        if (npName) return String(npName);
+
         try {
             if (Lampa.Account.Permit.account && Lampa.Account.Permit.account.profile && Lampa.Account.Permit.account.profile.name) {
-                profileName = Lampa.Account.Permit.account.profile.name;
+                return String(Lampa.Account.Permit.account.profile.name);
             }
         } catch (e) {}
-        if (profileName) {
-            return profileName;
-        }
+
+        return '';
     }
 
     function getProfileSetting(key, defaultValue) {

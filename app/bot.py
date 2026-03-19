@@ -105,32 +105,35 @@ async def _on_startup(bot: Bot) -> None:
     from app.config import get_settings
 
     settings = get_settings()
-    if not settings.TELEGRAM_USE_POLLING:
-        webhook_url = f"{settings.BASE_URL}/bot/webhook"
-        secret = settings.TELEGRAM_BOT_TOKEN.split(":")[1]
-        await bot.set_webhook(
-            webhook_url,
-            secret_token=secret,
-            allowed_updates=["message", "callback_query"],
-        )
-        logger.info(f"Telegram webhook set: {webhook_url}")
+    try:
+        if not settings.TELEGRAM_USE_POLLING:
+            webhook_url = f"{settings.BASE_URL}/bot/webhook"
+            secret = settings.TELEGRAM_BOT_TOKEN.split(":")[1]
+            await bot.set_webhook(
+                webhook_url,
+                secret_token=secret,
+                allowed_updates=["message", "callback_query"],
+            )
+            logger.info(f"Telegram webhook set: {webhook_url}")
 
-    # Команды бота (видны в меню «/»)
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="status", description="Статус аккаунта"),
-        ]
-    )
-
-    # Глобальная кнопка меню — открывает Mini App (для привязанных пользователей)
-    await bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(
-            text="📱 Управление",
-            web_app=WebAppInfo(url=f"{settings.BASE_URL}/tg-app"),
+        # Команды бота (видны в меню «/»)
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start", description="Главное меню"),
+                BotCommand(command="status", description="Статус аккаунта"),
+            ]
         )
-    )
-    logger.info("Bot commands and menu button set")
+
+        # Глобальная кнопка меню — открывает Mini App (для привязанных пользователей)
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="📱 Управление",
+                web_app=WebAppInfo(url=f"{settings.BASE_URL}/tg-app"),
+            )
+        )
+        logger.info("Bot commands and menu button set")
+    except Exception as e:
+        logger.warning(f"Telegram bot startup failed (API unavailable?): {e}")
 
 
 async def _on_shutdown(bot: Bot) -> None:
@@ -153,6 +156,24 @@ def init_bot(token: str) -> tuple[Bot, Dispatcher]:
 # ─── Хелперы ──────────────────────────────────────────────────────────────────
 
 
+def _fmt_date(dt, user) -> str:
+    """Format datetime in user's local timezone as dd.mm.YYYY."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from datetime import timezone as _tz
+    if dt is None:
+        return "—"
+    if not hasattr(dt, "hour"):
+        return dt.strftime("%d.%m.%Y")
+    tz_name = getattr(user, "timezone", None) or settings_cache.get("default_timezone") or "Europe/Moscow"
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, Exception):
+        tz = ZoneInfo("Europe/Moscow")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt.astimezone(tz).strftime("%d.%m.%Y")
+
+
 def _is_admin(telegram_id: int) -> bool:
     from app.config import get_settings
 
@@ -168,6 +189,7 @@ async def _get_tg_user(db, telegram_id: int) -> TelegramUser | None:
 
 async def _process_link_code(message: types.Message, code: str):
     """Привязывает Telegram-аккаунт к коду из БД."""
+    logger.info(f"Link code attempt: tg_id={message.from_user.id} code={repr(code)}")
     async with async_session_maker() as db:
         now = datetime.now(timezone.utc)
 
@@ -177,6 +199,9 @@ async def _process_link_code(message: types.Message, code: str):
         link_code = result.scalar_one_or_none()
 
         if not link_code:
+            all_codes = await db.execute(select(TelegramLinkCode))
+            existing = [c.code for c in all_codes.scalars().all()]
+            logger.warning(f"Link code not found: {repr(code)}, codes in DB: {existing}")
             await message.answer("Код не найден. Запросите новый на сайте.")
             return
 
@@ -271,7 +296,7 @@ async def cmd_status(message: types.Message):
             grace_until = grace_until.replace(tzinfo=timezone.utc)
         if grace_until > now:
             days_left = (grace_until - now).days
-            subscription_line = f"\n⚠️ <b>Grace-период:</b> ещё {days_left} {_plural(days_left, 'день', 'дня', 'дней')} (до {grace_until.strftime('%d.%m.%Y')})"
+            subscription_line = f"\n⚠️ <b>Grace-период:</b> ещё {days_left} {_plural(days_left, 'день', 'дня', 'дней')} (до {_fmt_date(grace_until, user)})"
         else:
             subscription_line = "\n❌ <b>Grace-период истёк</b>"
     elif user.premium_until:
@@ -730,19 +755,25 @@ async def send_reset_code(telegram_id: int, username: str, code: str) -> bool:
 
 
 async def send_new_session_notification(
-    telegram_id: int, ip: str, device: str, change_password_url: str, username: str = ""
+    telegram_id: int, ip: str, device: str, change_password_url: str, username: str = "", user_timezone: str = ""
 ) -> bool:
     """Уведомить пользователя о новом входе в аккаунт."""
     from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-    now = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    tz_name = user_timezone or settings_cache.get("default_timezone") or "Europe/Moscow"
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, Exception):
+        tz = ZoneInfo("Europe/Moscow")
+    now = datetime.now(timezone.utc).astimezone(tz).strftime("%d.%m.%Y %H:%M")
     user_line = f"👤 Аккаунт: <b>{username}</b>\n" if username else ""
     text = (
         f"🔐 <b>Новый вход в аккаунт</b>\n\n"
         f"{user_line}"
         f"🌐 IP: <code>{ip}</code>\n"
         f"📱 Устройство: {device}\n"
-        f"🕐 Время: {now}\n\n"
+        f"🕐 Время: {now} ({tz_name})\n\n"
         f'Если это были не вы — <a href="{change_password_url}">смените пароль</a>.'
     )
     return await send_message(telegram_id, text)

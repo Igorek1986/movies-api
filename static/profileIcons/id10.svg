@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Принцесса -->
+  <circle cx="100" cy="100" r="100" fill="#FFF0F8"/>
+  <!-- Корона -->
+  <polygon points="60,72 72,50 85,68 100,44 115,68 128,50 140,72" fill="#FFD700"/>
+  <polygon points="62,74 138,74 136,85 64,85" fill="#FFC200"/>
+  <!-- Камни в короне -->
+  <circle cx="100" cy="55" r="6" fill="#FF4488"/>
+  <circle cx="74" cy="62" r="4.5" fill="#AA44FF"/>
+  <circle cx="126" cy="62" r="4.5" fill="#44AAFF"/>
+  <!-- Волосы (задние) -->
+  <ellipse cx="100" cy="115" rx="54" ry="55" fill="#C8702A"/>
+  <!-- Лицо -->
+  <ellipse cx="100" cy="112" rx="44" ry="46" fill="#FFDAB0"/>
+  <!-- Волосы (передние) -->
+  <ellipse cx="62" cy="98" rx="18" ry="30" fill="#C8702A"/>
+  <ellipse cx="138" cy="98" rx="18" ry="30" fill="#C8702A"/>
+  <ellipse cx="62" cy="90" rx="14" ry="22" fill="#D98030"/>
+  <ellipse cx="138" cy="90" rx="14" ry="22" fill="#D98030"/>
+  <!-- Глаза -->
+  <ellipse cx="86" cy="105" rx="8" ry="9" fill="white"/>
+  <ellipse cx="114" cy="105" rx="8" ry="9" fill="white"/>
+  <ellipse cx="87" cy="106" rx="4.5" ry="5.5" fill="#6A3A1A"/>
+  <ellipse cx="115" cy="106" rx="4.5" ry="5.5" fill="#6A3A1A"/>
+  <circle cx="87" cy="104" r="1.8" fill="#111"/>
+  <circle cx="115" cy="104" r="1.8" fill="#111"/>
+  <circle cx="89" cy="103" r="1" fill="white"/>
+  <circle cx="117" cy="103" r="1" fill="white"/>
+  <!-- Ресницы -->
+  <path d="M79,100 Q82,96 86,98" fill="none" stroke="#4A2A0A" stroke-width="1.5"/>
+  <path d="M108,98 Q112,96 121,100" fill="none" stroke="#4A2A0A" stroke-width="1.5"/>
+  <!-- Нос -->
+  <ellipse cx="100" cy="116" rx="4" ry="3" fill="#E8A88A"/>
+  <!-- Рот -->
+  <path d="M88,124 Q100,133 112,124" fill="#FF7799" stroke="#E05070" stroke-width="1"/>
+  <path d="M88,124 Q100,128 112,124" fill="#FF99AA"/>
+  <!-- Румянец -->
+  <ellipse cx="78" cy="118" rx="9" ry="6" fill="#FFB0C0" opacity="0.5"/>
+  <ellipse cx="122" cy="118" rx="9" ry="6" fill="#FFB0C0" opacity="0.5"/>
+</svg>

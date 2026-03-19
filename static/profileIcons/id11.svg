@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Дедушка -->
+  <circle cx="100" cy="100" r="100" fill="#F0F4FF"/>
+  <!-- Волосы (белые, пышные) -->
+  <ellipse cx="100" cy="82" rx="52" ry="30" fill="#E8E8E8"/>
+  <ellipse cx="55" cy="92" rx="18" ry="26" fill="#E8E8E8"/>
+  <ellipse cx="145" cy="92" rx="18" ry="26" fill="#E8E8E8"/>
+  <!-- Лысина -->
+  <ellipse cx="100" cy="78" rx="36" ry="24" fill="#FFDDB0"/>
+  <!-- Лицо -->
+  <ellipse cx="100" cy="112" rx="46" ry="48" fill="#FFDDB0"/>
+  <!-- Морщины на лбу -->
+  <path d="M76,86 Q100,82 124,86" fill="none" stroke="#D4A870" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M80,93 Q100,90 120,93" fill="none" stroke="#D4A870" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Густые брови (седые) -->
+  <path d="M72,100 Q86,95 96,100" fill="none" stroke="#BBBBBB" stroke-width="5" stroke-linecap="round"/>
+  <path d="M104,100 Q114,95 128,100" fill="none" stroke="#BBBBBB" stroke-width="5" stroke-linecap="round"/>
+  <!-- Глаза -->
+  <ellipse cx="86" cy="109" rx="8" ry="7.5" fill="white"/>
+  <ellipse cx="114" cy="109" rx="8" ry="7.5" fill="white"/>
+  <circle cx="87" cy="110" r="4" fill="#5A6A80"/>
+  <circle cx="115" cy="110" r="4" fill="#5A6A80"/>
+  <circle cx="87" cy="108" r="1.5" fill="#111"/>
+  <circle cx="115" cy="108" r="1.5" fill="#111"/>
+  <circle cx="89" cy="107" r="1" fill="white"/>
+  <circle cx="117" cy="107" r="1" fill="white"/>
+  <!-- Мешки под глазами -->
+  <path d="M79,115 Q86,119 94,115" fill="none" stroke="#D4A870" stroke-width="1.2"/>
+  <path d="M106,115 Q114,119 121,115" fill="none" stroke="#D4A870" stroke-width="1.2"/>
+  <!-- Нос (крупнее) -->
+  <ellipse cx="100" cy="122" rx="7" ry="5" fill="#E8A878"/>
+  <circle cx="95" cy="124" r="3.5" fill="#E8A878"/>
+  <circle cx="105" cy="124" r="3.5" fill="#E8A878"/>
+  <!-- Усы (густые, седые) -->
+  <path d="M78,132 Q100,128 122,132" fill="#CCCCCC" stroke="#AAAAAA" stroke-width="1"/>
+  <ellipse cx="100" cy="132" rx="22" ry="7" fill="#DDDDDD"/>
+  <!-- Рот -->
+  <path d="M88,140 Q100,147 112,140" fill="none" stroke="#C07850" stroke-width="2" stroke-linecap="round"/>
+  <!-- Уши -->
+  <ellipse cx="54" cy="112" rx="8" ry="10" fill="#FFDDB0"/>
+  <ellipse cx="146" cy="112" rx="8" ry="10" fill="#FFDDB0"/>
+  <!-- Очки -->
+  <circle cx="86" cy="110" r="14" fill="none" stroke="#8B6040" stroke-width="2.5"/>
+  <circle cx="114" cy="110" r="14" fill="none" stroke="#8B6040" stroke-width="2.5"/>
+  <line x1="100" y1="110" x2="100" y2="110" stroke="#8B6040" stroke-width="2.5"/>
+  <path d="M100,109 Q100,111 100,110" fill="none" stroke="#8B6040" stroke-width="2.5"/>
+  <line x1="72" y1="107" x2="64" y2="105" stroke="#8B6040" stroke-width="2"/>
+  <line x1="128" y1="107" x2="136" y2="105" stroke="#8B6040" stroke-width="2"/>
+</svg>

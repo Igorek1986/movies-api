@@ -345,7 +345,6 @@
     <div class="details-body">
 
       <h4>Telegram</h4>
-      <p class="muted small">Используется для восстановления пароля.</p>
       <div id="tgStatus">
         {% if tg_linked %}
         <p class="muted small">Привязан{% if tg_username %}: <strong>@{{ tg_username }}</strong>{% endif %}</p>
@@ -355,6 +354,7 @@
         {% else %}
         <p class="muted small">Telegram не привязан.</p>
         <button type="button" id="tgLinkBtn" class="secondary">Привязать Telegram</button>
+        <p class="muted small" style="margin-top: .4rem; font-size: .8rem;">Привязывая Telegram, вы разрешаете хранение вашего Telegram ID и username для восстановления пароля и отправки уведомлений.</p>
         <span id="tgLinkStatus" class="status-text"></span>
         {% endif %}
       </div>

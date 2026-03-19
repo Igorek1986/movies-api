@@ -72,6 +72,9 @@ class User(Base):
     last_active_at        = Column(Date, nullable=True)
     inactive_warned       = Column(Boolean, nullable=False, default=False, server_default="false")
     notify_inactive_after = Column(DateTime(timezone=True), nullable=True)
+    # Account block (admin action)
+    blocked_at   = Column(DateTime(timezone=True), nullable=True)
+    block_reason = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -179,6 +182,7 @@ class LampaProfile(Base):
     device_id        = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
     lampa_profile_id = Column(String(100), nullable=False)
     name             = Column(String(100), nullable=False, default="")
+    icon             = Column(String(20), nullable=True)   # e.g. "id1", "id3"
 
     __table_args__ = (
         UniqueConstraint("device_id", "lampa_profile_id", name="uq_lampa_profile"),

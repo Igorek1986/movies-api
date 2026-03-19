@@ -42,6 +42,7 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .role-simple  { background:rgba(142,142,147,.2); color:var(--hint); }
 .role-premium { background:rgba(255,214,10,.2);  color:var(--warning); }
 .role-super   { background:rgba(48,209,88,.2);   color:var(--accent); }
+.role-blocked { background:rgba(255,69,58,.15);  color:var(--danger); }
 
 /* Stats */
 .sg { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
@@ -209,6 +210,19 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
   <div class="pane" id="p-users">
     <input class="search" type="text" id="search" placeholder="Поиск по логину…" oninput="filterUsers(this.value)">
     <div id="users-list"></div>
+  </div>
+
+  <!-- Модальное окно для причины блокировки -->
+  <div id="block-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:none;align-items:flex-end">
+    <div style="width:100%;background:var(--bg2);border-radius:16px 16px 0 0;padding:20px 16px 32px">
+      <div style="font-weight:600;font-size:16px;margin-bottom:12px">🚫 Блокировка <span id="block-uname"></span></div>
+      <input id="block-reason-inp" type="text" placeholder="Причина (необязательно)"
+             style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid rgba(255,255,255,.15);border-radius:var(--r);color:var(--text);font-size:14px;box-sizing:border-box;margin-bottom:12px">
+      <div style="display:flex;gap:8px">
+        <button onclick="closeBlockModal()" style="flex:1;padding:11px;background:var(--bg);border:1px solid rgba(255,255,255,.15);border-radius:var(--r);color:var(--hint);font-size:14px;font-weight:600;cursor:pointer">Отмена</button>
+        <button onclick="confirmBlock()" style="flex:1;padding:11px;background:rgba(255,69,58,.15);border:1px solid rgba(255,69,58,.3);border-radius:var(--r);color:var(--danger);font-size:14px;font-weight:600;cursor:pointer">Заблокировать</button>
+      </div>
+    </div>
   </div>
   <div class="pane" id="p-sett"><div id="sett-body"></div></div>
   <div class="pane" id="p-supp">
@@ -638,14 +652,23 @@ function renderUsers(users) {
   list.innerHTML = users.map(u => `
     <div class="user-item" id="u-${u.id}">
       <div class="urow">
-        <div class="uav">${esc(u.username[0]).toUpperCase()}</div>
+        <div class="uav" style="${u.blocked_at?'background:rgba(255,69,58,.2)':''}">${esc(u.username[0]).toUpperCase()}</div>
         <div style="flex:1;min-width:0">
           <div class="unm">${esc(u.username)}${u.tg_username?` <span style="color:var(--hint);font-weight:400">@${esc(u.tg_username)}</span>`:''}</div>
-          <div class="umt"><span class="role-badge role-${u.role}">${RL[u.role]||u.role}</span> ${u.device_count}/${u.device_limit??'∞'} уст. · ${u.created_at||'—'}</div>
+          <div class="umt">
+            <span class="role-badge role-${u.role}">${RL[u.role]||u.role}</span>
+            ${u.blocked_at?`<span class="role-badge role-blocked">блок ${u.blocked_at}</span>`:''}
+            ${u.device_count}/${u.device_limit??'∞'} уст. · ${u.created_at||'—'}
+          </div>
+          ${u.block_reason?`<div style="font-size:11px;color:var(--danger);margin-top:2px">Причина: ${esc(u.block_reason)}</div>`:''}
         </div>
       </div>
       <div class="rbtns">
         ${['simple','premium','super'].map(r=>`<button class="rbtn ${r}${u.role===r?' current':''}" onclick="setRole(${u.id},'${r}',this)">${RL[r]}</button>`).join('')}
+        ${u.blocked_at
+          ? `<button class="rbtn" style="color:var(--accent);border-color:rgba(48,209,88,.3)" onclick="unblockUser(${u.id},this)">✅ Разблок</button>`
+          : `<button class="rbtn" style="color:var(--danger);border-color:rgba(255,69,58,.3)" onclick="openBlockModal(${u.id},'${esc(u.username)}')">🚫 Блок</button>`
+        }
       </div>
     </div>`).join('');
 }
@@ -661,6 +684,45 @@ async function setRole(uid, role, btn) {
     btns.forEach(b=>{b.classList.toggle('current',b.classList.contains(role));b.disabled=false;});
     toast(`${d.username}: роль → ${RL[role]}`); haptic();
   } catch(e) { btns.forEach(b=>b.disabled=false); toast('Ошибка: '+e.message); haptic('error'); }
+}
+
+let _blockUid = null;
+function openBlockModal(uid, username) {
+  _blockUid = uid;
+  document.getElementById('block-uname').textContent = username;
+  document.getElementById('block-reason-inp').value = '';
+  const ov = document.getElementById('block-overlay');
+  ov.style.display = 'flex';
+  setTimeout(() => document.getElementById('block-reason-inp').focus(), 100);
+}
+function closeBlockModal() {
+  document.getElementById('block-overlay').style.display = 'none';
+  _blockUid = null;
+}
+async function confirmBlock() {
+  if (!_blockUid) return;
+  const reason = document.getElementById('block-reason-inp').value.trim();
+  try {
+    const d = await api('POST', `/api/users/${_blockUid}/block`, { reason });
+    const u = allUsers.find(x=>x.id===_blockUid);
+    const today = new Date().toLocaleDateString('ru-RU');
+    if (u) { u.blocked_at = today; u.block_reason = reason || null; }
+    closeBlockModal();
+    renderUsers(allUsers.filter(x => document.getElementById('search').value
+      ? x.username.toLowerCase().includes(document.getElementById('search').value.toLowerCase()) : true));
+    toast(`${d.username} заблокирован`); haptic('error');
+  } catch(e) { toast('Ошибка: '+e.message); haptic('error'); }
+}
+async function unblockUser(uid, btn) {
+  btn.disabled = true;
+  try {
+    const d = await api('POST', `/api/users/${uid}/unblock`);
+    const u = allUsers.find(x=>x.id===uid);
+    if (u) { u.blocked_at = null; u.block_reason = null; }
+    renderUsers(allUsers.filter(x => document.getElementById('search').value
+      ? x.username.toLowerCase().includes(document.getElementById('search').value.toLowerCase()) : true));
+    toast(`${d.username} разблокирован`); haptic();
+  } catch(e) { btn.disabled = false; toast('Ошибка: '+e.message); haptic('error'); }
 }
 
 // ── Admin: Support ────────────────────────────────────────────────────────────
