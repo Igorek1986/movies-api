@@ -604,11 +604,15 @@
     // === Поддержка профилей ===
     function getProfileId() {
 
-        var npId = Lampa.Storage.get('np_profile_id', '');
-        if (npId) return String(npId);
+        if (window._np_profiles_started) {
+            var npId = Lampa.Storage.get('np_profile_id', '');
+            if (npId) return String(npId);
+        }
 
-        var profileId = Lampa.Storage.get('lampac_profile_id', '');
-        if (profileId) return String(profileId);
+        if (window.profiles_plugin) {
+            var profileId = Lampa.Storage.get('lampac_profile_id', '');
+            if (profileId) return String(profileId);
+        }
 
         try {
             if (Lampa.Account.Permit.account && Lampa.Account.Permit.account.profile && Lampa.Account.Permit.account.profile.id) {
