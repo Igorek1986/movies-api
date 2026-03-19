@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Балерина -->
+  <circle cx="100" cy="100" r="100" fill="#FFF0F8"/>
+
+  <!-- Пачка (пышная) -->
+  <ellipse cx="100" cy="168" rx="58" ry="22" fill="#FFB6D9"/>
+  <ellipse cx="100" cy="160" rx="52" ry="18" fill="#FF9CC8"/>
+  <ellipse cx="100" cy="152" rx="44" ry="14" fill="#FFB6D9"/>
+  <!-- Лепестки пачки -->
+  <ellipse cx="60" cy="158" rx="18" ry="8" fill="#FFAACC" transform="rotate(-20,60,158)"/>
+  <ellipse cx="78" cy="153" rx="18" ry="8" fill="#FFB6D9" transform="rotate(-10,78,153)"/>
+  <ellipse cx="100" cy="151" rx="18" ry="8" fill="#FFAACC"/>
+  <ellipse cx="122" cy="153" rx="18" ry="8" fill="#FFB6D9" transform="rotate(10,122,153)"/>
+  <ellipse cx="140" cy="158" rx="18" ry="8" fill="#FFAACC" transform="rotate(20,140,158)"/>
+
+  <!-- Корсет платья -->
+  <path d="M76,130 Q100,125 124,130 L120,152 Q100,148 80,152 Z" fill="#FF88BB"/>
+  <!-- Блёстки на корсете -->
+  <circle cx="100" cy="136" r="2" fill="white" opacity="0.8"/>
+  <circle cx="90" cy="140" r="1.5" fill="white" opacity="0.8"/>
+  <circle cx="110" cy="140" r="1.5" fill="white" opacity="0.8"/>
+  <circle cx="100" cy="144" r="1.5" fill="white" opacity="0.8"/>
+
+  <!-- Голова -->
+  <ellipse cx="100" cy="90" rx="35" ry="38" fill="#FFE0C0"/>
+
+  <!-- Волосы — пучок -->
+  <ellipse cx="100" cy="58" rx="28" ry="24" fill="#8B4513"/>
+  <ellipse cx="100" cy="54" rx="22" ry="18" fill="#A0522D"/>
+  <!-- Пучок сверху -->
+  <ellipse cx="100" cy="45" rx="16" ry="14" fill="#8B4513"/>
+  <ellipse cx="100" cy="43" rx="12" ry="10" fill="#A0522D"/>
+  <!-- Заколка/цветок -->
+  <circle cx="112" cy="48" r="7" fill="#FF88BB"/>
+  <circle cx="112" cy="48" r="3" fill="white"/>
+  <circle cx="118" cy="44" r="4" fill="#FF88BB" opacity="0.7"/>
+  <circle cx="106" cy="44" r="4" fill="#FF88BB" opacity="0.7"/>
+
+  <!-- Глаза (большие, выразительные) -->
+  <ellipse cx="87" cy="92" rx="9" ry="10" fill="white"/>
+  <ellipse cx="113" cy="92" rx="9" ry="10" fill="white"/>
+  <ellipse cx="88" cy="93" rx="5.5" ry="6.5" fill="#5A2A1A"/>
+  <ellipse cx="114" cy="93" rx="5.5" ry="6.5" fill="#5A2A1A"/>
+  <circle cx="88" cy="91" r="2.2" fill="#111"/>
+  <circle cx="114" cy="91" r="2.2" fill="#111"/>
+  <circle cx="90" cy="89" r="1.3" fill="white"/>
+  <circle cx="116" cy="89" r="1.3" fill="white"/>
+  <!-- Длинные ресницы -->
+  <path d="M79,86 Q83,81 88,84" fill="none" stroke="#2A1A0A" stroke-width="1.5"/>
+  <path d="M83,84 Q87,80 90,83" fill="none" stroke="#2A1A0A" stroke-width="1.2"/>
+  <path d="M110,84 Q113,80 117,84" fill="none" stroke="#2A1A0A" stroke-width="1.5"/>
+  <path d="M114,83 Q117,79 121,83" fill="none" stroke="#2A1A0A" stroke-width="1.2"/>
+
+  <!-- Нос -->
+  <ellipse cx="100" cy="103" rx="3.5" ry="2.5" fill="#E8A888"/>
+  <!-- Рот (улыбка) -->
+  <path d="M90,111 Q100,119 110,111" fill="#FF7799" stroke="#E05070" stroke-width="1"/>
+  <path d="M90,111 Q100,115 110,111" fill="#FFAABB"/>
+  <!-- Румянец -->
+  <ellipse cx="80" cy="105" rx="8" ry="5" fill="#FFB0C8" opacity="0.5"/>
+  <ellipse cx="120" cy="105" rx="8" ry="5" fill="#FFB0C8" opacity="0.5"/>
+</svg>

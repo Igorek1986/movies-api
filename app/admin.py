@@ -10,7 +10,8 @@ from sqlalchemy import select, func
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import User, Device, Timecode, USER_ROLES
+from app.db.models import User, Device, Timecode, Session, TelegramUser, USER_ROLES
+from sqlalchemy import delete as sa_delete
 from app.api.dependencies import get_current_user
 from app import rate_limit, settings_cache
 
@@ -41,15 +42,6 @@ async def _get_admin_user(
     user = await get_current_user(request, response, db)
     return user if (user and user.is_admin) else None
 
-
-def _grace_days_used(user, now: datetime) -> int:
-    """Количество дней проведённых в grace-периоде (0 если не в grace)."""
-    grace_days = settings_cache.get_int("timecode_grace_days")
-    if not user.timecode_grace_until or grace_days == 0:
-        return 0
-    expired_at = user.timecode_grace_until - timedelta(days=grace_days)
-    days_used = (now - expired_at).days
-    return max(0, min(days_used, grace_days))
 
 
 async def _check_admin(
@@ -133,6 +125,8 @@ async def admin_dashboard(
             "premium_until": u.premium_until,
             "timecode_grace_until": u.timecode_grace_until,
             "created_at": u.created_at,
+            "blocked_at": u.blocked_at,
+            "block_reason": u.block_reason,
         })
 
     return templates.TemplateResponse("admin_dashboard.html", {
@@ -174,10 +168,11 @@ async def change_user_role(
     if role == "premium":
         now = datetime.now(timezone.utc)
         duration_days = settings_cache.get_int("premium_duration_days")
-        if was_in_grace:
-            duration_days = max(1, duration_days - _grace_days_used(user, now))
-        # Истекает в конец (23:59:59) дня через N дней — не зависит от времени выдачи
-        expiry_day = (now + timedelta(days=duration_days)).replace(
+        if was_in_grace and user.premium_until:
+            base, days = user.premium_until, duration_days
+        else:
+            base, days = now, duration_days - 1
+        expiry_day = (base + timedelta(days=days)).replace(
             hour=23, minute=59, second=59, microsecond=0
         )
         user.premium_until = expiry_day
@@ -261,12 +256,8 @@ async def extend_premium(
     if user.role != "premium" and not in_grace:
         raise HTTPException(status_code=400, detail="Пользователь не является Premium и не в grace-периоде")
 
-    extend_days = 30
-    if in_grace:
-        extend_days = max(1, extend_days - _grace_days_used(user, now))
-
-    base = user.premium_until if (user.premium_until and user.premium_until > now) else now
-    user.premium_until = (base + timedelta(days=extend_days)).replace(hour=23, minute=59, second=59, microsecond=0)
+    base = user.premium_until if user.premium_until else now
+    user.premium_until = (base + timedelta(days=30)).replace(hour=23, minute=59, second=59, microsecond=0)
     user.premium_warned = False
 
     if in_grace:
@@ -453,6 +444,64 @@ async def extend_all_premium(
     from urllib.parse import quote
     msg = quote(f"Premium продлён на {days} дн. для {len(users)} пользователей")
     logger.info(f"Admin: extended premium by {days} days for {len(users)} users")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Блокировка / разблокировка пользователя
+# ---------------------------------------------------------------------------
+
+@router.post("/user/{user_id}/block")
+async def block_user(
+    request: Request,
+    response: Response,
+    user_id: int,
+    reason: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.blocked_at = datetime.now(timezone.utc)
+    user.block_reason = reason.strip() or None
+
+    # Удаляем все активные сессии
+    await db.execute(sa_delete(Session).where(Session.user_id == user_id))
+    await db.commit()
+
+    logger.info(f"Admin: user {user.username} blocked, reason={reason!r}")
+    from urllib.parse import quote
+    msg = quote(f"Пользователь {user.username} заблокирован")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+@router.post("/user/{user_id}/unblock")
+async def unblock_user(
+    request: Request,
+    response: Response,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user.blocked_at = None
+    user.block_reason = None
+    await db.commit()
+
+    logger.info(f"Admin: user {user.username} unblocked")
+    from urllib.parse import quote
+    msg = quote(f"Пользователь {user.username} разблокирован")
     return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
 
 

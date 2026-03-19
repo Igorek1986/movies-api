@@ -90,10 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Открываем Telegram deep link — бот получит /start CODE автоматически
-        window.open(`https://t.me/${data.bot_name}?start=${data.code}`, '_blank');
-
-        statusEl.textContent = 'Подтвердите в Telegram…';
+        const tgUrl = `https://t.me/${data.bot_name}?start=${data.code}`;
+        statusEl.innerHTML = `Нажмите кнопку: <a href="${tgUrl}" target="_blank" rel="noopener"><strong>Открыть Telegram</strong></a> и нажмите Start в боте`;
 
         // Поллинг пока пользователь не привяжется
         const pollInterval = setInterval(async () => {

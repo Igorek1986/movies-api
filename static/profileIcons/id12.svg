@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Ниндзя -->
+  <circle cx="100" cy="100" r="100" fill="#E8F0E8"/>
+  <!-- Тело / одежда (тёмная) -->
+  <ellipse cx="100" cy="175" rx="62" ry="35" fill="#2A2A3A"/>
+  <!-- Голова - повязка (основа) -->
+  <ellipse cx="100" cy="106" rx="50" ry="52" fill="#2A2A3A"/>
+  <!-- Лицо (полоска открытая) -->
+  <rect x="58" y="96" width="84" height="32" rx="4" fill="#FFDDB0"/>
+  <!-- Глаза -->
+  <ellipse cx="84" cy="108" rx="9" ry="9.5" fill="white"/>
+  <ellipse cx="116" cy="108" rx="9" ry="9.5" fill="white"/>
+  <ellipse cx="85" cy="109" rx="5" ry="6" fill="#2A1A0A"/>
+  <ellipse cx="117" cy="109" rx="5" ry="6" fill="#2A1A0A"/>
+  <circle cx="85" cy="107" r="2" fill="#111"/>
+  <circle cx="117" cy="107" r="2" fill="#111"/>
+  <circle cx="87" cy="105" r="1.2" fill="white"/>
+  <circle cx="119" cy="105" r="1.2" fill="white"/>
+  <!-- Повязка сверху -->
+  <rect x="54" y="92" width="92" height="10" rx="5" fill="#1A1A28"/>
+  <!-- Узел повязки сбоку -->
+  <ellipse cx="148" cy="96" rx="10" ry="7" fill="#1A1A28"/>
+  <path d="M148,89 Q158,88 162,96 Q158,104 148,103" fill="none" stroke="#2A2A3A" stroke-width="2"/>
+  <!-- Прорезь рта (закрыта повязкой) -->
+  <rect x="58" y="122" width="84" height="28" rx="4" fill="#2A2A3A"/>
+  <!-- Декоративная полоска на повязке рта -->
+  <line x1="65" y1="133" x2="135" y2="133" stroke="#3A3A4A" stroke-width="1.5"/>
+  <line x1="65" y1="138" x2="135" y2="138" stroke="#3A3A4A" stroke-width="1.5"/>
+  <!-- Звезда-сюрикен на груди -->
+  <g transform="translate(100,160) rotate(22.5)">
+    <polygon points="0,-12 3,-4 11,-4 5,2 7,11 0,6 -7,11 -5,2 -11,-4 -3,-4" fill="#888899"/>
+  </g>
+</svg>

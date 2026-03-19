@@ -3,13 +3,12 @@
 
     var DEFAULT_ADD_THRESHOLD = '0';
     var DEFAULT_MIN_PROGRESS = 90;
-    var API_URL = 'https://api.myshows.me/v3/rpc/';
+    var API_URL = 'https://myshows.me/v3/rpc/';
     var MAP_KEY = 'myshows_hash_map';
-    // var MYSHOWS_AUTH_PROXY = 'https://numparser.igorek1986.ru/myshows/auth';
     var MYSHOWS_AUTH_PROXY = (function() {
     var scriptUrl = (document.currentScript && document.currentScript.src) || '';
     var params = new URLSearchParams(scriptUrl.split('?')[1]);
-    return params.get('auth_proxy') || 'https://numparser.igorek1986.ru/myshows/auth';
+    return params.get('auth_proxy') || 'https://myshows.igorek1986.ru/myshows/auth';
     })();
     var DEFAULT_CACHE_DAYS = 30;
     var JSON_HEADERS = {
@@ -57,31 +56,26 @@
         return url;
     }
 
+    // === Поддержка профилей ===
     function getProfileId() {
-        var lampaProfileId =
-            Lampa.Account.Permit.account &&
-            Lampa.Account.Permit.account.profile &&
-            Lampa.Account.Permit.account.profile.id
-                ? '_' + Lampa.Account.Permit.account.profile.id
-                : '';
 
-        if (IS_LAMPAC) {
-            var lampacProfileId = Lampa.Storage.get('lampac_profile_id', '');
-
-            if (lampacProfileId) {
-                // ✅ Нормализация: всегда "_id"
-                if (lampacProfileId[0] !== '_') {
-                    lampacProfileId = '_' + lampacProfileId;
-                }
-                return lampacProfileId;
-            }
-
-            // fallback на профиль Lampa
-            return lampaProfileId;
+        if (window._np_profiles_started) {
+            var npId = Lampa.Storage.get('np_profile_id', '');
+            if (npId) return String(npId);
         }
 
-        // Не LAMPAC → только профиль Lampa
-        return lampaProfileId;
+        if (window.profiles_plugin) {
+            var profileId = Lampa.Storage.get('lampac_profile_id', '');
+            if (profileId) return String(profileId);
+        }
+
+        try {
+            if (Lampa.Account.Permit.account && Lampa.Account.Permit.account.profile && Lampa.Account.Permit.account.profile.id) {
+                return String(Lampa.Account.Permit.account.profile.id);
+            }
+        } catch (e) {}
+
+        return '';
     }
 
     // Сохранение кеша с использованием профилей
@@ -346,11 +340,13 @@
     function getProfileKey(baseKey) {
         Log.info('IS_LAMPAC:', IS_LAMPAC, 'baseKey: ', baseKey);
         var profileId = getProfileId();
+        if (profileId && profileId.charAt(0) === '_') profileId = profileId.slice(1);
+
         if (!profileId) {
             return baseKey;
         }
 
-        return baseKey + '_profile' + profileId;
+        return baseKey + '_profile_' + profileId;
     }
 
     function getProfileSetting(key, defaultValue) {
@@ -590,7 +586,7 @@
             },
             field: {
             name: 'MyShows Логин',
-            description: 'Введите логин или email, привязанный к аккаунту myshows.me'
+            description: 'Введите логин от аккаунта myshows.me'
             },
             onChange: function(value) {
             setProfileSetting('myshows_login', value);
@@ -609,13 +605,36 @@
             },
             field: {
             name: 'MyShows Пароль',
-            description: 'Введите пароль от аккаунта myshows.me'
+            description: 'Введите пароль от аккаунта myshows.me. Логин и пароль передаются через прокси-сервер исключительно для получения токена авторизации и нигде не сохраняются.'
             },
             onChange: function(value) {
             setProfileSetting('myshows_password', value);
             tryAuthFromSettings();
             }
         });
+
+        if (tokenValue) {
+            Lampa.SettingsApi.addParam({
+                component: 'myshows',
+                param: {
+                    type: 'button'
+                },
+                field: {
+                    name: 'Выйти из MyShows',
+                    description: 'Очистить токен, логин и пароль'
+                },
+                onChange: function() {
+                    setProfileSetting('myshows_token', '');
+                    setProfileSetting('myshows_login', '');
+                    setProfileSetting('myshows_password', '');
+                    Lampa.Storage.set('myshows_token', '', true);
+                    Lampa.Storage.set('myshows_login', '', true);
+                    Lampa.Storage.set('myshows_password', '', true);
+                    Lampa.Noty.show('✅ Выход из MyShows выполнен');
+                    setTimeout(function() { window.location.reload(); }, 1500);
+                }
+            });
+        }
 
         var xhr = new XMLHttpRequest();
         xhr.open('GET', '/timecode/batch_add', true);

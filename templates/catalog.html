@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Каталог — NUMParser{% endblock %}
+
+{% block body %}
+<main class="container" style="padding-top: 1.5rem; max-width: 1200px;">
+  <h2 style="margin-bottom: 1.25rem;">Каталог</h2>
+  <div id="catalogLoading" class="muted small" style="padding: 1rem 0;">Загрузка категорий...</div>
+  <div id="catalogContainer"></div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>window.IMAGE_BASE = {{ image_base | tojson }};</script>
+<script src="/static/js/catalog.js"></script>
+{% endblock %}

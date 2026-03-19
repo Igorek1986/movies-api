@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Загрузка…{% endblock %}
+
+{% block body %}
+<div style="max-width:860px;margin:0 auto">
+
+  <div id="cardLoading" style="text-align:center;padding:4rem 0;color:var(--pico-muted-color)">
+    Загрузка…
+  </div>
+
+  <div id="cardContent" style="display:none">
+
+    <!-- Backdrop + back button -->
+    <div style="position:relative">
+      <img id="cardBackdrop" class="card-detail-backdrop" alt="" style="display:none">
+      <div id="cardNoBackdrop" style="height:120px;background:var(--pico-code-background-color);display:none"></div>
+      <a id="cardBack" class="card-detail-back" href="/history">← Назад</a>
+    </div>
+
+    <div class="card-detail-body">
+      <h1 id="cardTitle" class="card-detail-title"></h1>
+      <p id="cardOrigTitle" class="card-detail-orig" style="display:none"></p>
+      <div id="cardTags" class="card-detail-tags"></div>
+      <p id="cardOverview" class="card-detail-overview" style="display:none"></p>
+
+      <!-- Progress (logged-in with device) -->
+      <div id="cardProgressSection" style="display:none;border-top:1px solid var(--pico-muted-border-color);padding-top:.75rem;margin-top:.5rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem;font-size:.85rem;color:var(--pico-muted-color)">
+          <span id="cardProgressLabel"></span>
+          <button id="cardDeleteBtn" class="modal-delete-btn" title="Удалить историю просмотра" style="display:none">🗑</button>
+        </div>
+        <div class="modal-progress-bar"><div id="cardProgressFill" class="modal-progress-fill" style="width:0%"></div></div>
+      </div>
+
+      <!-- Episodes (TV) -->
+      <div id="cardEpisodesSection"></div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.TMDB_IMAGE_BASE = "{{ image_base }}";
+window.CARD_ID = {{ card_id | tojson }};
+</script>
+<script src="/static/js/card_detail.js"></script>
+{% endblock %}

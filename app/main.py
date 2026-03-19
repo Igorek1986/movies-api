@@ -16,7 +16,7 @@ import requests
 from fastapi import FastAPI, Header, Query, status, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response, RedirectResponse
 from app.templates import get_templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -158,6 +158,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/favicon.ico")
 async def favicon():
     return FileResponse("static/favicon/favicon.ico", media_type="image/x-icon")
+
 
 
 app.include_router(auth.router)
@@ -529,6 +530,35 @@ def get_clear_cache_password():
     return password
 
 
+# Точные названия из np.js (getAllCategories)
+_CATEGORY_TITLES: dict[str, str] = {
+    "lampac_movies_ru_new":    "Новые русские фильмы",
+    "lampac_movies_new":       "Новые фильмы",
+    "lampac_all_tv_shows":     "Сериалы",
+    "lampac_all_tv_shows_ru":  "Русские сериалы",
+    "lampac_movies_4k_new":    "В высоком качестве (новые)",
+    "legends_id":              "Топ фильмы",
+    "lampac_movies_4k":        "В высоком качестве",
+    "lampac_movies":           "Фильмы",
+    "lampac_movies_ru":        "Русские фильмы",
+    "lampac_all_cartoon_movies": "Мультфильмы",
+    "lampac_all_cartoon_series": "Мультсериалы",
+    "lampac_all_anime":        "Аниме",
+    "anime_id":                "Аниме",
+}
+
+_CATEGORY_ORDER: list[str] = list(_CATEGORY_TITLES.keys())
+
+
+def _category_display_name(cat_id: str) -> str:
+    if cat_id in _CATEGORY_TITLES:
+        return _CATEGORY_TITLES[cat_id]
+    m = re.match(r"^movies_id_(\d{4})$", cat_id)
+    if m:
+        return f"Фильмы {m.group(1)} года"
+    return cat_id
+
+
 def _item_card_id(item: dict) -> str | None:
     """Вычисляет card_id для элемента в формате '{tmdb_id}_{media_type}'."""
     try:
@@ -700,6 +730,89 @@ async def image_proxy(path: str):
     except Exception as e:
         logger.warning(f"Image proxy error for {path}: {e}")
         raise HTTPException(status_code=502, detail="Proxy error")
+
+
+@app.get("/api/categories")
+async def api_categories():
+    """Список доступных категорий из RELEASES_DIR, отсортированный как в np.js."""
+    if not RELEASES_DIR or not RELEASES_DIR.exists():
+        return []
+
+    available = {f.stem for f in RELEASES_DIR.glob("*.json")}
+    result: list[dict] = []
+    seen: set[str] = set()
+
+    # 1. Порядок из np.js
+    for cat_id in _CATEGORY_ORDER:
+        if cat_id in available:
+            result.append({"id": cat_id, "name": _category_display_name(cat_id)})
+            seen.add(cat_id)
+
+    # 2. Годовые категории по убыванию
+    current_year = datetime.now().year
+    for y in range(current_year, 1979, -1):
+        cat_id = f"movies_id_{y}"
+        if cat_id in available:
+            result.append({"id": cat_id, "name": _category_display_name(cat_id)})
+
+    return result
+
+
+@app.get("/catalog/{category}", response_class=HTMLResponse)
+async def catalog_category_page(
+    request: Request,
+    category: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not re.match(r"^[\w\-]+$", category):
+        raise HTTPException(status_code=404, detail="Not found")
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    cat_path = RELEASES_DIR / f"{category}.json" if RELEASES_DIR else None
+    if not cat_path or not cat_path.exists():
+        raise HTTPException(status_code=404, detail="Category not found")
+    return _templates.TemplateResponse("catalog_category.html", {
+        "request": request,
+        "user": current_user,
+        "category": category,
+        "category_name": _category_display_name(category),
+        "image_base": image_base,
+    })
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_page(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.api.devices import _devices_with_stats
+    devices = await _devices_with_stats(current_user.id, db)
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    return _templates.TemplateResponse("history.html", {
+        "request": request,
+        "user": current_user,
+        "devices": devices,
+        "image_base": image_base,
+    })
+
+
+@app.get("/card/{card_id}", response_class=HTMLResponse)
+async def card_detail_page(
+    request: Request,
+    card_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    return _templates.TemplateResponse("card_detail.html", {
+        "request": request,
+        "user": current_user,
+        "card_id": card_id,
+        "image_base": image_base,
+    })
 
 
 @app.get("/{category}")
@@ -1022,20 +1135,21 @@ async def index(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
     image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
-    devices = []
     if current_user:
-        from app.api.devices import _devices_with_stats
-
-        devices = await _devices_with_stats(current_user.id, db)
+        return _templates.TemplateResponse("catalog.html", {
+            "request": request,
+            "user": current_user,
+            "image_base": image_base,
+        })
+    plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
     from app import settings_cache as sc
     return _templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "user": current_user,
-            "devices": devices,
+            "user": None,
+            "devices": [],
             "plugin_url": plugin_url,
             "bot_name": settings.TELEGRAM_BOT_NAME,
             "image_base": image_base,

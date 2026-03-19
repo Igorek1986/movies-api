@@ -20,11 +20,13 @@ import asyncio
 import json
 import logging
 import re
+import secrets
 from datetime import date
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import select, delete, func, update
@@ -686,3 +688,168 @@ async def get_watch_history(
 
     history.sort(key=lambda x: x["last_watched"] or "", reverse=True)
     return history
+
+
+# ---------------------------------------------------------------------------
+# Управление профилями через device token (для плагина np_profiles.js)
+# ---------------------------------------------------------------------------
+
+@router.get("/profiles")
+async def list_profiles(
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Возвращает список профилей устройства (LampaProfile) + количество таймкодов.
+    Аутентификация: ?token=KEY или ?apikey=KEY
+    """
+    _require_device(device)
+
+    lp_result = await db.execute(
+        select(LampaProfile).where(LampaProfile.device_id == device.id)
+        .order_by(LampaProfile.id.asc())
+    )
+    profiles = lp_result.scalars().all()
+
+    result = []
+    for lp in profiles:
+        cnt = (await db.execute(
+            select(func.count()).select_from(Timecode).where(
+                Timecode.device_id == device.id,
+                Timecode.lampa_profile_id == lp.lampa_profile_id,
+            )
+        )).scalar() or 0
+        result.append({
+            "profile_id": lp.lampa_profile_id,
+            "name": lp.name,
+            "icon": lp.icon,
+            "timecodes_count": cnt,
+        })
+
+    user_role = await _get_user_role(device, db)
+    limit = settings_cache.get_role_limit(user_role, "profile_limit")
+    return {"profiles": result, "limit": limit}
+
+
+class _CreateProfileBody(BaseModel):
+    name: str
+    profile_id: str | None = None  # если не указан — генерируется
+    icon: str | None = None         # e.g. "id1"
+
+
+@router.post("/profiles")
+async def create_profile(
+    body: _CreateProfileBody,
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Создаёт LampaProfile для устройства.
+    Аутентификация: ?token=KEY или ?apikey=KEY
+    """
+    _require_device(device)
+
+    name = body.name.strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Название профиля не может быть пустым")
+
+    user_role = await _get_user_role(device, db)
+    limit = settings_cache.get_role_limit(user_role, "profile_limit")
+
+    if limit is not None:
+        count = (await db.execute(
+            select(func.count()).select_from(LampaProfile)
+            .where(LampaProfile.device_id == device.id)
+        )).scalar() or 0
+        if count >= limit:
+            raise HTTPException(status_code=403, detail=f"Достигнут лимит профилей ({limit})")
+
+    profile_id = (body.profile_id or "").strip().lstrip("_")[:100] or secrets.token_hex(4)
+
+    existing = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="Профиль с таким ID уже существует")
+
+    icon = (body.icon or "").strip()[:20] or None
+    lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name=name, icon=icon)
+    db.add(lp)
+    await db.commit()
+    await db.refresh(lp)
+
+    return {"ok": True, "profile_id": profile_id, "name": name, "icon": lp.icon}
+
+
+class _RenameProfileBody(BaseModel):
+    name: str | None = None
+    icon: str | None = None
+
+
+@router.patch("/profiles/{profile_id}")
+async def rename_profile(
+    profile_id: str,
+    body: _RenameProfileBody,
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обновляет имя и/или иконку LampaProfile. Аутентификация: ?token=KEY"""
+    _require_device(device)
+
+    if body.name is None and body.icon is None:
+        raise HTTPException(status_code=400, detail="Нужно передать name или icon")
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+    if not lp:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    if body.name is not None:
+        name = body.name.strip()[:100]
+        if not name:
+            raise HTTPException(status_code=400, detail="Название не может быть пустым")
+        lp.name = name
+
+    if body.icon is not None:
+        lp.icon = body.icon.strip()[:20] or None
+
+    await db.commit()
+    return {"ok": True, "profile_id": profile_id, "name": lp.name, "icon": lp.icon}
+
+
+@router.delete("/profiles/{profile_id}")
+async def delete_profile(
+    profile_id: str,
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Удаляет LampaProfile и все его таймкоды.
+    Аутентификация: ?token=KEY или ?apikey=KEY
+    """
+    _require_device(device)
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+    if not lp:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    await db.execute(delete(Timecode).where(
+        Timecode.device_id == device.id,
+        Timecode.lampa_profile_id == profile_id,
+    ))
+    await db.delete(lp)
+    await db.commit()
+    return {"ok": True}
+

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}История просмотров{% endblock %}
+
+{% block body %}
+<main class="container" style="padding-top: 1.5rem;">
+  {% if not devices %}
+  <p style="text-align:center;color:var(--pico-muted-color);padding:3rem 0">
+    Устройства не найдены. <a href="/profiles">Добавьте устройство</a>.
+  </p>
+  {% else %}
+  <div class="history-controls">
+    {% if devices|length > 1 %}
+    <select id="historyDeviceSelect">
+      {% for d in devices %}
+      <option value="{{ d.id }}">{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="hidden" id="historyDeviceSelect" value="{{ devices[0].id }}">
+    {% endif %}
+
+    <div id="historyProfileTabs"></div>
+
+    <div class="stats-tabs">
+      <button class="tab-btn active" id="historyFilterAll">Все</button>
+      <button class="tab-btn" id="historyFilterMovie">Фильмы</button>
+      <button class="tab-btn" id="historyFilterTv">Сериалы</button>
+      <button class="tab-btn" id="historyFilterWatching">В&nbsp;процессе</button>
+    </div>
+
+    <select id="historySortSelect" class="sort-select">
+      <option value="watched">По дате просмотра</option>
+      <option value="release">По дате выхода</option>
+      <option value="pct_asc">По прогрессу ↑</option>
+      <option value="pct_desc">По прогрессу ↓</option>
+    </select>
+
+    <div style="width: 200px; margin-left: auto;">
+      <input type="search" id="historySearch" placeholder="Поиск…" class="history-search">
+    </div>
+  </div>
+
+  <div id="historyGrid" class="history-grid"></div>
+  {% endif %}
+</main>
+{% endblock %}
+
+{% block scripts %}
+{% if devices %}
+<script>window.TMDB_IMAGE_BASE = "{{ image_base }}";</script>
+<script src="/static/js/history.js"></script>
+<script>initHistory({{ devices[0].id }});</script>
+{% endif %}
+{% endblock %}

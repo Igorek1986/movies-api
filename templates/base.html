@@ -101,7 +101,8 @@
         <li><a href="/stats" role="button" class="outline btn-sm {% if request.url.path.startswith('/stats') %}secondary{% endif %}">📊 Статистика</a></li>
         <li><a href="/admin" role="button" class="outline btn-sm {% if request.url.path.startswith('/admin') %}secondary{% endif %}">⚙️ Админ</a></li>
         {% endif %}
-        <li><a href="/" role="button" class="outline btn-sm {% if request.url.path == '/' %}secondary{% endif %}">История</a></li>
+        <li><a href="/" role="button" class="outline btn-sm {% if request.url.path == '/' or request.url.path.startswith('/catalog') %}secondary{% endif %}">Каталог</a></li>
+        <li><a href="/history" role="button" class="outline btn-sm {% if request.url.path == '/history' %}secondary{% endif %}">История</a></li>
         <li><a href="/profiles" role="button" class="outline btn-sm {% if request.url.path.startswith('/profiles') %}secondary{% endif %}">Настройки</a></li>
         <li><a href="/sessions" role="button" class="outline btn-sm {% if request.url.path == '/sessions' %}secondary{% endif %}">Сессии</a></li>
         {% block header_actions %}{% endblock %}
@@ -187,5 +188,14 @@
       });
     });
   </script>
+  <footer style="text-align:center; padding: 1.5rem 1rem; margin-top: 2rem; border-top: 1px solid var(--pico-muted-border-color);">
+    <a href="https://www.themoviedb.org/" target="_blank" rel="noopener">
+      <img src="/static/tmdb-logo.svg" alt="TMDB" style="height: 1rem; opacity: 0.6; vertical-align: middle;">
+    </a>
+    <br>
+    <small style="color: var(--pico-muted-color); font-size: 0.7rem;">
+      Сайт использует API TMDB, но не одобрен и не сертифицирован TMDB.
+    </small>
+  </footer>
 </body>
 </html>

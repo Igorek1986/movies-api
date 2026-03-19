@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Робот -->
+  <circle cx="100" cy="100" r="100" fill="#E8F4FF"/>
+  <!-- Антенна -->
+  <rect x="97" y="38" width="6" height="20" rx="3" fill="#5B8DBE"/>
+  <circle cx="100" cy="35" r="7" fill="#4A9FE0"/>
+  <circle cx="100" cy="35" r="3" fill="#80D0FF"/>
+  <!-- Голова -->
+  <rect x="60" y="58" width="80" height="68" rx="12" fill="#7AB3D8"/>
+  <rect x="62" y="60" width="76" height="64" rx="10" fill="#8EC5E8"/>
+  <!-- Глаза — экраны -->
+  <rect x="70" y="73" width="24" height="20" rx="5" fill="#1A2A3A"/>
+  <rect x="106" y="73" width="24" height="20" rx="5" fill="#1A2A3A"/>
+  <rect x="72" y="75" width="20" height="16" rx="4" fill="#00AAFF" opacity="0.85"/>
+  <rect x="108" y="75" width="20" height="16" rx="4" fill="#00AAFF" opacity="0.85"/>
+  <circle cx="82" cy="83" r="5" fill="white" opacity="0.9"/>
+  <circle cx="118" cy="83" r="5" fill="white" opacity="0.9"/>
+  <circle cx="82" cy="83" r="2.5" fill="#0055CC"/>
+  <circle cx="118" cy="83" r="2.5" fill="#0055CC"/>
+  <!-- Рот / решётка -->
+  <rect x="72" y="103" width="56" height="14" rx="4" fill="#5A90B0"/>
+  <line x1="82" y1="103" x2="82" y2="117" stroke="#7AB3D8" stroke-width="1.5"/>
+  <line x1="92" y1="103" x2="92" y2="117" stroke="#7AB3D8" stroke-width="1.5"/>
+  <line x1="102" y1="103" x2="102" y2="117" stroke="#7AB3D8" stroke-width="1.5"/>
+  <line x1="112" y1="103" x2="112" y2="117" stroke="#7AB3D8" stroke-width="1.5"/>
+  <line x1="118" y1="103" x2="118" y2="117" stroke="#7AB3D8" stroke-width="1.5"/>
+  <!-- Болтики по углам -->
+  <circle cx="68" cy="65" r="4" fill="#5A90B0"/>
+  <circle cx="132" cy="65" r="4" fill="#5A90B0"/>
+  <circle cx="68" cy="120" r="4" fill="#5A90B0"/>
+  <circle cx="132" cy="120" r="4" fill="#5A90B0"/>
+  <!-- Тело (шея) -->
+  <rect x="86" y="126" width="28" height="14" rx="4" fill="#7AB3D8"/>
+  <!-- Плечи -->
+  <rect x="52" y="138" width="96" height="30" rx="10" fill="#7AB3D8"/>
+  <rect x="54" y="140" width="92" height="26" rx="8" fill="#8EC5E8"/>
+</svg>
