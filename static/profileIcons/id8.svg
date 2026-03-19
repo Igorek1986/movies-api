@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Кот -->
+  <circle cx="100" cy="100" r="100" fill="#FFF5E0"/>
+  <!-- Уши -->
+  <polygon points="42,68 58,38 74,68" fill="#F0A060"/>
+  <polygon points="48,66 58,46 68,66" fill="#FFCBA4"/>
+  <polygon points="126,68 142,38 158,68" fill="#F0A060"/>
+  <polygon points="132,66 142,46 152,66" fill="#FFCBA4"/>
+  <!-- Голова -->
+  <ellipse cx="100" cy="108" rx="52" ry="48" fill="#F5B97A"/>
+  <!-- Глаза -->
+  <ellipse cx="82" cy="96" rx="10" ry="11" fill="white"/>
+  <ellipse cx="118" cy="96" rx="10" ry="11" fill="white"/>
+  <ellipse cx="83" cy="97" rx="5" ry="7" fill="#2A6040"/>
+  <ellipse cx="119" cy="97" rx="5" ry="7" fill="#2A6040"/>
+  <circle cx="83" cy="95" r="2" fill="#111"/>
+  <circle cx="119" cy="95" r="2" fill="#111"/>
+  <circle cx="85" cy="93" r="1.2" fill="white"/>
+  <circle cx="121" cy="93" r="1.2" fill="white"/>
+  <!-- Нос -->
+  <polygon points="100,110 95,116 105,116" fill="#E07070"/>
+  <!-- Рот -->
+  <path d="M95,116 Q100,123 105,116" fill="none" stroke="#C05050" stroke-width="1.5"/>
+  <path d="M82,116 Q90,122 95,116" fill="none" stroke="#C05050" stroke-width="1.5"/>
+  <path d="M105,116 Q110,122 118,116" fill="none" stroke="#C05050" stroke-width="1.5"/>
+  <!-- Усы -->
+  <line x1="60" y1="112" x2="93" y2="115" stroke="#C08050" stroke-width="1.2"/>
+  <line x1="60" y1="118" x2="93" y2="117" stroke="#C08050" stroke-width="1.2"/>
+  <line x1="107" y1="115" x2="140" y2="112" stroke="#C08050" stroke-width="1.2"/>
+  <line x1="107" y1="117" x2="140" y2="118" stroke="#C08050" stroke-width="1.2"/>
+  <!-- Полосы на лбу -->
+  <path d="M88,76 Q100,72 112,76" fill="none" stroke="#D08040" stroke-width="2" stroke-linecap="round"/>
+  <path d="M85,83 Q100,79 115,83" fill="none" stroke="#D08040" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

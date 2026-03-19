@@ -8,7 +8,7 @@
     var MYSHOWS_AUTH_PROXY = (function() {
     var scriptUrl = (document.currentScript && document.currentScript.src) || '';
     var params = new URLSearchParams(scriptUrl.split('?')[1]);
-    return params.get('auth_proxy') || 'https://numparser.igorek1986.ru/myshows/auth';
+    return params.get('auth_proxy') || 'https://myshows.igorek1986.ru/myshows/auth';
     })();
     var DEFAULT_CACHE_DAYS = 30;
     var JSON_HEADERS = {
