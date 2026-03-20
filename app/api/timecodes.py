@@ -853,3 +853,53 @@ async def delete_profile(
     await db.commit()
     return {"ok": True}
 
+
+@router.get("/favorite")
+async def get_favorite(
+    profile_id: str = Query(default=""),
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает сохранённые закладки. ?token=KEY&profile_id=ID (profile_id опционален)"""
+    _require_device(device)
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+
+    return {"favorite": json.loads(lp.favorite) if (lp and lp.favorite) else None}
+
+
+class _FavoriteBody(BaseModel):
+    favorite: Any
+
+
+@router.put("/favorite")
+async def put_favorite(
+    body: _FavoriteBody,
+    profile_id: str = Query(default=""),
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохраняет закладки. ?token=KEY&profile_id=ID (profile_id опционален)"""
+    _require_device(device)
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+    if not lp:
+        # Auto-create: LampaProfile создаётся при первом сохранении (как таймкоды)
+        lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name="")
+        db.add(lp)
+        await db.flush()
+
+    lp.favorite = json.dumps(body.favorite, ensure_ascii=False) if body.favorite is not None else None
+    await db.commit()
+    return {"ok": True}
+
