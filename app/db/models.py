@@ -183,6 +183,7 @@ class LampaProfile(Base):
     lampa_profile_id = Column(String(100), nullable=False)
     name             = Column(String(100), nullable=False, default="")
     icon             = Column(String(20), nullable=True)   # e.g. "id1", "id3"
+    favorite         = Column(Text, nullable=True)         # JSON: Lampa favorite object
 
     __table_args__ = (
         UniqueConstraint("device_id", "lampa_profile_id", name="uq_lampa_profile"),
