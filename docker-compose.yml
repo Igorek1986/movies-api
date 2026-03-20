@@ -27,6 +27,7 @@ services:
       - "${PORT:-8888}:8888"
     volumes:
       - ${RELEASES_DIR}:/releases:ro
+      - ./lampa-plugins:/app/lampa-plugins:ro
     depends_on:
       postgres:
         condition: service_healthy
