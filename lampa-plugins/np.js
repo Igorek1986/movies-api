@@ -605,8 +605,10 @@
     function getProfileId() {
 
         if (window._np_profiles_started) {
+            // Если наш плагин профилей активен — используем только np_profile_id.
+            // Не проваливаемся к lampac_profile_id: он мог остаться от levende и сломает изоляцию.
             var npId = Lampa.Storage.get('np_profile_id', '');
-            if (npId) return String(npId);
+            return npId ? String(npId) : '';
         }
 
         if (window.profiles_plugin) {
