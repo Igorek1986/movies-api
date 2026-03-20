@@ -100,6 +100,80 @@
             .catch(onFail || function () {});
     }
 
+    // =========================================================================
+    // WebSocket — получение таймкодов от других устройств в реальном времени
+    // =========================================================================
+
+    var _ws = null;
+    var _wsReconnectTimer = null;
+    var _wsEnabled = false;
+
+    function connectWS() {
+        if (!_wsEnabled || !getToken()) return;
+        if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return;
+
+        clearTimeout(_wsReconnectTimer);
+
+        var wsUrl = BASE_URL.replace(/^http/, 'ws') + '/timecode/ws?token=' + encodeURIComponent(getToken());
+        try {
+            _ws = new WebSocket(wsUrl);
+
+            _ws.onopen = function () {
+                // соединение установлено
+            };
+
+            _ws.onmessage = function (event) {
+                try {
+                    var msg = JSON.parse(event.data);
+                    if (msg.type === 'timecode') onWsTimecode(msg);
+                    else if (msg.type === 'favorite') onWsFavorite(msg);
+                } catch (e) {}
+            };
+
+            _ws.onclose = function () {
+                _ws = null;
+                if (_wsEnabled) _wsReconnectTimer = setTimeout(connectWS, 5000);
+            };
+
+            _ws.onerror = function () {
+                // onclose вызовется следом
+            };
+        } catch (e) {
+            _wsReconnectTimer = setTimeout(connectWS, 5000);
+        }
+    }
+
+    function onWsTimecode(msg) {
+        // Применяем только если profile_id совпадает с активным
+        var active = getActiveProfile();
+        var activeId = active ? String(active.profile_id) : '';
+        if (String(msg.profile_id || '') !== activeId) return;
+
+        try {
+            var tc = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+            var key = timelineKey();
+            var fv = Lampa.Storage.get(key, {});
+            fv[String(msg.item)] = {
+                percent:  tc.percent  || 0,
+                time:     tc.time     || 0,
+                duration: tc.duration || 0,
+                profile:  0,
+            };
+            Lampa.Storage.set(key, fv);
+            if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read();
+        } catch (e) {}
+    }
+
+    function onWsFavorite(msg) {
+        // Применяем только если profile_id совпадает с активным
+        var active = getActiveProfile();
+        var activeId = active ? String(active.profile_id) : '';
+        if (String(msg.profile_id || '') !== activeId) return;
+        if (msg.favorite === null || msg.favorite === undefined) return;
+
+        applyFavorite(msg.favorite);
+    }
+
     var _saveFavTimer = null;
     /** Применяет favorite с сервера. Storage.set не триггерит сохранение — мы слушаем только state:changed reason:update. */
     function applyFavorite(fav) {
@@ -692,6 +766,10 @@
                 if (e.target === 'favorite' && e.reason === 'update') scheduleSaveFavorite();
             });
 
+            // Запускаем WebSocket для real-time синхронизации таймкодов
+            _wsEnabled = true;
+            connectWS();
+
         }, function (status) {
             // 401/403 — токен недействителен, плагин не загружаем
             if (status === 401 || status === 403) return;
@@ -724,7 +802,7 @@
         });
     }
 
-    // listenFullCardOpen();
+    listenFullCardOpen();
 
     // Ждём готовности Lampa
     if (window.appready) {

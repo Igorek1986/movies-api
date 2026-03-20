@@ -25,7 +25,7 @@ from datetime import date
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -37,6 +37,7 @@ from app import rate_limit
 from app.db.models import Device, Timecode, MediaCard, LampaProfile, User
 from app.api.dependencies import get_device_by_token
 from app import settings_cache
+from app.ws_manager import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/timecode", tags=["timecodes"])
@@ -392,6 +393,12 @@ async def save_timecode(
     m = _CARD_ID_RE.match(card_id)
     if m:
         asyncio.create_task(_fetch_and_store_media_card(card_id, int(m.group(1)), m.group(2)))
+
+    # Рассылаем обновление другим соединениям того же пользователя
+    asyncio.create_task(ws_manager.broadcast(
+        device.user_id, None,  # None = отправить всем (HTTP-запрос не знает conn_id)
+        {"type": "timecode", "profile_id": lampa_profile_id, "card_id": card_id, "item": item, "data": data},
+    ))
 
     return {"success": True}
 
@@ -901,5 +908,40 @@ async def put_favorite(
 
     lp.favorite = json.dumps(body.favorite, ensure_ascii=False) if body.favorite is not None else None
     await db.commit()
+
+    # Рассылаем обновление закладок другим соединениям пользователя
+    asyncio.create_task(ws_manager.broadcast(
+        device.user_id, None,
+        {"type": "favorite", "profile_id": profile_id, "favorite": body.favorite},
+    ))
+
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — real-time push таймкодов на другие устройства пользователя
+# ---------------------------------------------------------------------------
+
+@router.websocket("/ws")
+async def ws_timecode(
+    websocket: WebSocket,
+    device: Device = Depends(get_device_by_token),
+):
+    """
+    WebSocket для получения обновлений таймкодов от других устройств пользователя в реальном времени.
+    Подключение: ws://BASE_URL/timecode/ws?token=KEY
+    Сообщения: {"type": "timecode", "profile_id": "", "card_id": "123_movie", "item": "hash", "data": "..."}
+    """
+    if not device:
+        await websocket.close(code=4001)
+        return
+
+    conn_id = await ws_manager.connect(device.user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # держим соединение, ping/pong
+    except WebSocketDisconnect:
+        ws_manager.disconnect(device.user_id, conn_id)
+    except Exception:
+        ws_manager.disconnect(device.user_id, conn_id)
 
