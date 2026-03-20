@@ -103,14 +103,20 @@ async def lifespan(app: FastAPI):
 
         bot, dp = init_bot(settings.TELEGRAM_BOT_TOKEN)
         if settings.TELEGRAM_USE_POLLING:
-            await bot.delete_webhook(drop_pending_updates=True)
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+            except Exception as e:
+                logger.warning(f"Telegram недоступен при старте (delete_webhook): {e}")
             _polling_task = asyncio.create_task(
                 dp.start_polling(bot, handle_signals=False)
             )
             logger.info("Telegram bot started in polling mode")
         else:
             # webhook регистрируется через dp.startup hook в bot.py
-            await dp.emit_startup(bot=bot)
+            try:
+                await dp.emit_startup(bot=bot)
+            except Exception as e:
+                logger.warning(f"Telegram недоступен при старте (webhook): {e}")
     else:
         logger.warning("TELEGRAM_BOT_TOKEN не задан — бот отключён")
 
