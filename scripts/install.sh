@@ -890,7 +890,10 @@ function do_update {
         service)
             install_python_deps
             _sudo systemctl restart "$SERVICE_NAME"
-            info "Service restarted."
+            local svc_port
+            svc_port=$(_get_env_val "PORT" || true)
+            svc_port="${svc_port:-$DEFAULT_PORT}"
+            wait_for_app "$svc_port" "sudo journalctl -u ${SERVICE_NAME} -f"
             ;;
         docker)
             cd "$PROJECT_DIR"
@@ -906,6 +909,10 @@ function do_update {
                     docker compose -f docker-compose.yml up -d
             fi
             info "Docker stack rebuilt."
+            local docker_port
+            docker_port=$(_get_env_val "PORT" || true)
+            docker_port="${docker_port:-$DEFAULT_PORT}"
+            wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.yml logs"
             ;;
         none)
             warn "No running installation detected — run install first."
