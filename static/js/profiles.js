@@ -97,7 +97,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const tgUrl = `https://t.me/${data.bot_name}?start=${data.code}`;
-        statusEl.innerHTML = `Нажмите кнопку: <a href="${tgUrl}" target="_blank" rel="noopener"><strong>Открыть Telegram</strong></a> и нажмите Start в боте`;
+        const botUrl = `https://t.me/${data.bot_name}`;
+        statusEl.innerHTML =
+          `<a href="${tgUrl}" target="_blank" rel="noopener" role="button" class="secondary" style="display:inline-block;margin-bottom:.5rem">Открыть Telegram</a><br>` +
+          `<span style="font-size:.85rem">Нажмите кнопку «Открыть Telegram» — код отправится автоматически.</span><br>` +
+          `<span style="font-size:.85rem">Или перейдите в <a href="${botUrl}" target="_blank" rel="noopener">бот</a> и отправьте код: <strong style="letter-spacing:.1em">${data.code}</strong></span>`;
 
         // Поллинг пока пользователь не привяжется
         const pollInterval = setInterval(async () => {
