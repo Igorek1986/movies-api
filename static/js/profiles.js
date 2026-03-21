@@ -73,6 +73,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Telegram link ───────────────────────────────────────────────────────────
   const tgLinkBtn = document.getElementById('tgLinkBtn');
+  const tgConsentCheck = document.getElementById('tgConsentCheck');
+  if (tgConsentCheck) {
+    tgConsentCheck.addEventListener('change', () => {
+      tgLinkBtn.disabled = !tgConsentCheck.checked;
+    });
+  }
   if (tgLinkBtn) {
     tgLinkBtn.addEventListener('click', async () => {
       const statusEl = document.getElementById('tgLinkStatus');
@@ -110,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Прекращаем поллинг по истечении TTL
         setTimeout(() => {
           clearInterval(pollInterval);
-          tgLinkBtn.disabled = false;
+          tgLinkBtn.disabled = tgConsentCheck ? !tgConsentCheck.checked : false;
           if (statusEl.className !== 'status-text status-ok') {
             statusEl.textContent = 'Время истекло. Попробуйте снова.';
             statusEl.className = 'status-text status-err';
