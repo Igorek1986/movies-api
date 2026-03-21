@@ -305,6 +305,21 @@ class Session(Base):
         return f"<Session(user_id={self.user_id}, ip={self.ip})>"
 
 
+class TrustedDevice(Base):
+    """Доверенное устройство пользователя (долгоживущий cookie device_token)."""
+
+    __tablename__ = "trusted_devices"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token        = Column(String(64), unique=True, nullable=False, index=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        return f"<TrustedDevice(user_id={self.user_id})>"
+
+
 class Totp2faPending(Base):
     """Временный токен ожидающего 2FA-подтверждения входа (TTL 10 мин)."""
 
