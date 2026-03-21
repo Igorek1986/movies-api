@@ -763,13 +763,13 @@ async def create_profile(
     user_role = await _get_user_role(device, db)
     limit = settings_cache.get_role_limit(user_role, "profile_limit")
 
-    if limit is not None:
-        count = (await db.execute(
-            select(func.count()).select_from(LampaProfile)
-            .where(LampaProfile.device_id == device.id)
-        )).scalar() or 0
-        if count >= limit:
-            raise HTTPException(status_code=403, detail=f"Достигнут лимит профилей ({limit})")
+    count = (await db.execute(
+        select(func.count()).select_from(LampaProfile)
+        .where(LampaProfile.device_id == device.id)
+    )).scalar() or 0
+
+    if limit is not None and count >= limit:
+        raise HTTPException(status_code=403, detail=f"Достигнут лимит профилей ({limit})")
 
     profile_id = (body.profile_id or "").strip().lstrip("_")[:100] or secrets.token_hex(4)
 
@@ -783,8 +783,33 @@ async def create_profile(
         raise HTTPException(status_code=409, detail="Профиль с таким ID уже существует")
 
     icon = (body.icon or "").strip()[:20] or None
-    lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name=name, icon=icon)
-    db.add(lp)
+
+    # Если есть LampaProfile с пустым ID (создан авто через put_favorite без профиля) —
+    # просто переименовываем его вместо создания нового + удаления старого.
+    empty_lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == "",
+        )
+    )).scalar_one_or_none()
+
+    if empty_lp:
+        empty_lp.lampa_profile_id = profile_id
+        empty_lp.name = name
+        if icon:
+            empty_lp.icon = icon
+        lp = empty_lp
+    else:
+        lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name=name, icon=icon)
+        db.add(lp)
+
+    # Переносим таймкоды с пустым profile_id (сохранены без профиля)
+    await db.execute(
+        update(Timecode)
+        .where(Timecode.device_id == device.id, Timecode.lampa_profile_id == "")
+        .values(lampa_profile_id=profile_id)
+    )
+
     await db.commit()
     await db.refresh(lp)
 
@@ -828,6 +853,12 @@ async def rename_profile(
         lp.icon = body.icon.strip()[:20] or None
 
     await db.commit()
+
+    asyncio.create_task(ws_manager.broadcast(
+        device.user_id, None,
+        {"type": "profile_updated", "profile_id": profile_id, "name": lp.name, "icon": lp.icon},
+    ))
+
     return {"ok": True, "profile_id": profile_id, "name": lp.name, "icon": lp.icon}
 
 
