@@ -188,6 +188,46 @@
       });
     });
   </script>
+  <!-- Analytics -->
+  {% set _a = analytics() %}
+  {% if _a.yandex_metrika_id %}
+  <script>
+    (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+    m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+    (window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");
+    ym({{ _a.yandex_metrika_id }}, "init", {clickmap:true,trackLinks:true,accurateTrackBounce:true});
+  </script>
+  <noscript><div><img src="https://mc.yandex.ru/watch/{{ _a.yandex_metrika_id }}" style="position:absolute;left:-9999px" alt=""/></div></noscript>
+  {% endif %}
+  {% if _a.google_analytics_id %}
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{ _a.google_analytics_id }}"></script>
+  <script>
+    window.dataLayer=window.dataLayer||[];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js',new Date());gtag('config','{{ _a.google_analytics_id }}');
+  </script>
+  {% endif %}
+
+  <!-- Cookie consent banner -->
+  <div id="cookieBanner" style="display:none;position:fixed;bottom:1.2rem;left:1.2rem;z-index:1000;max-width:360px;background:var(--pico-card-background-color);border:1px solid var(--pico-muted-border-color);border-radius:var(--pico-border-radius);padding:1rem 1.2rem;box-shadow:0 4px 16px rgba(0,0,0,.3)">
+    <p style="font-size:.83rem;color:var(--pico-muted-color);margin:0 0 .7rem">
+      Сайт использует cookie-файлы, чтобы сделать ваше пребывание на нём максимально удобным. Оставаясь на сайте, вы даёте согласие на использование cookie-файлов.
+      <a href="/privacy#cookie-policy" target="_blank" rel="noopener" style="white-space:nowrap">Подробнее</a>
+    </p>
+    <button id="cookieAccept" style="width:100%;padding:.4rem;font-size:.85rem">Принять</button>
+  </div>
+  <script>
+    (function() {
+      if (!localStorage.getItem('cookie_accepted')) {
+        document.getElementById('cookieBanner').style.display = 'block';
+      }
+      document.getElementById('cookieAccept').addEventListener('click', function() {
+        localStorage.setItem('cookie_accepted', '1');
+        document.getElementById('cookieBanner').style.display = 'none';
+      });
+    })();
+  </script>
+
   <footer style="text-align:center; padding: 1.5rem 1rem; margin-top: 2rem; border-top: 1px solid var(--pico-muted-border-color);">
     <a href="https://www.themoviedb.org/" target="_blank" rel="noopener">
       <img src="/static/tmdb-logo.svg" alt="TMDB" style="height: 1rem; opacity: 0.6; vertical-align: middle;">
@@ -195,6 +235,12 @@
     <br>
     <small style="color: var(--pico-muted-color); font-size: 0.7rem;">
       Сайт использует API TMDB, но не одобрен и не сертифицирован TMDB.
+    </small>
+    <br>
+    <small style="color: var(--pico-muted-color); font-size: 0.7rem;">
+      <a href="/privacy" target="_blank" rel="noopener" style="color: var(--pico-muted-color);">Политика обработки персональных данных</a>
+      &nbsp;·&nbsp;
+      <a href="/consent" target="_blank" rel="noopener" style="color: var(--pico-muted-color);">Согласие на обработку персональных данных</a>
     </small>
   </footer>
 </body>

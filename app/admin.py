@@ -525,6 +525,8 @@ async def admin_settings_page(
         "settings": settings_cache.all_settings(),
         "groups": settings_cache.GROUPS,
         "labels": settings_cache.LABELS,
+        "textarea_keys": settings_cache.TEXTAREA_KEYS,
+        "checkbox_keys": settings_cache.CHECKBOX_KEYS,
         "success": request.query_params.get("success"),
     })
 
@@ -541,11 +543,16 @@ async def admin_settings_update(
     form = await request.form()
     allowed_keys = set(settings_cache.DEFAULTS.keys())
 
+    # Чекбоксы не отправляются если сняты — явно сохраняем "0"
+    for key in settings_cache.CHECKBOX_KEYS:
+        if key in allowed_keys and key not in form:
+            await settings_cache.set_setting(key, "0", db)
+
     for key, value in form.items():
         if key not in allowed_keys:
             continue
         value = str(value).strip()
-        if value == "":
+        if value == "" and key not in settings_cache.TEXTAREA_KEYS:
             continue
         await settings_cache.set_setting(key, value, db)
 

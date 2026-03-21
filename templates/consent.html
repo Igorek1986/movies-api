@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Согласие на обработку персональных данных{% endblock %}
+{% block body %}
+<main class="container" style="max-width:800px;padding-top:2rem;padding-bottom:3rem">
+  <h2>Согласие на обработку персональных данных</h2>
+
+  {% if custom_content %}
+    {{ custom_content | safe }}
+  {% else %}
+  <p>
+    Настоящим я, пользователь сервиса <strong>{{ site_name }}</strong>,
+    свободно, своей волей и в своём интересе даю согласие на обработку следующих
+    персональных данных:
+  </p>
+
+  <ul>
+    <li>Telegram ID и username в мессенджере Telegram</li>
+  </ul>
+
+  <p><strong>Цели обработки:</strong></p>
+  <ul>
+    <li>Восстановление доступа к аккаунту через Telegram</li>
+    <li>Отправка уведомлений о входе в аккаунт и истечении подписки</li>
+  </ul>
+
+  <p>
+    Согласие предоставляется путём установки отметки (чекбокса) на странице привязки
+    Telegram-аккаунта и действует до его отзыва.
+  </p>
+
+  <p>
+    Я вправе в любой момент отозвать согласие, отвязав Telegram-аккаунт
+    в разделе «Настройки аккаунта». После отзыва согласия данные будут удалены.
+  </p>
+
+  {% if contact_email %}
+  <p><strong>Контактные данные оператора:</strong> <a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>
+  {% endif %}
+  {% endif %}
+
+  <p style="margin-top:2rem"><a href="/">← На главную</a></p>
+</main>
+{% endblock %}
