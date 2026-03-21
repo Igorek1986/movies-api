@@ -353,8 +353,16 @@
         </form>
         {% else %}
         <p class="muted small">Telegram не привязан.</p>
-        <button type="button" id="tgLinkBtn" class="secondary">Привязать Telegram</button>
-        <p class="muted small" style="margin-top: .4rem; font-size: .8rem;">Привязывая Telegram, вы разрешаете хранение вашего Telegram ID и username для восстановления пароля и отправки уведомлений.</p>
+        <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;margin-bottom:.6rem">
+          <input type="checkbox" id="tgConsentCheck" style="margin-top:.2rem;flex-shrink:0">
+          <span class="muted small" style="font-size:.82rem;line-height:1.4">
+            Привязывая Telegram, я разрешаю хранение своего Telegram ID и username для восстановления пароля и отправки уведомлений. Я ознакомился(-ась) с
+            <a href="{{ privacy_policy_url or '/privacy' }}" target="_blank" rel="noopener">Политикой обработки персональных данных</a>
+            и даю
+            <a href="{{ consent_url or '/consent' }}" target="_blank" rel="noopener">Согласие на обработку персональных данных</a>.
+          </span>
+        </label>
+        <button type="button" id="tgLinkBtn" class="secondary" disabled>Привязать Telegram</button>
         <span id="tgLinkStatus" class="status-text"></span>
         {% endif %}
       </div>

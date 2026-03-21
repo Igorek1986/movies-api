@@ -59,6 +59,18 @@ DEFAULTS: dict[str, str] = {
     "rate_2fa_max": "5",
     "rate_2fa_window_sec": "900",
     "sync_cooldown_sec": "86400",
+    # ── Analytics ──────────────────────────────────────────────────────────────
+    "yandex_metrika_enabled": "0",
+    "yandex_metrika_id": "",
+    "google_analytics_enabled": "0",
+    "google_analytics_id": "",
+    # ── Legal ──────────────────────────────────────────────────────────────────
+    "site_name": "NUMParser",
+    "contact_email": "",
+    "privacy_policy_url": "/privacy",
+    "consent_url": "/consent",
+    "privacy_policy_content": "",
+    "consent_content": "",
 }
 
 # Human-readable labels for the admin UI (key → label)
@@ -102,6 +114,16 @@ LABELS: dict[str, str] = {
     "rate_2fa_max": "Rate: 2FA — попыток",
     "rate_2fa_window_sec": "Rate: 2FA — окно (сек)",
     "sync_cooldown_sec": "MyShows cooldown (сек)",
+    "yandex_metrika_enabled": "Яндекс.Метрика — включена",
+    "yandex_metrika_id": "Яндекс.Метрика ID",
+    "google_analytics_enabled": "Google Analytics — включена",
+    "google_analytics_id": "Google Analytics ID",
+    "site_name": "Название сервиса",
+    "contact_email": "Контактный email (отображается на юридических страницах)",
+    "privacy_policy_url": "URL Политики обработки персональных данных",
+    "consent_url": "URL Согласия на обработку персональных данных",
+    "privacy_policy_content": "Текст Политики обработки персональных данных (HTML)",
+    "consent_content": "Текст Согласия на обработку персональных данных (HTML)",
 }
 
 # Ordered groups for the UI
@@ -162,6 +184,26 @@ GROUPS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "Аналитика",
+        [
+            "yandex_metrika_enabled",
+            "yandex_metrika_id",
+            "google_analytics_enabled",
+            "google_analytics_id",
+        ],
+    ),
+    (
+        "Юридические",
+        [
+            "site_name",
+            "contact_email",
+            "privacy_policy_url",
+            "consent_url",
+            "privacy_policy_content",
+            "consent_content",
+        ],
+    ),
+    (
         "Rate Limits",
         [
             "rate_login_max",
@@ -177,11 +219,21 @@ GROUPS: list[tuple[str, list[str]]] = [
     ),
 ]
 
+# Keys rendered as <textarea> in admin UI (long text / HTML content)
+TEXTAREA_KEYS: set[str] = {"privacy_policy_content", "consent_content"}
+
+# Keys rendered as <input type="checkbox"> in admin UI (stored as "1"/"0")
+CHECKBOX_KEYS: set[str] = {"yandex_metrika_enabled", "google_analytics_enabled"}
+
 _cache: dict[str, str] = dict(DEFAULTS)
 
 
 def get(key: str, default: str | None = None) -> str | None:
     return _cache.get(key, default if default is not None else DEFAULTS.get(key))
+
+
+def get_bool(key: str) -> bool:
+    return get(key) == "1"
 
 
 def get_int(key: str) -> int:

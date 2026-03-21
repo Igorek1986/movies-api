@@ -130,6 +130,8 @@ async def _profiles_ctx(request, user, db, **extra) -> dict:
         "device_limit": settings_cache.get_role_limit(user.role, "device_limit"),
         "tg_linked": tg is not None,
         "tg_username": tg.username if (tg and tg.username) else None,
+        "privacy_policy_url": settings_cache.get("privacy_policy_url"),
+        "consent_url": settings_cache.get("consent_url"),
         "totp_enabled": user.totp_enabled,
         "backup_codes_count": backup_codes_count(user.backup_codes),
         "notifications_enabled": user.notifications_enabled is not False,
@@ -270,6 +272,28 @@ async def register_submit(
     _set_session_cookie(response, session_key)
     _set_device_token_cookie(response, device_token)
     return response
+
+
+# ─── Legal pages ──────────────────────────────────────────────────────────────
+
+@router.get("/privacy", response_class=HTMLResponse)
+async def privacy_page(request: Request):
+    return templates.TemplateResponse("privacy.html", {
+        "request": request,
+        "site_name": settings_cache.get("site_name") or "NUMParser",
+        "contact_email": settings_cache.get("contact_email") or "",
+        "custom_content": settings_cache.get("privacy_policy_content") or "",
+    })
+
+
+@router.get("/consent", response_class=HTMLResponse)
+async def consent_page(request: Request):
+    return templates.TemplateResponse("consent.html", {
+        "request": request,
+        "site_name": settings_cache.get("site_name") or "NUMParser",
+        "contact_email": settings_cache.get("contact_email") or "",
+        "custom_content": settings_cache.get("consent_content") or "",
+    })
 
 
 # ─── Profile redirect (legacy) ────────────────────────────────────────────────
