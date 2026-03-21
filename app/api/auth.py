@@ -13,7 +13,7 @@ from sqlalchemy import select, delete
 from app.db.database import get_db
 import string
 import json as _json
-from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending, Session
+from app.db.models import User, PasswordResetToken, TelegramUser, Totp2faPending, Session, TrustedDevice
 from app.api.devices import _devices_with_stats, _import_ctx
 from app.utils import (
     hash_password, verify_password, generate_api_key, validate_password, validate_name,
@@ -31,6 +31,7 @@ settings = get_settings()
 
 COOKIE_NAME = "session_key"
 PENDING_2FA_COOKIE = "2fa_pending"
+DEVICE_TOKEN_COOKIE = "device_token"
 
 
 async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
@@ -51,20 +52,47 @@ async def _notify_new_session(user_id: int, ip: str, ua: str, base_url: str):
         logger.warning(f"Session notification failed for user {user_id}: {e}")
 
 
-async def _create_session(db: AsyncSession, user_id: int, request: Request) -> str:
-    """Создаёт запись Session и возвращает ключ для cookie."""
+async def _create_session(db: AsyncSession, user_id: int, request: Request) -> tuple[str, str]:
+    """Создаёт запись Session. Возвращает (session_key, device_token).
+
+    Если device_token cookie уже есть и совпадает с записью trusted_devices — уведомление не отправляется.
+    Иначе создаётся новая запись доверенного устройства и отправляется Telegram-уведомление.
+    """
     key = generate_api_key()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings_cache.get_int("session_ttl_days"))
     ip = get_real_ip(request)
     ua = request.headers.get("User-Agent", "")[:500]
     db.add(Session(user_id=user_id, key=key, expires_at=expires_at, ip=ip, user_agent=ua))
+
+    # Проверяем, знакомое ли устройство
+    existing_device_token = request.cookies.get(DEVICE_TOKEN_COOKIE)
+    device_token = existing_device_token
+    is_trusted = False
+
+    if existing_device_token:
+        result = await db.execute(
+            select(TrustedDevice).where(
+                TrustedDevice.user_id == user_id,
+                TrustedDevice.token == existing_device_token,
+            )
+        )
+        trusted = result.scalar_one_or_none()
+        if trusted:
+            is_trusted = True
+            trusted.last_used_at = datetime.now(timezone.utc)
+
+    if not is_trusted:
+        device_token = generate_api_key()
+        db.add(TrustedDevice(user_id=user_id, token=device_token))
+        base_url = str(request.base_url).rstrip("/")
+        asyncio.create_task(_notify_new_session(user_id, ip, ua, base_url))
+
     await db.commit()
-    base_url = str(request.base_url).rstrip("/")
-    asyncio.create_task(_notify_new_session(user_id, ip, ua, base_url))
+
     from app.api.dependencies import _should_update_active, _update_last_active
     if _should_update_active(user_id):
         asyncio.create_task(_update_last_active(user_id))
-    return key
+    return key, device_token
 
 
 async def _delete_all_sessions(db: AsyncSession, user_id: int):
@@ -77,6 +105,13 @@ def _set_session_cookie(response, session_key: str):
     response.set_cookie(
         key=COOKIE_NAME, value=session_key,
         httponly=True, max_age=settings_cache.get_int("session_ttl_days") * 86400, samesite="lax",
+    )
+
+
+def _set_device_token_cookie(response, device_token: str):
+    response.set_cookie(
+        key=DEVICE_TOKEN_COOKIE, value=device_token,
+        httponly=True, max_age=settings_cache.get_int("device_token_ttl_days") * 86400, samesite="lax",
     )
 
 
@@ -162,9 +197,10 @@ async def login_submit(
         )
         return response
 
-    session_key = await _create_session(db, user.id, request)
+    session_key, device_token = await _create_session(db, user.id, request)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, session_key)
+    _set_device_token_cookie(response, device_token)
     return response
 
 
@@ -229,9 +265,10 @@ async def register_submit(
     await db.refresh(user)
     logger.info(f"New user registered: {username}")
 
-    session_key = await _create_session(db, user.id, request)
+    session_key, device_token = await _create_session(db, user.id, request)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, session_key)
+    _set_device_token_cookie(response, device_token)
     return response
 
 
@@ -554,10 +591,11 @@ async def verify_2fa_submit(
     await db.commit()
     rate_limit.clear_2fa(ip)
 
-    session_key = await _create_session(db, user.id, request)
+    session_key, device_token = await _create_session(db, user.id, request)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     response.delete_cookie(PENDING_2FA_COOKIE)
     _set_session_cookie(response, session_key)
+    _set_device_token_cookie(response, device_token)
     return response
 
 
