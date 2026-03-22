@@ -162,7 +162,8 @@ class MediaCard(Base):
     vote_average = Column(Float, nullable=True)
     release_date = Column(String(20), nullable=True)   # release_date (movie) / first_air_date (tv)
     last_air_date = Column(String(20), nullable=True)  # tv only
-    number_of_seasons = Column(Integer, nullable=True) # tv only
+    number_of_seasons = Column(Integer, nullable=True)  # tv only
+    number_of_episodes = Column(Integer, nullable=True) # tv only
     seasons_json = Column(Text, nullable=True)          # JSON list of seasons, tv only
     last_ep_season = Column(Integer, nullable=True)    # last_episode_to_air.season_number, tv only
     last_ep_number = Column(Integer, nullable=True)    # last_episode_to_air.episode_number, tv only
