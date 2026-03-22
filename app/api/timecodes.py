@@ -25,7 +25,7 @@ from datetime import date
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -37,6 +37,7 @@ from app import rate_limit
 from app.db.models import Device, Timecode, MediaCard, LampaProfile, User
 from app.api.dependencies import get_device_by_token
 from app import settings_cache
+from app.ws_manager import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/timecode", tags=["timecodes"])
@@ -157,6 +158,105 @@ async def _trim_to_limit(
             f"profile={lampa_profile_id!r} role={user_role} limit={limit}"
         )
     return len(oldest_ids)
+
+
+def _media_card_to_entry(mc) -> dict:
+    """
+    Конвертирует MediaCard в card-объект для Lampa favorite.
+    Ключевой момент: для TV сериалов Lampa использует original_name (не original_title)
+    чтобы определить тип — router.js: data.original_name ? 'tv' : 'movie'
+    """
+    entry = {
+        "id": mc.tmdb_id,
+        "type": mc.media_type,
+        "poster_path": mc.poster_path or "",
+        "backdrop_path": mc.backdrop_path or "",
+        "vote_average": mc.vote_average or 0,
+        "overview": mc.overview or "",
+        "source": "tmdb",
+    }
+    if mc.media_type == "tv":
+        entry["name"] = mc.title or ""
+        entry["original_name"] = mc.original_title or ""  # ключевое поле для роутинга
+        entry["first_air_date"] = mc.release_date or ""
+        if mc.number_of_seasons:
+            entry["number_of_seasons"] = mc.number_of_seasons
+        if mc.number_of_episodes:
+            entry["number_of_episodes"] = mc.number_of_episodes
+        if mc.next_ep_air_date:
+            entry["next_episode_to_air"] = {"air_date": mc.next_ep_air_date}
+    else:
+        entry["title"] = mc.title or ""
+        entry["original_title"] = mc.original_title or ""
+        entry["release_date"] = mc.release_date or ""
+    return entry
+
+
+async def _merge_favorite_history(
+    db: AsyncSession,
+    device_id: int,
+    profile_id: str,
+    entries: list[dict],
+    user_role: str = "simple",
+) -> None:
+    """
+    Добавляет записи в favorite Lampa-формата:
+      history — список TMDB ID (int)
+      card    — список объектов с метаданными карточек
+    Не перезаписывает существующие записи (дедупликация по tmdb_id).
+    Применяет лимит по роли пользователя.
+    Не делает commit — вызывающий код коммитит сам.
+    """
+    if not entries:
+        return
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device_id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+
+    if not lp:
+        lp = LampaProfile(device_id=device_id, lampa_profile_id=profile_id, name="")
+        db.add(lp)
+        await db.flush()
+
+    try:
+        existing_fav = json.loads(lp.favorite) if lp.favorite else {}
+    except Exception:
+        existing_fav = {}
+
+    existing_history = existing_fav.get("history", [])   # list of int tmdb_id
+    existing_cards   = existing_fav.get("card", [])       # list of card objects
+
+    existing_ids      = set(existing_history)
+    existing_card_ids = {c.get("id") for c in existing_cards if c.get("id")}
+
+    new_ids   = []
+    new_cards = []
+    for e in entries:
+        tmdb_id = e.get("id")
+        if not tmdb_id:
+            continue
+        if tmdb_id not in existing_ids:
+            existing_ids.add(tmdb_id)
+            new_ids.append(tmdb_id)
+        if tmdb_id not in existing_card_ids:
+            existing_card_ids.add(tmdb_id)
+            new_cards.append(e)
+
+    if not new_ids:
+        return
+
+    existing_fav["history"] = new_ids + existing_history
+    existing_fav["card"]    = new_cards + existing_cards
+
+    limit = settings_cache.get_role_limit(user_role, "favorite_limit")
+    if limit is not None:
+        existing_fav = _trim_favorite(existing_fav, limit)
+
+    lp.favorite = json.dumps(existing_fav, ensure_ascii=False)
 
 
 async def _upsert_timecodes(
@@ -294,6 +394,7 @@ async def _fetch_and_store_media_card(
             seasons = data.get("seasons")
             values["last_air_date"] = data.get("last_air_date") or ""
             values["number_of_seasons"] = data.get("number_of_seasons")
+            values["number_of_episodes"] = data.get("number_of_episodes")
             values["seasons_json"] = json.dumps(seasons, ensure_ascii=False) if seasons else None
             last_ep = data.get("last_episode_to_air") or {}
             values["last_ep_season"] = last_ep.get("season_number")
@@ -393,6 +494,12 @@ async def save_timecode(
     if m:
         asyncio.create_task(_fetch_and_store_media_card(card_id, int(m.group(1)), m.group(2)))
 
+    # Рассылаем обновление другим соединениям того же пользователя
+    asyncio.create_task(ws_manager.broadcast(
+        device.user_id, None,  # None = отправить всем (HTTP-запрос не знает conn_id)
+        {"type": "timecode", "profile_id": lampa_profile_id, "card_id": card_id, "item": item, "data": data},
+    ))
+
     return {"success": True}
 
 
@@ -475,12 +582,25 @@ async def import_from_lampac(
 
     # Запускаем фоновую загрузку MediaCard + обновление даты таймкодов
     lp = profile_id or ""
+    valid_card_ids = []
     for card_id in data.keys():
         m = _CARD_ID_RE.match(card_id)
         if m:
+            valid_card_ids.append(card_id)
             asyncio.create_task(_fetch_and_store_media_card(
                 card_id, int(m.group(1)), m.group(2), device.id, lp,
             ))
+
+    # Обновляем favorite.history один раз по уже существующим в DB MediaCards.
+    # Новые карточки появятся в истории при следующем импорте (после обогащения TMDB).
+    if valid_card_ids:
+        mc_result = await db.execute(
+            select(MediaCard).where(MediaCard.card_id.in_(valid_card_ids))
+        )
+        entries = [_media_card_to_entry(mc) for mc in mc_result.scalars().all()]
+        if entries:
+            await _merge_favorite_history(db, device.id, lp, entries, user_role)
+            await db.commit()
 
     return {"success": True, "saved": saved, "trimmed": trimmed}
 
@@ -756,13 +876,13 @@ async def create_profile(
     user_role = await _get_user_role(device, db)
     limit = settings_cache.get_role_limit(user_role, "profile_limit")
 
-    if limit is not None:
-        count = (await db.execute(
-            select(func.count()).select_from(LampaProfile)
-            .where(LampaProfile.device_id == device.id)
-        )).scalar() or 0
-        if count >= limit:
-            raise HTTPException(status_code=403, detail=f"Достигнут лимит профилей ({limit})")
+    count = (await db.execute(
+        select(func.count()).select_from(LampaProfile)
+        .where(LampaProfile.device_id == device.id)
+    )).scalar() or 0
+
+    if limit is not None and count >= limit:
+        raise HTTPException(status_code=403, detail=f"Достигнут лимит профилей ({limit})")
 
     profile_id = (body.profile_id or "").strip().lstrip("_")[:100] or secrets.token_hex(4)
 
@@ -776,8 +896,33 @@ async def create_profile(
         raise HTTPException(status_code=409, detail="Профиль с таким ID уже существует")
 
     icon = (body.icon or "").strip()[:20] or None
-    lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name=name, icon=icon)
-    db.add(lp)
+
+    # Если есть LampaProfile с пустым ID (создан авто через put_favorite без профиля) —
+    # просто переименовываем его вместо создания нового + удаления старого.
+    empty_lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == "",
+        )
+    )).scalar_one_or_none()
+
+    if empty_lp:
+        empty_lp.lampa_profile_id = profile_id
+        empty_lp.name = name
+        if icon:
+            empty_lp.icon = icon
+        lp = empty_lp
+    else:
+        lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name=name, icon=icon)
+        db.add(lp)
+
+    # Переносим таймкоды с пустым profile_id (сохранены без профиля)
+    await db.execute(
+        update(Timecode)
+        .where(Timecode.device_id == device.id, Timecode.lampa_profile_id == "")
+        .values(lampa_profile_id=profile_id)
+    )
+
     await db.commit()
     await db.refresh(lp)
 
@@ -821,6 +966,12 @@ async def rename_profile(
         lp.icon = body.icon.strip()[:20] or None
 
     await db.commit()
+
+    asyncio.create_task(ws_manager.broadcast(
+        device.user_id, None,
+        {"type": "profile_updated", "profile_id": profile_id, "name": lp.name, "icon": lp.icon},
+    ))
+
     return {"ok": True, "profile_id": profile_id, "name": lp.name, "icon": lp.icon}
 
 
@@ -852,4 +1003,155 @@ async def delete_profile(
     await db.delete(lp)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/favorite")
+async def get_favorite(
+    profile_id: str = Query(default=""),
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает сохранённые закладки. ?token=KEY&profile_id=ID (profile_id опционален)"""
+    _require_device(device)
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+
+    # Auto-rebuild: если history пуст — строим из MediaCards по существующим таймкодам.
+    # Срабатывает один раз после первого импорта, когда фоновые задачи уже заполнили MediaCards.
+    existing_fav = {}
+    if lp and lp.favorite:
+        try:
+            existing_fav = json.loads(lp.favorite)
+        except Exception:
+            pass
+
+    if not existing_fav.get("history"):
+        card_ids = (await db.execute(
+            select(Timecode.card_id).distinct().where(
+                Timecode.device_id == device.id,
+                Timecode.lampa_profile_id == profile_id,
+                Timecode.card_id != "lampa_import",
+            )
+        )).scalars().all()
+        valid_ids = [cid for cid in card_ids if _CARD_ID_RE.match(cid)]
+        if valid_ids:
+            mc_result = await db.execute(select(MediaCard).where(MediaCard.card_id.in_(valid_ids)))
+            entries = [_media_card_to_entry(mc) for mc in mc_result.scalars().all()]
+            if entries:
+                role = await _get_user_role(device, db)
+                await _merge_favorite_history(db, device.id, profile_id, entries, role)
+                await db.commit()
+                lp = (await db.execute(
+                    select(LampaProfile).where(
+                        LampaProfile.device_id == device.id,
+                        LampaProfile.lampa_profile_id == profile_id,
+                    )
+                )).scalar_one_or_none()
+
+    return {"favorite": json.loads(lp.favorite) if (lp and lp.favorite) else None}
+
+
+class _FavoriteBody(BaseModel):
+    favorite: Any
+
+
+_FAV_CATEGORIES = ("like", "wath", "book", "history", "look", "viewed", "scheduled", "continued", "thrown")
+
+
+def _trim_favorite(fav: dict, limit: int) -> dict:
+    """Обрезает каждую категорию favorite до limit записей (новые идут первыми).
+    Затем чистит 'card' — оставляет только карточки, чьи id есть хотя бы в одной категории.
+    """
+    fav = dict(fav)
+    for cat in _FAV_CATEGORIES:
+        if cat in fav and isinstance(fav[cat], list) and len(fav[cat]) > limit:
+            fav[cat] = fav[cat][:limit]
+
+    # Собираем актуальный набор id
+    allowed_ids: set = set()
+    for cat in _FAV_CATEGORIES:
+        if isinstance(fav.get(cat), list):
+            for item in fav[cat]:
+                allowed_ids.add(item)
+
+    if isinstance(fav.get("card"), list):
+        fav["card"] = [c for c in fav["card"] if isinstance(c, dict) and c.get("id") in allowed_ids]
+
+    return fav
+
+
+@router.put("/favorite")
+async def put_favorite(
+    body: _FavoriteBody,
+    profile_id: str = Query(default=""),
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохраняет закладки. ?token=KEY&profile_id=ID (profile_id опционален)"""
+    _require_device(device)
+
+    favorite = body.favorite
+
+    # Применяем лимит по роли пользователя
+    if isinstance(favorite, dict):
+        role = await _get_user_role(device, db)
+        limit = settings_cache.get_role_limit(role, "favorite_limit")
+        if limit is not None:
+            favorite = _trim_favorite(favorite, limit)
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device.id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+    if not lp:
+        # Auto-create: LampaProfile создаётся при первом сохранении (как таймкоды)
+        lp = LampaProfile(device_id=device.id, lampa_profile_id=profile_id, name="")
+        db.add(lp)
+        await db.flush()
+
+    lp.favorite = json.dumps(favorite, ensure_ascii=False) if favorite is not None else None
+    await db.commit()
+
+    # Рассылаем обновление закладок другим соединениям пользователя
+    asyncio.create_task(ws_manager.broadcast(
+        device.user_id, None,
+        {"type": "favorite", "profile_id": profile_id, "favorite": favorite},
+    ))
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — real-time push таймкодов на другие устройства пользователя
+# ---------------------------------------------------------------------------
+
+@router.websocket("/ws")
+async def ws_timecode(
+    websocket: WebSocket,
+    device: Device = Depends(get_device_by_token),
+):
+    """
+    WebSocket для получения обновлений таймкодов от других устройств пользователя в реальном времени.
+    Подключение: ws://BASE_URL/timecode/ws?token=KEY
+    Сообщения: {"type": "timecode", "profile_id": "", "card_id": "123_movie", "item": "hash", "data": "..."}
+    """
+    if not device:
+        await websocket.close(code=4001)
+        return
+
+    conn_id = await ws_manager.connect(device.user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # держим соединение, ping/pong
+    except WebSocketDisconnect:
+        ws_manager.disconnect(device.user_id, conn_id)
+    except Exception:
+        ws_manager.disconnect(device.user_id, conn_id)
 
