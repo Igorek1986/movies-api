@@ -14,7 +14,7 @@ from app.utils import lampa_hash
 from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
-from app.api.timecodes import _trim_to_limit
+from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -376,6 +376,29 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                     },
                 )
                 await db.execute(mc_stmt)
+
+                # Добавляем в favorite.history: читаем из БД чтобы использовать полные данные
+                # (карточки могли быть обогащены TMDB раньше — там есть backdrop, overview, vote_average)
+                db_cards = (await db.execute(
+                    select(MediaCard).where(MediaCard.card_id.in_(list(mc_unique.keys())))
+                )).scalars().all()
+
+                # Определяем дату последнего просмотра для каждой карточки (для сортировки)
+                card_last_watched: dict[str, datetime] = {}
+                for tc in all_timecodes:
+                    cid = tc["card_id"]
+                    dt = tc.get("updated_at")
+                    if dt and (cid not in card_last_watched or dt > card_last_watched[cid]):
+                        card_last_watched[cid] = dt
+
+                db_cards_sorted = sorted(
+                    db_cards,
+                    key=lambda mc: card_last_watched.get(mc.card_id, datetime.min),
+                    reverse=True,
+                )
+
+                history_entries = [_media_card_to_entry(mc) for mc in db_cards_sorted]
+                await _merge_favorite_history(db, device.id, profile_id, history_entries, user_role)
 
             if all_timecodes or all_media_cards:
                 await db.commit()
