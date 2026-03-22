@@ -160,6 +160,98 @@ async def _trim_to_limit(
     return len(oldest_ids)
 
 
+def _media_card_to_entry(mc) -> dict:
+    """
+    Конвертирует MediaCard в card-объект для Lampa favorite.
+    Ключевой момент: для TV сериалов Lampa использует original_name (не original_title)
+    чтобы определить тип — router.js: data.original_name ? 'tv' : 'movie'
+    """
+    entry = {
+        "id": mc.tmdb_id,
+        "type": mc.media_type,
+        "poster_path": mc.poster_path or "",
+        "backdrop_path": mc.backdrop_path or "",
+        "vote_average": mc.vote_average or 0,
+        "overview": mc.overview or "",
+        "source": "tmdb",
+    }
+    if mc.media_type == "tv":
+        entry["name"] = mc.title or ""
+        entry["original_name"] = mc.original_title or ""  # ключевое поле для роутинга
+        entry["first_air_date"] = mc.release_date or ""
+        if mc.number_of_seasons:
+            entry["number_of_seasons"] = mc.number_of_seasons
+        if mc.number_of_episodes:
+            entry["number_of_episodes"] = mc.number_of_episodes
+        if mc.next_ep_air_date:
+            entry["next_episode_to_air"] = {"air_date": mc.next_ep_air_date}
+    else:
+        entry["title"] = mc.title or ""
+        entry["original_title"] = mc.original_title or ""
+        entry["release_date"] = mc.release_date or ""
+    return entry
+
+
+async def _merge_favorite_history(
+    db: AsyncSession,
+    device_id: int,
+    profile_id: str,
+    entries: list[dict],
+) -> None:
+    """
+    Добавляет записи в favorite Lampa-формата:
+      history — список TMDB ID (int)
+      card    — список объектов с метаданными карточек
+    Не перезаписывает существующие записи (дедупликация по tmdb_id).
+    Не делает commit — вызывающий код коммитит сам.
+    """
+    if not entries:
+        return
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device_id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+
+    if not lp:
+        lp = LampaProfile(device_id=device_id, lampa_profile_id=profile_id, name="")
+        db.add(lp)
+        await db.flush()
+
+    try:
+        existing_fav = json.loads(lp.favorite) if lp.favorite else {}
+    except Exception:
+        existing_fav = {}
+
+    existing_history = existing_fav.get("history", [])   # list of int tmdb_id
+    existing_cards   = existing_fav.get("card", [])       # list of card objects
+
+    existing_ids      = set(existing_history)
+    existing_card_ids = {c.get("id") for c in existing_cards if c.get("id")}
+
+    new_ids   = []
+    new_cards = []
+    for e in entries:
+        tmdb_id = e.get("id")
+        if not tmdb_id:
+            continue
+        if tmdb_id not in existing_ids:
+            existing_ids.add(tmdb_id)
+            new_ids.append(tmdb_id)
+        if tmdb_id not in existing_card_ids:
+            existing_card_ids.add(tmdb_id)
+            new_cards.append(e)
+
+    if not new_ids:
+        return
+
+    existing_fav["history"] = new_ids + existing_history
+    existing_fav["card"]    = new_cards + existing_cards
+    lp.favorite = json.dumps(existing_fav, ensure_ascii=False)
+
+
 async def _upsert_timecodes(
     db: AsyncSession,
     device_id: int,
@@ -295,6 +387,7 @@ async def _fetch_and_store_media_card(
             seasons = data.get("seasons")
             values["last_air_date"] = data.get("last_air_date") or ""
             values["number_of_seasons"] = data.get("number_of_seasons")
+            values["number_of_episodes"] = data.get("number_of_episodes")
             values["seasons_json"] = json.dumps(seasons, ensure_ascii=False) if seasons else None
             last_ep = data.get("last_episode_to_air") or {}
             values["last_ep_season"] = last_ep.get("season_number")
@@ -482,12 +575,25 @@ async def import_from_lampac(
 
     # Запускаем фоновую загрузку MediaCard + обновление даты таймкодов
     lp = profile_id or ""
+    valid_card_ids = []
     for card_id in data.keys():
         m = _CARD_ID_RE.match(card_id)
         if m:
+            valid_card_ids.append(card_id)
             asyncio.create_task(_fetch_and_store_media_card(
                 card_id, int(m.group(1)), m.group(2), device.id, lp,
             ))
+
+    # Обновляем favorite.history один раз по уже существующим в DB MediaCards.
+    # Новые карточки появятся в истории при следующем импорте (после обогащения TMDB).
+    if valid_card_ids:
+        mc_result = await db.execute(
+            select(MediaCard).where(MediaCard.card_id.in_(valid_card_ids))
+        )
+        entries = [_media_card_to_entry(mc) for mc in mc_result.scalars().all()]
+        if entries:
+            await _merge_favorite_history(db, device.id, lp, entries)
+            await db.commit()
 
     return {"success": True, "saved": saved, "trimmed": trimmed}
 
@@ -907,6 +1013,37 @@ async def get_favorite(
             LampaProfile.lampa_profile_id == profile_id,
         )
     )).scalar_one_or_none()
+
+    # Auto-rebuild: если history пуст — строим из MediaCards по существующим таймкодам.
+    # Срабатывает один раз после первого импорта, когда фоновые задачи уже заполнили MediaCards.
+    existing_fav = {}
+    if lp and lp.favorite:
+        try:
+            existing_fav = json.loads(lp.favorite)
+        except Exception:
+            pass
+
+    if not existing_fav.get("history"):
+        card_ids = (await db.execute(
+            select(Timecode.card_id).distinct().where(
+                Timecode.device_id == device.id,
+                Timecode.lampa_profile_id == profile_id,
+                Timecode.card_id != "lampa_import",
+            )
+        )).scalars().all()
+        valid_ids = [cid for cid in card_ids if _CARD_ID_RE.match(cid)]
+        if valid_ids:
+            mc_result = await db.execute(select(MediaCard).where(MediaCard.card_id.in_(valid_ids)))
+            entries = [_media_card_to_entry(mc) for mc in mc_result.scalars().all()]
+            if entries:
+                await _merge_favorite_history(db, device.id, profile_id, entries)
+                await db.commit()
+                lp = (await db.execute(
+                    select(LampaProfile).where(
+                        LampaProfile.device_id == device.id,
+                        LampaProfile.lampa_profile_id == profile_id,
+                    )
+                )).scalar_one_or_none()
 
     return {"favorite": json.loads(lp.favorite) if (lp and lp.favorite) else None}
 
