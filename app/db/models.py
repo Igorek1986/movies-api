@@ -162,7 +162,8 @@ class MediaCard(Base):
     vote_average = Column(Float, nullable=True)
     release_date = Column(String(20), nullable=True)   # release_date (movie) / first_air_date (tv)
     last_air_date = Column(String(20), nullable=True)  # tv only
-    number_of_seasons = Column(Integer, nullable=True) # tv only
+    number_of_seasons = Column(Integer, nullable=True)  # tv only
+    number_of_episodes = Column(Integer, nullable=True) # tv only
     seasons_json = Column(Text, nullable=True)          # JSON list of seasons, tv only
     last_ep_season = Column(Integer, nullable=True)    # last_episode_to_air.season_number, tv only
     last_ep_number = Column(Integer, nullable=True)    # last_episode_to_air.episode_number, tv only
@@ -185,6 +186,7 @@ class LampaProfile(Base):
     lampa_profile_id = Column(String(100), nullable=False)
     name             = Column(String(100), nullable=False, default="")
     icon             = Column(String(20), nullable=True)   # e.g. "id1", "id3"
+    favorite         = Column(Text, nullable=True)         # JSON: Lampa favorite object
 
     __table_args__ = (
         UniqueConstraint("device_id", "lampa_profile_id", name="uq_lampa_profile"),
@@ -304,6 +306,21 @@ class Session(Base):
 
     def __repr__(self):
         return f"<Session(user_id={self.user_id}, ip={self.ip})>"
+
+
+class TrustedDevice(Base):
+    """Доверенное устройство пользователя (долгоживущий cookie device_token)."""
+
+    __tablename__ = "trusted_devices"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token        = Column(String(64), unique=True, nullable=False, index=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        return f"<TrustedDevice(user_id={self.user_id})>"
 
 
 class Totp2faPending(Base):

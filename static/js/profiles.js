@@ -73,6 +73,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Telegram link ───────────────────────────────────────────────────────────
   const tgLinkBtn = document.getElementById('tgLinkBtn');
+  const tgConsentCheck = document.getElementById('tgConsentCheck');
+  if (tgConsentCheck) {
+    tgConsentCheck.addEventListener('change', () => {
+      tgLinkBtn.disabled = !tgConsentCheck.checked;
+    });
+  }
   if (tgLinkBtn) {
     tgLinkBtn.addEventListener('click', async () => {
       const statusEl = document.getElementById('tgLinkStatus');
@@ -91,7 +97,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const tgUrl = `https://t.me/${data.bot_name}?start=${data.code}`;
-        statusEl.innerHTML = `Нажмите кнопку: <a href="${tgUrl}" target="_blank" rel="noopener"><strong>Открыть Telegram</strong></a> и нажмите Start в боте`;
+        const botUrl = `https://t.me/${data.bot_name}`;
+        statusEl.innerHTML =
+          `<a href="${tgUrl}" target="_blank" rel="noopener" role="button" class="secondary" style="display:inline-block;margin-bottom:.5rem">Открыть Telegram</a><br>` +
+          `<span style="font-size:.85rem">Нажмите кнопку «Открыть Telegram» — код отправится автоматически.</span><br>` +
+          `<span style="font-size:.85rem">Или перейдите в <a href="${botUrl}" target="_blank" rel="noopener">бот</a> и отправьте код: <strong style="letter-spacing:.1em">${data.code}</strong></span>`;
 
         // Поллинг пока пользователь не привяжется
         const pollInterval = setInterval(async () => {
@@ -110,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Прекращаем поллинг по истечении TTL
         setTimeout(() => {
           clearInterval(pollInterval);
-          tgLinkBtn.disabled = false;
+          tgLinkBtn.disabled = tgConsentCheck ? !tgConsentCheck.checked : false;
           if (statusEl.className !== 'status-text status-ok') {
             statusEl.textContent = 'Время истекло. Попробуйте снова.';
             statusEl.className = 'status-text status-err';
