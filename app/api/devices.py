@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, TelegramUser
 from app import rate_limit, settings_cache
+from app.api.timecodes import _trim_to_limit
 
 
 def _import_ctx(user: User) -> dict:
@@ -746,6 +747,11 @@ async def api_lampa_profile_quota(
 # ---------------------------------------------------------------------------
 
 def _mc_to_dict(mc: MediaCard) -> dict:
+    movie_item = (
+        lampa_hash(mc.original_title)
+        if mc.media_type == "movie" and mc.original_title
+        else None
+    )
     return {
         "card_id": mc.card_id,
         "tmdb_id": mc.tmdb_id,
@@ -760,6 +766,9 @@ def _mc_to_dict(mc: MediaCard) -> dict:
         "release_date": mc.release_date,
         "last_air_date": mc.last_air_date,
         "number_of_seasons": mc.number_of_seasons,
+        "runtime": mc.runtime,
+        "episode_run_time": mc.episode_run_time,
+        "movie_item": movie_item,
     }
 
 
@@ -781,8 +790,11 @@ async def api_media_card(
     result = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
     mc = result.scalar_one_or_none()
 
-    # Для фильмов кэшируем если есть overview; для сериалов ещё нужен next_ep_air_date
-    if mc and mc.overview and (media_type == "movie" or mc.next_ep_air_date is not None):
+    # Для фильмов кэшируем если есть overview и runtime; для сериалов ещё нужен next_ep_air_date и episode_run_time
+    if mc and mc.overview and (
+        (media_type == "movie" and mc.runtime is not None)
+        or (media_type == "tv" and mc.next_ep_air_date is not None and mc.episode_run_time is not None)
+    ):
         return _mc_to_dict(mc)
 
     # Запрашиваем свежие данные из TMDB
@@ -830,6 +842,7 @@ async def api_media_card(
         "vote_average": data.get("vote_average"),
         "year": date_val[:4],
         "release_date": date_val,
+        "runtime": data.get("runtime"),
     }
     if media_type == "tv":
         seasons = data.get("seasons")
@@ -840,6 +853,8 @@ async def api_media_card(
         values["last_ep_season"] = last_ep.get("season_number")
         values["last_ep_number"] = last_ep.get("episode_number")
         values["next_ep_air_date"] = (data.get("next_episode_to_air") or {}).get("air_date") or ""
+        ert = data.get("episode_run_time") or []
+        values["episode_run_time"] = ert[0] if ert else 0  # 0 = sentinel (TMDB не знает), NULL = ещё не запрашивали
 
     stmt = pg_insert(MediaCard).values([values])
     stmt = stmt.on_conflict_do_update(
@@ -849,12 +864,14 @@ async def api_media_card(
     await db.execute(stmt)
     await db.commit()
 
+    orig_title = values.get("original_title") or ""
+    movie_item = lampa_hash(orig_title) if media_type == "movie" and orig_title else None
     return {
         "card_id": values["card_id"],
         "tmdb_id": values["tmdb_id"],
         "media_type": values["media_type"],
         "title": values.get("title"),
-        "original_title": values.get("original_title"),
+        "original_title": orig_title,
         "poster_path": values.get("poster_path"),
         "backdrop_path": values.get("backdrop_path"),
         "overview": values.get("overview"),
@@ -863,6 +880,9 @@ async def api_media_card(
         "release_date": values.get("release_date"),
         "last_air_date": values.get("last_air_date"),
         "number_of_seasons": values.get("number_of_seasons"),
+        "runtime": values.get("runtime"),
+        "episode_run_time": values.get("episode_run_time"),
+        "movie_item": movie_item,
     }
 
 
@@ -902,10 +922,12 @@ async def api_episodes(
     tc_result = await db.execute(select(Timecode.item, Timecode.data).where(*tc_where))
     watched_items: set[str] = set()
     special_items: set[str] = set()
+    timecode_data: dict[str, dict] = {}
     for item, data_raw in tc_result.all():
         try:
             d = json.loads(data_raw)
             pct = d.get("percent", 0)
+            timecode_data[item] = d
             if pct >= 90:
                 watched_items.add(item)
             if d.get("special"):
@@ -922,6 +944,7 @@ async def api_episodes(
     last_e = mc.last_ep_number or 0
     today_str = _date.today().isoformat()
     orig_title = mc.original_title
+    duration_sec = (mc.episode_run_time * 60) if mc.episode_run_time else None
 
     episodes = []
     for s in seasons:
@@ -947,12 +970,15 @@ async def api_episodes(
 
         for ep in range(1, aired_to + 1):
             h = lampa_hash(build_episode_hash_string(snum, ep, orig_title))
+            td = timecode_data.get(h, {})
             episodes.append({
                 "season": snum,
                 "episode": ep,
                 "hash": h,
                 "watched": h in watched_items,
                 "special": h in special_items,
+                "percent": td.get("percent", 0),
+                "duration_sec": duration_sec,
             })
 
     return {"episodes": episodes, "original_title": orig_title}
@@ -991,6 +1017,120 @@ async def api_mark_watched(
         set_={"data": data},
     )
     await db.execute(stmt)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/api/card-timecodes")
+async def api_get_card_timecodes(
+    device_id: int = Query(...),
+    card_id: str = Query(...),
+    profile_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает таймкоды карточки для устройства. Для фильмов — один элемент."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    where = [Timecode.device_id == device_id, Timecode.card_id == card_id]
+    if profile_id is not None:
+        where.append(Timecode.lampa_profile_id == profile_id)
+    result = await db.execute(select(Timecode.item, Timecode.data).where(*where))
+    rows = []
+    for item, data_raw in result.all():
+        try:
+            d = json.loads(data_raw)
+        except Exception:
+            d = {}
+        duration_sec = d.get("duration") or None
+        rows.append({
+            "item": item,
+            "percent": d.get("percent", 0),
+            "time": d.get("time", 0),
+            "duration_sec": duration_sec,
+        })
+    return rows
+
+
+class _SetTimecodeBody(BaseModel):
+    device_id: int
+    card_id: str
+    item: str
+    percent: float
+    profile_id: str = ""
+
+
+@router.post("/api/set-timecode")
+async def api_set_timecode(
+    body: _SetTimecodeBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upsert таймкода с заданным процентом (из веб-интерфейса)."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(body.device_id, current_user, db)
+
+    pct = max(0.0, min(100.0, body.percent))
+
+    # Читаем существующий таймкод чтобы сохранить duration
+    where = [
+        Timecode.device_id == body.device_id,
+        Timecode.card_id == body.card_id,
+        Timecode.item == body.item,
+        Timecode.lampa_profile_id == body.profile_id,
+    ]
+    existing = await db.execute(select(Timecode.data).where(*where))
+    row = existing.scalar_one_or_none()
+    try:
+        existing_d = json.loads(row) if row else {}
+    except Exception:
+        existing_d = {}
+
+    duration = existing_d.get("duration", 0) or 0
+    time_sec = round(duration * pct / 100) if duration else 0
+    new_data = json.dumps({"time": time_sec, "duration": duration, "percent": pct})
+
+    stmt = pg_insert(Timecode).values(
+        device_id=body.device_id,
+        lampa_profile_id=body.profile_id,
+        card_id=body.card_id,
+        item=body.item,
+        data=new_data,
+    ).on_conflict_do_update(
+        constraint="uq_timecode_unique",
+        set_={"data": new_data},
+    )
+    await db.execute(stmt)
+    await db.commit()
+    await _trim_to_limit(db, body.device_id, body.profile_id, current_user.role)
+    return {"ok": True, "percent": pct, "time": time_sec}
+
+
+@router.delete("/api/episode-timecode")
+async def api_delete_episode_timecode(
+    device_id: int = Query(...),
+    card_id: str = Query(...),
+    item: str = Query(...),
+    profile_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Удаляет таймкод одного эпизода."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    where = [
+        Timecode.device_id == device_id,
+        Timecode.card_id == card_id,
+        Timecode.item == item,
+    ]
+    if profile_id is not None:
+        where.append(Timecode.lampa_profile_id == profile_id)
+    await db.execute(delete(Timecode).where(*where))
     await db.commit()
     return {"ok": True}
 
