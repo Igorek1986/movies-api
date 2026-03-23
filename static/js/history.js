@@ -143,19 +143,23 @@ async function _loadProfileTabs(deviceId, currentProfileId) {
     const data = await res.json();
     const profiles = data.profiles || [];
 
-    // Табы показываем только если есть несколько профилей
     if (profiles.length === 0) {
       container.innerHTML = '';
       container.classList.remove('stats-tabs');
       return;
     }
 
+    // Если профиль не выбран — автоматически берём первый
+    if (currentProfileId === null) {
+      currentProfileId = profiles[0].profile_id;
+      _currentProfile  = currentProfileId;
+      _savePrefs({ profile_id: currentProfileId });
+      loadHistory(deviceId, currentProfileId);
+    }
+
     container.classList.add('stats-tabs');
 
-    // "Все" — null означает без фильтра по профилю
-    const allActive = currentProfileId === null ? ' active' : '';
-    const tabs = [`<button class="tab-btn${allActive}" data-profile-null="1">Все</button>`];
-
+    const tabs = [];
     profiles.forEach(p => {
       const active = p.profile_id === currentProfileId ? ' active' : '';
       const label  = _profileLabel(p);
@@ -168,15 +172,13 @@ async function _loadProfileTabs(deviceId, currentProfileId) {
       btn.addEventListener('click', () => {
         container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const pid = btn.dataset.profileNull ? null : btn.dataset.profile;
+        const pid = btn.dataset.profile;
         _currentProfile = pid;
         _savePrefs({ profile_id: pid });
         loadHistory(deviceId, pid);
       });
 
-      if (!btn.dataset.profileNull) {
-        btn.addEventListener('dblclick', () => _renameProfile(deviceId, btn));
-      }
+      btn.addEventListener('dblclick', () => _renameProfile(deviceId, btn));
     });
   } catch {
     container.innerHTML = '';
@@ -512,8 +514,8 @@ function initHistory(defaultDeviceId) {
       const did = parseInt(deviceSelect.value);
       _currentProfile = null;
       _savePrefs({ device_id: did, profile_id: null });
+      // profile_id: null → _loadProfileTabs автоматически выберет первый профиль
       _loadProfileTabs(did, null);
-      loadHistory(did, null);
     });
   }
 
