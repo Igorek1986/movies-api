@@ -1,6 +1,5 @@
 /**
  * card_detail.js — полная страница карточки фильма/сериала.
- * Читает window.CARD_ID, параметры device_id / profile_id / back из query string.
  */
 
 const _CD_IMG_BASE   = (window.TMDB_IMAGE_BASE || 'https://image.tmdb.org');
@@ -11,8 +10,18 @@ const _WATCHED_THR   = 90;
   const cardId   = window.CARD_ID;
   const params   = new URLSearchParams(location.search);
   const backUrl  = params.get('back') || '/history';
-  const deviceId = params.get('device_id') ? parseInt(params.get('device_id')) : null;
-  const profileId = params.has('profile_id') ? params.get('profile_id') : null;
+
+  let deviceId  = params.get('device_id') ? parseInt(params.get('device_id')) : null;
+  let profileId = params.has('profile_id') ? params.get('profile_id') : null;
+  if (!deviceId) {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('history_prefs') || '{}');
+      if (prefs.device_id) {
+        deviceId  = parseInt(prefs.device_id);
+        if (profileId === null && prefs.hasOwnProperty('profile_id')) profileId = prefs.profile_id;
+      }
+    } catch { /* ignore */ }
+  }
 
   document.getElementById('cardBack').href = backUrl;
 
@@ -25,23 +34,353 @@ const _WATCHED_THR   = 90;
     const card = await res.json();
     _renderCard(card, cardId);
 
-    // Параллельно: прогресс + эпизоды
-    const tasks = [];
-    if (deviceId) {
-      tasks.push(_loadProgress(cardId, deviceId, profileId));
-      if (card.media_type === 'tv') tasks.push(_loadEpisodes(card, cardId, deviceId, profileId));
+    if (!deviceId) return;
+
+    if (card.media_type === 'movie') {
+      await _loadMovieProgress(card, cardId, deviceId, profileId);
+    } else {
+      // Для сериала: сначала эпизоды (содержат percent), потом общий прогресс из них
+      const epData = await _fetchEpisodes(cardId, deviceId, profileId);
+      if (epData) {
+        const qp    = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+        const tcRes = await fetch(`/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`);
+        const tcRows = tcRes.ok ? await tcRes.json() : [];
+        _renderEpisodes(epData, card, cardId, deviceId, profileId);
+        _setupTvProgressSection(epData.episodes || [], cardId, deviceId, profileId, tcRows);
+      }
     }
-    await Promise.all(tasks);
   } catch (e) {
     document.getElementById('cardLoading').textContent = 'Ошибка загрузки';
   }
 })();
 
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function _fmtTime(sec) {
+  if (!sec && sec !== 0) return '';
+  sec = Math.round(sec);
+  const h  = Math.floor(sec / 3600);
+  const m  = Math.floor((sec % 3600) / 60);
+  const s  = sec % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function _fmtRuntime(min) {
+  if (!min) return '';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h ? (m ? `${h} ч ${m} мин` : `${h} ч`) : `${m} мин`;
+}
+
+/** Парсит строку времени H:MM:SS / MM:SS → секунды, или 0 если неверный формат */
+function _parseTime(s) {
+  const parts = (s || '').trim().replace(/^✓\s*/, '').split(':').map(p => Number(p));
+  if (!parts.length || parts.some(p => isNaN(p) || p < 0)) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0];
+}
+
+/**
+ * iPhone-style drum-roll time picker.
+ * currentSec — начальное значение (секунды).
+ * maxSec     — если > 3600, показываем колонку часов.
+ * onConfirm(seconds) — вызывается по OK.
+ */
+function _showTimePicker(currentSec, maxSec, onConfirm, onCancel) {
+  const ITEM_H  = 44;
+  const VISIBLE = 5;
+  const CENTER  = Math.floor(VISIBLE / 2); // = 2
+
+  const sec0  = Math.round(Math.max(0, currentSec || 0));
+  const initH = Math.floor(sec0 / 3600);
+  const initM = Math.floor((sec0 % 3600) / 60);
+  const initS = sec0 % 60;
+  const showHours = (maxSec || 0) > 3600;
+
+  /* ── overlay & dialog ── */
+  const overlay = document.createElement('div');
+  overlay.className = 'tp-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'tp-dialog';
+
+  const titleEl = document.createElement('div');
+  titleEl.className   = 'tp-title';
+  titleEl.textContent = 'Установить время';
+  dialog.appendChild(titleEl);
+
+  const colsWrap = document.createElement('div');
+  colsWrap.className = 'tp-cols-wrap';
+
+  const band = document.createElement('div');
+  band.className = 'tp-band-line';
+  colsWrap.appendChild(band);
+
+  /* ── shared drag state ── */
+  let activeCtrl = null;
+  function onDocMove(e) { if (activeCtrl) activeCtrl._drag(e.clientY); }
+  function onDocUp()    { if (activeCtrl) { activeCtrl._end(); activeCtrl = null; } }
+  document.addEventListener('mousemove', onDocMove);
+  document.addEventListener('mouseup',   onDocUp);
+
+  /* ── column factory ── */
+  function makeCol(count, initial, labelText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tp-col-wrap';
+
+    /* drum */
+    const colEl = document.createElement('div');
+    colEl.className = 'tp-col';
+
+    const listEl = document.createElement('div');
+    listEl.className = 'tp-list';
+
+    const fadeT = document.createElement('div'); fadeT.className = 'tp-fade-top';
+    const fadeB = document.createElement('div'); fadeB.className = 'tp-fade-bot';
+
+    colEl.appendChild(listEl);
+    colEl.appendChild(fadeT);
+    colEl.appendChild(fadeB);
+    wrap.appendChild(colEl);
+
+    for (let i = 0; i < count; i++) {
+      const it = document.createElement('div');
+      it.className   = 'tp-item';
+      it.textContent = String(i).padStart(2, '0');
+      it.dataset.idx = i;
+      listEl.appendChild(it);
+    }
+    const items = Array.from(listEl.querySelectorAll('.tp-item'));
+
+    /* input field */
+    const inputEl = document.createElement('input');
+    inputEl.type      = 'number';
+    inputEl.min       = 0;
+    inputEl.max       = count - 1;
+    inputEl.className = 'tp-input';
+    wrap.appendChild(inputEl);
+
+    /* label */
+    const lbl = document.createElement('div');
+    lbl.className   = 'tp-label';
+    lbl.textContent = labelText;
+    wrap.appendChild(lbl);
+
+    let maxIdx = count - 1;
+    let curIdx = Math.max(0, Math.min(maxIdx, Math.round(initial)));
+    let ty     = (CENTER - curIdx) * ITEM_H;
+
+    function refreshActive(approxIdx) {
+      const snap = Math.max(0, Math.min(maxIdx, Math.round(approxIdx)));
+      items.forEach((el, i) => el.classList.toggle('tp-item-active', i === snap));
+    }
+
+    function applyTY(y, animate) {
+      listEl.style.transition = animate ? 'transform 0.2s ease' : 'none';
+      listEl.style.transform  = `translateY(${y}px)`;
+      refreshActive(CENTER - y / ITEM_H);
+    }
+
+    /* silent=true — не вызывать onChange (используется из setMax) */
+    function snapTo(idx, animate, silent) {
+      curIdx = Math.max(0, Math.min(maxIdx, Math.round(idx)));
+      ty     = (CENTER - curIdx) * ITEM_H;
+      applyTY(ty, animate !== false);
+      if (document.activeElement !== inputEl) inputEl.value = curIdx;
+      if (!silent && ctrl.onChange) ctrl.onChange();
+    }
+
+    applyTY(ty, false);
+    inputEl.value = curIdx;
+
+    /* input → drum */
+    inputEl.addEventListener('change', () => {
+      const v = parseInt(inputEl.value);
+      if (!isNaN(v)) snapTo(v, true);
+    });
+
+    /* wheel on input → drum */
+    inputEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      snapTo(curIdx + (e.deltaY > 0 ? 1 : -1), true);
+    }, { passive: false });
+
+    let dragY0 = null, dragTY0 = null;
+
+    const ctrl = {
+      getValue: () => curIdx,
+      onChange: null,
+      setMax(limit) {
+        maxIdx = Math.max(0, Math.min(count - 1, limit));
+        inputEl.max = maxIdx;
+        items.forEach((el, i) => el.classList.toggle('tp-item-disabled', i > maxIdx));
+        if (curIdx > maxIdx) snapTo(maxIdx, true, true);
+      },
+      _start(clientY) {
+        dragY0  = clientY;
+        dragTY0 = ty;
+        listEl.style.transition = 'none';
+      },
+      _drag(clientY) {
+        if (dragY0 === null) return;
+        ty = dragTY0 + (clientY - dragY0);
+        listEl.style.transform = `translateY(${ty}px)`;
+        refreshActive(CENTER - ty / ITEM_H);
+      },
+      _end() {
+        if (dragY0 === null) return;
+        dragY0 = null;
+        snapTo(CENTER - ty / ITEM_H, true);
+      },
+    };
+
+    /* mouse */
+    listEl.addEventListener('mousedown', e => {
+      e.preventDefault();
+      activeCtrl = ctrl;
+      ctrl._start(e.clientY);
+    });
+
+    /* touch */
+    listEl.addEventListener('touchstart', e => { ctrl._start(e.touches[0].clientY); }, { passive: true });
+    listEl.addEventListener('touchmove',  e => { e.preventDefault(); ctrl._drag(e.touches[0].clientY); }, { passive: false });
+    listEl.addEventListener('touchend',   () => ctrl._end());
+
+    /* wheel on drum */
+    listEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      snapTo(curIdx + (e.deltaY > 0 ? 1 : -1), true);
+    }, { passive: false });
+
+    /* click on item */
+    listEl.addEventListener('click', e => {
+      const it = e.target.closest('.tp-item');
+      if (it) snapTo(parseInt(it.dataset.idx), true);
+    });
+
+    return { wrap, ctrl };
+  }
+
+  /* ── build columns ── */
+  let hCtrl = null, mCtrl, sCtrl;
+
+  if (showHours) {
+    const maxH = Math.max(1, Math.floor((maxSec || 0) / 3600));
+    const { wrap, ctrl } = makeCol(maxH + 1, initH, 'ч');
+    colsWrap.appendChild(wrap);
+    hCtrl = ctrl;
+    const sep = document.createElement('div');
+    sep.className = 'tp-sep'; sep.textContent = ':';
+    colsWrap.appendChild(sep);
+  }
+
+  { const { wrap, ctrl } = makeCol(60, initM, 'мин'); colsWrap.appendChild(wrap); mCtrl = ctrl; }
+
+  {
+    const sep = document.createElement('div');
+    sep.className = 'tp-sep'; sep.textContent = ':';
+    colsWrap.appendChild(sep);
+  }
+
+  { const { wrap, ctrl } = makeCol(60, initS, 'сек'); colsWrap.appendChild(wrap); sCtrl = ctrl; }
+
+  /* ── каскадные ограничения по maxSec ── */
+  if (maxSec) {
+    const limH = Math.floor(maxSec / 3600);
+    const limM = Math.floor((maxSec % 3600) / 60);
+    const limS = maxSec % 60;
+
+    function applyMinLimit() {
+      const h = hCtrl ? hCtrl.getValue() : 0;
+      mCtrl.setMax(h >= limH ? limM : 59);
+    }
+    function applySecLimit() {
+      const h = hCtrl ? hCtrl.getValue() : 0;
+      const m = mCtrl.getValue();
+      sCtrl.setMax((h >= limH && m >= limM) ? limS : 59);
+    }
+
+    if (hCtrl) hCtrl.onChange = () => { applyMinLimit(); applySecLimit(); };
+    mCtrl.onChange = applySecLimit;
+
+    applyMinLimit();
+    applySecLimit();
+  }
+
+  dialog.appendChild(colsWrap);
+
+  /* ── buttons ── */
+  const btns = document.createElement('div');
+  btns.className = 'tp-btns';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className   = 'secondary';
+  cancelBtn.textContent = 'Отмена';
+
+  const okBtn = document.createElement('button');
+  okBtn.className   = 'tp-ok';
+  okBtn.textContent = 'OK';
+
+  btns.appendChild(okBtn);
+  btns.appendChild(cancelBtn);
+  dialog.appendChild(btns);
+
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+
+  /* блокируем скролл страницы при касании вне барабанов */
+  overlay.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
+  overlay.addEventListener('wheel',     e => { e.stopPropagation(); }, { passive: true });
+
+  /* ── close / confirm ── */
+  function close() {
+    document.removeEventListener('mousemove', onDocMove);
+    document.removeEventListener('mouseup',   onDocUp);
+    document.body.style.overflow = '';
+    overlay.remove();
+  }
+
+  function cancel() { close(); if (onCancel) onCancel(); }
+  cancelBtn.addEventListener('click', cancel);
+  overlay.addEventListener('click', e => { if (e.target === overlay) cancel(); });
+
+  okBtn.addEventListener('click', () => {
+    const h = hCtrl ? hCtrl.getValue() : 0;
+    const m = mCtrl.getValue();
+    const s = sCtrl.getValue();
+    close();
+    onConfirm(h * 3600 + m * 60 + s);
+  });
+}
+
+/**
+ * Делает элемент кликабельным — по клику открывается drum-picker.
+ * durationSec используется чтобы показать колонку часов (если > 3600).
+ * onTime(seconds) вызывается при подтверждении.
+ */
+function _attachTimeEditor(el, durationSec, onTime) {
+  el.classList.add('clickable-time');
+  el.title = 'Нажмите чтобы изменить время';
+
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    const currentSec = _parseTime(el.textContent);
+    _showTimePicker(currentSec, durationSec, onTime);
+  });
+}
+
+
+// ─── Render card metadata ─────────────────────────────────────────────────────
+
 function _renderCard(card, cardId) {
   document.title = card.title || cardId;
   document.getElementById('cardLoading').style.display = 'none';
-  document.getElementById('cardContent').style.display  = 'block';
+  document.getElementById('cardContent').style.display = 'block';
 
   if (card.backdrop_path) {
     const img = document.getElementById('cardBackdrop');
@@ -60,11 +399,16 @@ function _renderCard(card, cardId) {
   }
 
   const tags = [];
-  if (card.year)            tags.push({ text: card.year, accent: true });
-  if (card.vote_average)    tags.push({ text: `★ ${Number(card.vote_average).toFixed(1)}` });
+  if (card.year)         tags.push({ text: card.year, accent: true });
+  if (card.vote_average) tags.push({ text: `★ ${Number(card.vote_average).toFixed(1)}` });
+  if (card.media_type === 'movie' && card.runtime) {
+    tags.push({ text: _fmtRuntime(card.runtime) });
+  }
   if (card.media_type === 'tv' && card.number_of_seasons) {
-    const n = card.number_of_seasons;
-    tags.push({ text: `${n} сез.` });
+    tags.push({ text: `${card.number_of_seasons} сез.` });
+  }
+  if (card.media_type === 'tv' && card.episode_run_time) {
+    tags.push({ text: `~${card.episode_run_time} мин / серия` });
   }
   tags.push({ text: card.media_type === 'movie' ? 'Фильм' : 'Сериал' });
   document.getElementById('cardTags').innerHTML = tags
@@ -79,149 +423,602 @@ function _renderCard(card, cardId) {
 }
 
 
-async function _loadProgress(cardId, deviceId, profileId) {
+// ─── Interactive progress bar ─────────────────────────────────────────────────
+
+/**
+ * Интерактивный прогресс-бар.
+ * Drag и tap — оба показывают позицию визуально, при отпускании вызывают
+ * onPick(pct) с процентом позиции где отпустили. Сохранение — на стороне вызывающего.
+ */
+function _makeInteractiveBar(barEl, fillEl, onPick) {
+  let active   = false;
+  let lastPct  = null;
+  let prevWidth = null; // захватывается до начала движения
+
+  function pctFromEvent(e) {
+    const rect    = barEl.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    return Math.round(Math.min(100, Math.max(0, (clientX - rect.left) / rect.width * 100)));
+  }
+
+  function start(e) {
+    prevWidth = fillEl.style.width; // сохраняем ДО изменения
+    active    = true;
+    lastPct   = pctFromEvent(e);
+    fillEl.style.width = lastPct + '%';
+  }
+
+  barEl.style.cursor = 'pointer';
+
+  /* mouse */
+  barEl.addEventListener('mousedown', e => start(e));
+  document.addEventListener('mousemove', e => {
+    if (!active) return;
+    lastPct = pctFromEvent(e);
+    fillEl.style.width = lastPct + '%';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!active) return;
+    active = false;
+    if (lastPct !== null) onPick(lastPct, prevWidth);
+  });
+
+  /* touch */
+  barEl.addEventListener('touchstart', e => start(e), { passive: true });
+  barEl.addEventListener('touchmove', e => {
+    e.preventDefault();
+    lastPct = pctFromEvent(e);
+    fillEl.style.width = lastPct + '%';
+  }, { passive: false });
+  barEl.addEventListener('touchend', () => {
+    if (!active) return;
+    active = false;
+    if (lastPct !== null) onPick(lastPct, prevWidth);
+  });
+}
+
+
+// ─── Movie progress ───────────────────────────────────────────────────────────
+
+async function _loadMovieProgress(card, cardId, deviceId, profileId) {
   try {
-    const qp = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
-    const res = await fetch(`/api/history?device_id=${deviceId}${qp}`);
+    const qp  = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+    const res = await fetch(`/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`);
     if (!res.ok) return;
-    const cards = await res.json();
-    const data  = cards.find(c => c.card_id === cardId);
-    if (!data) return;
+    const rows = await res.json();
 
-    const pct     = Math.min(100, Math.max(0, data.max_percent || 0));
-    const watched = pct >= _WATCHED_THR;
-    const section = document.getElementById('cardProgressSection');
-    section.style.display = 'block';
+    const tc   = rows.reduce((best, r) => (!best || r.percent > best.percent) ? r : best, null);
+    const pct  = tc ? Math.min(100, Math.max(0, tc.percent || 0)) : 0;
+    const item = tc ? tc.item : (card.movie_item || null);
 
-    const lastWatched = data.last_watched
-      ? new Date(data.last_watched).toLocaleDateString('ru-RU') : '';
+    if (!tc && !card.movie_item) return;
 
-    document.getElementById('cardProgressLabel').textContent =
-      (watched ? '✓ Просмотрено' : `Просмотрено ${pct}%`) +
-      (lastWatched ? ` · ${lastWatched}` : '');
-    document.getElementById('cardProgressFill').style.width = pct + '%';
+    // Длительность: из таймкода, иначе из MediaCard.runtime
+    const durationSec = (tc && tc.duration_sec) || (card.runtime ? card.runtime * 60 : null);
 
+    const section   = document.getElementById('cardProgressSection');
+    const labelEl   = document.getElementById('cardProgressLabel');
+    const fillEl    = document.getElementById('cardProgressFill');
     const deleteBtn = document.getElementById('cardDeleteBtn');
-    deleteBtn.style.display = 'inline';
+
+    section.style.display = 'block';
+    fillEl.style.width = pct + '%';
+
+    // Строим label из отдельных span-ов чтобы время было кликабельным
+    labelEl.innerHTML = '';
+    const statusSpan = document.createElement('span');
+    labelEl.appendChild(statusSpan);
+
+    let posSpan = null;
+    if (durationSec) {
+      const sep1 = document.createElement('span'); sep1.textContent = ' · ';
+      posSpan    = document.createElement('span');
+      const sep2 = document.createElement('span'); sep2.textContent = ' / ';
+      const durSpan = document.createElement('span'); durSpan.textContent = _fmtTime(durationSec);
+      labelEl.appendChild(sep1);
+      labelEl.appendChild(posSpan);
+      labelEl.appendChild(sep2);
+      labelEl.appendChild(durSpan);
+    }
+
+    function updateLabel(p) {
+      statusSpan.textContent = p >= _WATCHED_THR ? '✓ Просмотрено' : `Просмотрено ${Math.round(p)}%`;
+      if (posSpan) posSpan.textContent = _fmtTime(durationSec * p / 100);
+    }
+    updateLabel(pct);
+
+    // ── Кнопка "Смотрю" ──
+    const watchSection = document.getElementById('cardWatchSection');
+    const watchBtn     = document.getElementById('cardWatchBtn');
+    let inHistory = !!tc;
+
+    function syncWatchBtn(val) {
+      inHistory = val;
+      watchBtn.classList.toggle('active', val);
+      watchBtn.textContent = val ? '✓ Смотрю' : 'Смотрю';
+    }
+
+    if (item && watchSection) {
+      watchSection.style.display = 'block';
+      syncWatchBtn(inHistory);
+      watchBtn.addEventListener('click', async () => {
+        watchBtn.disabled = true;
+        if (inHistory) {
+          const r = await fetch(
+            `/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`,
+            { method: 'DELETE' }
+          );
+          if (r.ok) {
+            syncWatchBtn(false);
+            fillEl.style.width = '0%';
+            updateLabel(0);
+            syncDeleteBtn(0);
+          }
+        } else {
+          await fetch('/api/set-timecode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId, card_id: cardId, item, percent: 0, profile_id: profileId ?? '' }),
+          });
+          syncWatchBtn(true);
+        }
+        watchBtn.disabled = false;
+      });
+    }
+
+    function syncDeleteBtn(p) {
+      deleteBtn.style.display = p > 0 ? 'inline' : 'none';
+    }
+    syncDeleteBtn(pct);
+
+    async function setTimecode(newPct) {
+      await fetch('/api/set-timecode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: deviceId, card_id: cardId, item, percent: newPct, profile_id: profileId ?? '' }),
+      });
+      syncDeleteBtn(newPct);
+      if (!inHistory) syncWatchBtn(true); // первое сохранение = добавление в историю
+    }
+
     deleteBtn.addEventListener('click', async () => {
       if (!confirm('Удалить историю просмотра?')) return;
       deleteBtn.disabled = true;
-      const dp = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
-      const r  = await fetch(
-        `/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${dp}`,
+      const r = await fetch(
+        `/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`,
         { method: 'DELETE' }
       );
-      if (r.ok) { section.style.display = 'none'; }
-      else      { deleteBtn.disabled = false; }
+      if (r.ok) {
+        fillEl.style.width = '0%';
+        updateLabel(0);
+        syncDeleteBtn(0);
+        syncWatchBtn(false);
+      }
+      deleteBtn.disabled = false;
     });
+
+    if (item) {
+      const barEl = document.querySelector('#cardProgressSection .modal-progress-bar');
+      _makeInteractiveBar(barEl, fillEl, (pickedPct, prevWidth) => {
+        const pickedSec = durationSec ? Math.round(durationSec * pickedPct / 100) : 0;
+        _showTimePicker(pickedSec, durationSec, async (newSec) => {
+          const newPct = durationSec ? Math.min(100, newSec / durationSec * 100) : pickedPct;
+          fillEl.style.width = newPct + '%';
+          updateLabel(newPct);
+          await setTimecode(newPct);
+        }, () => { fillEl.style.width = prevWidth; });
+      });
+
+      if (posSpan && durationSec) {
+        _attachTimeEditor(posSpan, durationSec, async (newSec) => {
+          const newPct = Math.min(100, newSec / durationSec * 100);
+          fillEl.style.width = newPct + '%';
+          updateLabel(newPct);
+          await setTimecode(newPct);
+        });
+      }
+    }
   } catch { /* ignore */ }
 }
 
 
-async function _loadEpisodes(card, cardId, deviceId, profileId) {
+// ─── TV: общий прогресс из эпизодов ──────────────────────────────────────────
+
+function _setupTvProgressSection(episodes, cardId, deviceId, profileId, tcRows) {
+  if (!episodes.length) return;
+
+  const section      = document.getElementById('cardProgressSection');
+  const labelEl      = document.getElementById('cardProgressLabel');
+  const fillEl       = document.getElementById('cardProgressFill');
+  const deleteBtn    = document.getElementById('cardDeleteBtn');
+  const watchSection = document.getElementById('cardWatchSection');
+  const watchBtn     = document.getElementById('cardWatchBtn');
+
+  section.style.display = 'block';
+
+  const qp = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+
+  // Экспортируем функцию обновления чтобы вызывать из _renderEpisodes
+  window._updateTvProgress = function () {
+    const rows  = document.querySelectorAll('.ep-row');
+    const total = rows.length;
+    if (!total) return;
+    let watched = 0;
+    rows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
+    const pct = Math.round(watched / total * 100);
+    fillEl.style.width = pct + '%';
+    labelEl.textContent = `Просмотрено ${watched} / ${total} серий`;
+    syncDeleteBtn();
+  };
+
+  window._updateTvProgress();
+
+  function syncDeleteBtn() {
+    const hasAny = Array.from(document.querySelectorAll('.ep-row'))
+      .some(r => parseFloat(r.dataset.percent) > 0);
+    deleteBtn.style.display = hasAny ? 'inline' : 'none';
+  }
+  syncDeleteBtn();
+
+  // ── Кнопка "Смотрю" ──
+  let inHistory = (tcRows && tcRows.length > 0);
+
+  function syncWatchBtn(val) {
+    inHistory = val;
+    watchBtn.classList.toggle('active', val);
+    watchBtn.textContent = val ? '✓ Смотрю' : 'Смотрю';
+  }
+  // Доступен из _makeEpRow: при сохранении первого таймкода активировать кнопку
+  window._syncTvWatchBtn = (val) => syncWatchBtn(val);
+
+  if (watchSection) {
+    watchSection.style.display = 'block';
+    syncWatchBtn(inHistory);
+
+    watchBtn.addEventListener('click', async () => {
+      watchBtn.disabled = true;
+      if (inHistory) {
+        const r = await fetch(
+          `/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`,
+          { method: 'DELETE' }
+        );
+        if (r.ok) {
+          syncWatchBtn(false);
+          _resetAllEpRows();
+        }
+      } else {
+        // Добавляем: POST первый эпизод с percent=0
+        const sorted = [...episodes].sort((a, b) =>
+          a.season !== b.season ? a.season - b.season : a.episode - b.episode
+        );
+        const first = sorted[0];
+        if (first) {
+          await fetch('/api/set-timecode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              device_id: deviceId,
+              card_id: cardId,
+              item: first.hash,
+              percent: 0,
+              profile_id: profileId ?? '',
+            }),
+          });
+        }
+        syncWatchBtn(true);
+      }
+      watchBtn.disabled = false;
+    });
+  }
+
+  function _resetAllEpRows() {
+    const updaters = window._epRowUpdaters || {};
+    for (const [, fn] of Object.entries(updaters)) fn(0);
+    if (typeof window._updateTvProgress === 'function') window._updateTvProgress();
+  }
+
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm('Удалить всю историю просмотра сериала?')) return;
+    deleteBtn.disabled = true;
+    const r = await fetch(
+      `/api/card-timecodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`,
+      { method: 'DELETE' }
+    );
+    if (r.ok) {
+      syncWatchBtn(false);
+      _resetAllEpRows();
+    } else {
+      deleteBtn.disabled = false;
+    }
+  });
+}
+
+
+// ─── Episodes fetch ───────────────────────────────────────────────────────────
+
+async function _fetchEpisodes(cardId, deviceId, profileId) {
   try {
-    const qp = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+    const qp  = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
     const res = await fetch(`/api/episodes?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}${qp}`);
-    if (!res.ok) return;
-    const epData = await res.json();
-    _renderEpisodes(card, epData, cardId, deviceId, profileId);
-  } catch { /* ignore */ }
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
 }
 
 
-function _renderEpisodes(card, epData, cardId, deviceId, profileId) {
+// ─── Episodes accordion ───────────────────────────────────────────────────────
+
+function _epLabel(ep) {
+  return `S${String(ep.season).padStart(2,'0')}E${String(ep.episode).padStart(2,'0')}`;
+}
+
+function _updateSeasonCount(snum) {
+  const countEl = document.querySelector(`.ep-season-count[data-snum="${snum}"]`);
+  if (!countEl) return;
+  const rows = document.querySelectorAll(`.ep-row[data-snum="${snum}"]`);
+  let watched = 0;
+  rows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
+  countEl.textContent = `${watched} / ${rows.length}`;
+}
+
+function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   const container = document.getElementById('cardEpisodesSection');
   const allEps    = epData.episodes || [];
-  const unwatched = allEps.filter(e => !e.watched);
-  const special   = allEps.filter(e => e.special);
-  if (!unwatched.length && !special.length) return;
+  if (!allEps.length) return;
 
-  function epLabel(e) {
-    return `S${String(e.season).padStart(2,'0')}E${String(e.episode).padStart(2,'0')}`;
+  const pp = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+
+  // Отсортированный список для поиска prev/next
+  const sortedEps = [...allEps].sort((a, b) =>
+    a.season !== b.season ? a.season - b.season : a.episode - b.episode);
+
+  // Реестр функций обновления строки: ep.hash → updateRow(pct)
+  const rowUpdaters = {};
+  window._epRowUpdaters = rowUpdaters; // доступен из _setupTvProgressSection
+
+  // Текущий процент серии по DOM
+  function getRowPct(e) {
+    const r = document.querySelector(`.ep-row[data-ep-hash="${e.hash}"]`);
+    return r ? parseFloat(r.dataset.percent || 0) : (e.percent || 0);
   }
 
-  function itemHtml(e, isSpecial) {
-    const btnClass = isSpecial ? 'modal-ep-btn unmark unmark-btn' : 'modal-ep-btn mark-btn';
-    const btnText  = isSpecial ? 'Отменить' : 'Спецэпизод';
-    return `<div class="modal-ep-item" data-hash="${e.hash}">
-      <span class="modal-ep-label">${epLabel(e)}</span>
-      <button class="${btnClass}">${btnText}</button>
-    </div>`;
+  async function batchSave(eps, pct) {
+    for (const e of eps) {
+      await fetch('/api/set-timecode', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: deviceId, card_id: cardId, item: e.hash, percent: pct, profile_id: profileId ?? '' }),
+      });
+      rowUpdaters[e.hash]?.(pct);
+    }
   }
 
-  const leftHtml  = unwatched.map(e => itemHtml(e, false)).join('') || '<span class="modal-ep-empty">—</span>';
-  const rightHtml = special.map(e => itemHtml(e, true)).join('')    || '<span class="modal-ep-empty">—</span>';
-
-  container.innerHTML = `
-    <div class="modal-episodes-section" style="margin-top:1rem;border-top:1px solid var(--pico-muted-border-color)">
-      <div class="modal-ep-hdr-row">
-        <span id="epHdrLeft">Непросмотрено (${unwatched.length})</span>
-        <span id="epHdrRight">Спецсерии (${special.length})</span>
-      </div>
-      <div class="modal-ep-cols">
-        <div class="modal-ep-col" id="epColLeft">${leftHtml}</div>
-        <div class="modal-ep-col" id="epColRight">${rightHtml}</div>
-      </div>
-    </div>`;
-
-  function updateHeaders() {
-    const l = container.querySelectorAll('#epColLeft .modal-ep-item').length;
-    const r = container.querySelectorAll('#epColRight .modal-ep-item').length;
-    document.getElementById('epHdrLeft').textContent  = `Непросмотрено (${l})`;
-    document.getElementById('epHdrRight').textContent = `Спецсерии (${r})`;
-    if (!l && !r) container.innerHTML = '';
+  async function batchReset(eps) {
+    for (const e of eps) {
+      await fetch(
+        `/api/episode-timecode?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}&item=${encodeURIComponent(e.hash)}${pp}`,
+        { method: 'DELETE' }
+      );
+      rowUpdaters[e.hash]?.(0);
+    }
   }
 
-  async function markSpecial(item, hash, label) {
-    const btn = item.querySelector('.mark-btn');
-    btn.disabled = true; btn.textContent = '…';
-    const pp = profileId != null ? `, "profile_id": "${profileId}"` : '';
-    const r  = await fetch('/api/mark-watched', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: `{"device_id":${deviceId},"card_id":${JSON.stringify(cardId)},"item":${JSON.stringify(hash)}${pp}}`,
+  // Предложить отметить предыдущие если не просмотрены
+  async function offerMarkPrev(ep) {
+    const idx  = sortedEps.findIndex(e => e.hash === ep.hash);
+    const prev = sortedEps.slice(0, idx).filter(e => getRowPct(e) < _WATCHED_THR);
+    if (prev.length && confirm(`Отметить ${prev.length} предыд. серий как просмотренные?`))
+      await batchSave(prev, 100);
+  }
+
+  // Предложить сбросить последующие если есть прогресс
+  async function offerResetNext(ep) {
+    const idx  = sortedEps.findIndex(e => e.hash === ep.hash);
+    const next = sortedEps.slice(idx + 1).filter(e => getRowPct(e) > 0);
+    if (next.length && confirm(`Сбросить прогресс ${next.length} следующих серий?`))
+      await batchReset(next);
+  }
+
+  // Группируем по сезонам
+  const seasons = {};
+  for (const ep of allEps) {
+    if (!seasons[ep.season]) seasons[ep.season] = [];
+    seasons[ep.season].push(ep);
+  }
+
+  // Первый сезон с непросмотренными
+  let activeSeasonExpand = null;
+  for (const snum of Object.keys(seasons).map(Number).sort((a, b) => a - b)) {
+    if (seasons[snum].some(e => e.percent < _WATCHED_THR)) { activeSeasonExpand = snum; break; }
+  }
+
+  container.innerHTML = '';
+  container.style.marginTop = '1rem';
+  container.style.borderTop = '1px solid var(--pico-muted-border-color)';
+
+  for (const snum of Object.keys(seasons).map(Number).sort((a, b) => a - b)) {
+    const eps     = seasons[snum];
+    const watched = eps.filter(e => e.percent >= _WATCHED_THR).length;
+
+    const details = document.createElement('details');
+    if (snum === activeSeasonExpand) details.open = true;
+    details.className = 'ep-season-block';
+
+    const summary = document.createElement('summary');
+    summary.className = 'ep-season-summary';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = `Сезон ${snum}`;
+
+    const countSpan = document.createElement('span');
+    countSpan.className    = 'ep-season-count';
+    countSpan.dataset.snum = snum;
+    countSpan.textContent  = `${watched} / ${eps.length}`;
+
+    const markAllBtn = document.createElement('button');
+    markAllBtn.className   = 'ep-mark-season';
+    markAllBtn.textContent = '✓ Все';
+    markAllBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      markAllBtn.disabled = true;
+      const unwatched = eps.filter(ep => getRowPct(ep) < _WATCHED_THR);
+      if (unwatched.length) await batchSave(unwatched, 100);
+      markAllBtn.disabled = false;
+    });
+
+    summary.appendChild(titleSpan);
+    summary.appendChild(countSpan);
+    summary.appendChild(markAllBtn);
+    details.appendChild(summary);
+
+    const epList = document.createElement('div');
+    epList.className = 'ep-list';
+    for (const ep of eps) {
+      epList.appendChild(_makeEpRow(
+        ep, card, cardId, deviceId, profileId, pp,
+        rowUpdaters, offerMarkPrev, offerResetNext
+      ));
+    }
+
+    details.appendChild(epList);
+    container.appendChild(details);
+  }
+}
+
+
+function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offerMarkPrev, offerResetNext) {
+  const durSec = (ep.duration_sec > 0 ? ep.duration_sec : null)
+    || (card.episode_run_time > 0 ? card.episode_run_time * 60 : null);
+  let curPct = Math.min(100, Math.max(0, ep.percent || 0));
+
+  const row = document.createElement('div');
+  row.className       = 'ep-row';
+  row.dataset.snum    = ep.season;
+  row.dataset.percent = curPct;
+  row.dataset.epHash  = ep.hash;
+
+  // Метка серии
+  const labelEl = document.createElement('span');
+  labelEl.className   = 'ep-row-label';
+  labelEl.textContent = _epLabel(ep);
+
+  // Прогресс-бар
+  const barWrap = document.createElement('div');
+  barWrap.className = 'ep-row-bar';
+  const barFill = document.createElement('div');
+  barFill.className   = `ep-row-fill${curPct >= _WATCHED_THR ? ' watched' : ''}`;
+  barFill.style.width = curPct + '%';
+  barWrap.appendChild(barFill);
+
+  // Метка времени / процента
+  const pctEl = document.createElement('span');
+  pctEl.className = 'ep-row-pct';
+
+  let posSpan = null;
+  if (durSec) {
+    posSpan = document.createElement('span');
+    const sep     = document.createElement('span'); sep.textContent = ' / ';
+    const durSpan = document.createElement('span'); durSpan.textContent = _fmtTime(durSec);
+    pctEl.appendChild(posSpan);
+    pctEl.appendChild(sep);
+    pctEl.appendChild(durSpan);
+  }
+
+  function updateRow(p) {
+    curPct = p;
+    row.dataset.percent = p;
+    barFill.style.width = p + '%';
+    barFill.className   = `ep-row-fill${p >= _WATCHED_THR ? ' watched' : ''}`;
+    if (posSpan) {
+      posSpan.textContent = p >= _WATCHED_THR ? `✓ ${_fmtTime(durSec)}`
+        : (p > 0 ? _fmtTime(durSec * p / 100) : '—');
+    } else {
+      pctEl.textContent = p >= _WATCHED_THR ? '✓' : (p > 0 ? `${Math.round(p)}%` : '');
+    }
+    _updateSeasonCount(ep.season);
+    if (typeof window._updateTvProgress === 'function') window._updateTvProgress();
+  }
+  updateRow(curPct);
+
+  // Регистрируем функцию обновления для batch-операций
+  rowUpdaters[ep.hash] = updateRow;
+
+  async function saveEpTimecode(newPct) {
+    await fetch('/api/set-timecode', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId, card_id: cardId, item: ep.hash, percent: newPct, profile_id: profileId ?? '' }),
+    });
+    if (typeof window._syncTvWatchBtn === 'function') window._syncTvWatchBtn(true);
+    if (newPct >= _WATCHED_THR) await offerMarkPrev(ep);
+  }
+
+  // Интерактивный бар
+  _makeInteractiveBar(barWrap, barFill, (pickedPct, prevWidth) => {
+    const pickedSec = durSec ? Math.round(durSec * pickedPct / 100) : 0;
+    _showTimePicker(pickedSec, durSec, async (newSec) => {
+      const newPct = durSec ? Math.min(100, newSec / durSec * 100) : pickedPct;
+      updateRow(newPct);
+      await saveEpTimecode(newPct);
+    }, () => { barFill.style.width = prevWidth; });
+  });
+
+  // Кликабельное время позиции
+  if (posSpan && durSec) {
+    _attachTimeEditor(posSpan, durSec, async (newSec) => {
+      const newPct = Math.min(100, newSec / durSec * 100);
+      updateRow(newPct);
+      await saveEpTimecode(newPct);
+    });
+  }
+
+  // Кнопка удалить прогресс
+  const delBtn = document.createElement('button');
+  delBtn.className   = 'ep-row-del';
+  delBtn.title       = 'Сбросить прогресс';
+  delBtn.textContent = '🗑';
+  delBtn.addEventListener('click', async () => {
+    delBtn.disabled = true;
+    const r = await fetch(
+      `/api/episode-timecode?device_id=${deviceId}&card_id=${encodeURIComponent(cardId)}&item=${encodeURIComponent(ep.hash)}${pp}`,
+      { method: 'DELETE' }
+    );
+    if (r.ok) {
+      updateRow(0);
+      await offerResetNext(ep);
+    }
+    delBtn.disabled = false;
+  });
+
+  // Кнопка Спецэпизод / Отменить
+  const specBtn = document.createElement('button');
+  specBtn.className   = `ep-row-spec${ep.special ? ' unmark' : ''}`;
+  specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+
+  specBtn.addEventListener('click', async () => {
+    specBtn.disabled = true;
+    specBtn.textContent = '…';
+    const url    = ep.special ? '/api/unmark-special' : '/api/mark-watched';
+    const pidStr = profileId != null ? `, "profile_id": "${profileId}"` : '';
+    const r = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: `{"device_id":${deviceId},"card_id":${JSON.stringify(cardId)},"item":${JSON.stringify(ep.hash)}${pidStr}}`,
     });
     if (r.ok) {
-      item.remove();
-      const right = document.getElementById('epColRight');
-      right.querySelector('.modal-ep-empty')?.remove();
-      const ni = document.createElement('div');
-      ni.className = 'modal-ep-item'; ni.dataset.hash = hash;
-      ni.innerHTML = `<span class="modal-ep-label">${label}</span><button class="modal-ep-btn unmark unmark-btn">Отменить</button>`;
-      right.appendChild(ni);
-      ni.querySelector('.unmark-btn').addEventListener('click', () => unmarkSpecial(ni, hash, label));
-      updateHeaders();
-    } else { btn.disabled = false; btn.textContent = 'Спецэпизод'; }
-  }
-
-  async function unmarkSpecial(item, hash, label) {
-    const btn = item.querySelector('.unmark-btn');
-    btn.disabled = true; btn.textContent = '…';
-    const pp = profileId != null ? `, "profile_id": "${profileId}"` : '';
-    const r  = await fetch('/api/unmark-special', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: `{"device_id":${deviceId},"card_id":${JSON.stringify(cardId)},"item":${JSON.stringify(hash)}${pp}}`,
-    });
-    if (r.ok) {
-      item.remove();
-      const left = document.getElementById('epColLeft');
-      left.querySelector('.modal-ep-empty')?.remove();
-      const ni = document.createElement('div');
-      ni.className = 'modal-ep-item'; ni.dataset.hash = hash;
-      ni.innerHTML = `<span class="modal-ep-label">${label}</span><button class="modal-ep-btn mark-btn">Спецэпизод</button>`;
-      left.appendChild(ni);
-      ni.querySelector('.mark-btn').addEventListener('click', () => markSpecial(ni, hash, label));
-      updateHeaders();
-    } else { btn.disabled = false; btn.textContent = 'Отменить'; }
-  }
-
-  container.querySelectorAll('.mark-btn').forEach(btn => {
-    const item = btn.closest('.modal-ep-item');
-    btn.addEventListener('click', () => markSpecial(item, item.dataset.hash, item.querySelector('.modal-ep-label').textContent));
+      ep.special = !ep.special;
+      updateRow(ep.special ? 100 : 0);
+      specBtn.className   = `ep-row-spec${ep.special ? ' unmark' : ''}`;
+      specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+      if (ep.special) await offerMarkPrev(ep);
+      else            await offerResetNext(ep);
+    } else {
+      specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+    }
+    specBtn.disabled = false;
   });
-  container.querySelectorAll('.unmark-btn').forEach(btn => {
-    const item = btn.closest('.modal-ep-item');
-    btn.addEventListener('click', () => unmarkSpecial(item, item.dataset.hash, item.querySelector('.modal-ep-label').textContent));
-  });
+
+  row.appendChild(labelEl);
+  row.appendChild(barWrap);
+  row.appendChild(pctEl);
+  row.appendChild(delBtn);
+  row.appendChild(specBtn);
+  return row;
 }

@@ -813,6 +813,301 @@ figure { overflow-x: auto; }
 }
 
 /* ============================================================
+   CARD DETAIL — episode accordion
+   ============================================================ */
+
+.ep-season-block {
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.ep-season-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem 0;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.ep-season-summary > span:first-child { flex: 1; }
+.ep-season-summary::-webkit-details-marker { display: none; }
+.ep-season-summary::marker { display: none; }
+.ep-season-summary::after { display: none; }
+.ep-season-summary::before {
+  content: '▶';
+  font-size: .65rem;
+  margin-right: .5rem;
+  transition: transform .15s;
+  color: var(--pico-muted-color);
+}
+details[open] > .ep-season-summary::before { transform: rotate(90deg); }
+.ep-season-count {
+  font-weight: 400;
+  font-size: .78rem;
+  color: var(--pico-muted-color);
+}
+.ep-mark-season {
+  padding: .1rem .4rem;
+  font-size: .7rem;
+  border-radius: var(--pico-border-radius);
+  cursor: pointer;
+  border: 1px solid var(--pico-muted-border-color);
+  background: transparent;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+  user-select: none;
+}
+.ep-mark-season:hover:not(:disabled) {
+  border-color: var(--pico-ins-color, #1a7f3c);
+  color: var(--pico-ins-color, #1a7f3c);
+}
+
+.ep-list {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  padding-bottom: .6rem;
+}
+
+.ep-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr auto auto auto;
+  align-items: center;
+  gap: .4rem;
+  min-height: 1.8rem;
+}
+
+.ep-row-label {
+  font-size: .78rem;
+  font-family: monospace;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}
+
+.ep-row-bar {
+  height: 5px;
+  background: var(--pico-muted-border-color);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+}
+.ep-row-fill {
+  height: 100%;
+  background: var(--pico-primary);
+  border-radius: 3px;
+  pointer-events: none;
+  transition: width .1s;
+}
+.ep-row-fill.watched { background: var(--pico-ins-color, #1a7f3c); }
+
+.ep-row-pct {
+  font-size: .72rem;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+  min-width: 7rem;
+  text-align: right;
+}
+
+.ep-row-del {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .85rem;
+  padding: 0 .1rem;
+  opacity: .4;
+  line-height: 1;
+}
+.ep-row-del:hover:not(:disabled) { opacity: 1; }
+
+.ep-row-spec {
+  padding: .1rem .35rem;
+  font-size: .7rem;
+  border-radius: var(--pico-border-radius);
+  cursor: pointer;
+  border: 1px solid var(--pico-muted-border-color);
+  background: transparent;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}
+.ep-row-spec:hover:not(:disabled) {
+  border-color: var(--pico-primary);
+  color: var(--pico-primary);
+}
+.ep-row-spec.unmark:hover:not(:disabled) {
+  border-color: var(--pico-del-color, #c00);
+  color: var(--pico-del-color, #c00);
+}
+
+.card-watch-btn {
+  padding: .3rem .9rem;
+  font-size: .82rem;
+  border-radius: var(--pico-border-radius);
+  cursor: pointer;
+  border: 1px solid var(--pico-muted-border-color);
+  background: transparent;
+  color: var(--pico-muted-color);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.card-watch-btn:hover:not(:disabled):not(.active) {
+  border-color: var(--pico-primary);
+  color: var(--pico-primary);
+}
+.card-watch-btn.active {
+  background: var(--pico-primary);
+  border-color: var(--pico-primary);
+  color: #fff;
+}
+
+.clickable-time {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.clickable-time:hover { color: var(--pico-primary); }
+
+/* ── Drum-roll time picker ─────────────────────────────── */
+.tp-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tp-dialog {
+  background: var(--pico-card-background-color);
+  border-radius: 14px;
+  padding: 1.25rem 1rem 1rem;
+  min-width: 260px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+.tp-title {
+  text-align: center;
+  font-weight: 600;
+  font-size: .95rem;
+  margin-bottom: 1rem;
+}
+.tp-cols-wrap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  position: relative;
+}
+.tp-col-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.tp-sep {
+  font-size: 1.6rem;
+  font-weight: 700;
+  /* align colon with center row: CENTER * ITEM_H = 2*44 = 88px top + half item */
+  margin-top: calc(44px * 2 + 8px);
+  padding: 0 3px;
+  color: var(--pico-muted-color);
+  line-height: 1;
+}
+.tp-input {
+  width: 60px;
+  text-align: center;
+  font-size: 1.1rem;
+  font-family: monospace;
+  padding: .2rem .25rem;
+  margin-top: .4rem;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 6px;
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+  -moz-appearance: textfield;
+}
+.tp-input::-webkit-inner-spin-button,
+.tp-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.tp-input:focus { outline: 2px solid var(--pico-primary); border-color: transparent; }
+.tp-label {
+  font-size: .68rem;
+  color: var(--pico-muted-color);
+  margin-top: .25rem;
+}
+.tp-col {
+  width: 66px;
+  height: calc(44px * 5); /* VISIBLE = 5 */
+  position: relative;
+  overflow: hidden;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.tp-list {
+  position: absolute;
+  width: 100%;
+  will-change: transform;
+}
+.tp-item {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.55rem;
+  font-family: monospace;
+  color: var(--pico-muted-color);
+  user-select: none;
+  cursor: pointer;
+  transition: color .1s;
+}
+.tp-item-active {
+  color: var(--pico-color);
+  font-weight: 700;
+}
+.tp-item-disabled {
+  opacity: .2;
+  pointer-events: none;
+}
+.tp-fade-top, .tp-fade-bot {
+  position: absolute;
+  left: 0; right: 0;
+  height: calc(44px * 2);
+  z-index: 2;
+  pointer-events: none;
+}
+.tp-fade-top { top: 0;    background: linear-gradient(to bottom, var(--pico-card-background-color) 30%, transparent); }
+.tp-fade-bot { bottom: 0; background: linear-gradient(to top,   var(--pico-card-background-color) 30%, transparent); }
+.tp-band-line {
+  position: absolute;
+  top: calc(44px * 2);
+  height: 44px;
+  left: 4px; right: 4px;
+  border-top: 1px solid var(--pico-muted-border-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 4px;
+}
+.tp-btns {
+  display: flex;
+  gap: .5rem;
+  margin-top: .85rem;
+}
+.tp-btns button {
+  flex: 1;
+  padding: .5rem;
+  border-radius: var(--pico-border-radius);
+  cursor: pointer;
+  border: 1px solid var(--pico-muted-border-color);
+  background: transparent;
+  color: var(--pico-color);
+  font-size: .88rem;
+}
+.tp-btns .tp-ok {
+  background: var(--pico-primary);
+  border-color: var(--pico-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.tp-btns button:hover { opacity: .85; }
+
+/* ============================================================
    CATALOG — horizontal category rows
    ============================================================ */
 

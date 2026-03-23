@@ -331,6 +331,7 @@ async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
             "overview": data.get("overview") or "",
             "vote_average": data.get("vote_average"),
             "release_date": date_val,
+            "runtime": data.get("runtime"),
         }
     else:  # tv
         date_val = data.get("first_air_date") or ""
@@ -359,6 +360,7 @@ async def upsert_tmdb_cache(media_type: str, tmdb_id: int, data: dict) -> None:
                 "episode_number"
             ),
             "next_ep_air_date": (data.get("next_episode_to_air") or {}).get("air_date") or "",
+            "episode_run_time": (lambda ert: ert[0] if ert else 0)(data.get("episode_run_time") or []),
         }
 
     try:
@@ -769,6 +771,7 @@ async def catalog_category_page(
     request: Request,
     category: str,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     if not re.match(r"^[\w\-]+$", category):
         raise HTTPException(status_code=404, detail="Not found")
@@ -776,12 +779,17 @@ async def catalog_category_page(
     cat_path = RELEASES_DIR / f"{category}.json" if RELEASES_DIR else None
     if not cat_path or not cat_path.exists():
         raise HTTPException(status_code=404, detail="Category not found")
+    devices = []
+    if current_user:
+        from app.api.devices import _devices_with_stats
+        devices = await _devices_with_stats(current_user.id, db)
     return _templates.TemplateResponse("catalog_category.html", {
         "request": request,
         "user": current_user,
         "category": category,
         "category_name": _category_display_name(category),
         "image_base": image_base,
+        "devices": devices,
     })
 
 
@@ -1143,10 +1151,13 @@ async def index(
 ):
     image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
     if current_user:
+        from app.api.devices import _devices_with_stats
+        devices = await _devices_with_stats(current_user.id, db)
         return _templates.TemplateResponse("catalog.html", {
             "request": request,
             "user": current_user,
             "image_base": image_base,
+            "devices": devices,
         })
     plugin_url = settings.PLUGIN_URL or f"{settings.BASE_URL}/np.js"
     from app import settings_cache as sc
