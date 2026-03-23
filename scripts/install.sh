@@ -242,6 +242,7 @@ function setup_env_file {
     fi
 
     local tmpfile="${envfile}.tmp"
+    declare -A written_keys
     > "$tmpfile"
 
     header "Configuring environment variables"
@@ -323,8 +324,24 @@ function setup_env_file {
         fi
 
         echo "${key}=${final_val}" >> "$tmpfile"
+        written_keys["$key"]=1
         last_comment=""
     done 3< "$template"
+
+    # Дописываем ключи из существующего .env которых нет в шаблоне
+    # (например, раскомментированные пользователем опциональные переменные)
+    local extras=()
+    for key in "${!existing_vals[@]}"; do
+        [ "${written_keys[$key]+isset}" = "isset" ] && continue
+        extras+=("$key")
+    done
+    if [ "${#extras[@]}" -gt 0 ]; then
+        echo "" >> "$tmpfile"
+        echo "# Extra variables (not in template)" >> "$tmpfile"
+        for key in "${extras[@]}"; do
+            echo "${key}=${existing_vals[$key]}" >> "$tmpfile"
+        done
+    fi
 
     mv "$tmpfile" "$envfile"
 
@@ -756,22 +773,22 @@ function install_docker_mode {
     header "Building and starting Docker containers"
     warn "Building Docker image — это может занять несколько минут..."
     if [ "$VERBOSE" = "1" ]; then
-        docker compose -f docker-compose.prod.yml build \
+        docker compose -f docker-compose.yml build \
             || error_exit "docker compose build failed"
-        docker compose -f docker-compose.prod.yml up -d \
+        docker compose -f docker-compose.yml up -d \
             || error_exit "docker compose up failed"
     else
         run_cmd "Building Docker image" \
-            docker compose -f docker-compose.prod.yml build
+            docker compose -f docker-compose.yml build
         run_cmd "Starting containers" \
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.yml up -d
     fi
     local docker_port
     docker_port=$(_get_env_val "PORT" || true)
     docker_port="${docker_port:-$DEFAULT_PORT}"
-    wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+    wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.yml logs"
     echo ""
-    docker compose -f docker-compose.prod.yml ps
+    docker compose -f docker-compose.yml ps
     info "Docker stack started."
 }
 
@@ -835,7 +852,7 @@ function do_install {
 
             header "Installation complete"
             info "Access URL: http://${host_ip}:${port}"
-            info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
+            info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.yml {ps|logs|down}"
             info "Nginx HTTPS: ${PROJECT_DIR}/nginx/numparser.conf"
             echo ""
             warn "Парсер данных NUMParser: https://github.com/Igorek1986/NUMParser"
@@ -873,22 +890,29 @@ function do_update {
         service)
             install_python_deps
             _sudo systemctl restart "$SERVICE_NAME"
-            info "Service restarted."
+            local svc_port
+            svc_port=$(_get_env_val "PORT" || true)
+            svc_port="${svc_port:-$DEFAULT_PORT}"
+            wait_for_app "$svc_port" "sudo journalctl -u ${SERVICE_NAME} -f"
             ;;
         docker)
             cd "$PROJECT_DIR"
             if [ "$VERBOSE" = "1" ]; then
-                docker compose -f docker-compose.prod.yml build \
+                docker compose -f docker-compose.yml build \
                     || error_exit "docker compose build failed"
-                docker compose -f docker-compose.prod.yml up -d \
+                docker compose -f docker-compose.yml up -d \
                     || error_exit "docker compose up failed"
             else
                 run_cmd "Rebuilding Docker image" \
-                    docker compose -f docker-compose.prod.yml build
+                    docker compose -f docker-compose.yml build
                 run_cmd "Restarting containers" \
-                    docker compose -f docker-compose.prod.yml up -d
+                    docker compose -f docker-compose.yml up -d
             fi
             info "Docker stack rebuilt."
+            local docker_port
+            docker_port=$(_get_env_val "PORT" || true)
+            docker_port="${docker_port:-$DEFAULT_PORT}"
+            wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.yml logs"
             ;;
         none)
             warn "No running installation detected — run install first."
@@ -958,22 +982,22 @@ function do_switch {
             ensure_releases_dir_absolute
 
             if [ "$VERBOSE" = "1" ]; then
-                docker compose -f docker-compose.prod.yml build \
+                docker compose -f docker-compose.yml build \
                     || error_exit "docker compose build failed"
             else
                 run_cmd "Building Docker image" \
-                    docker compose -f docker-compose.prod.yml build
+                    docker compose -f docker-compose.yml build
             fi
 
             # Start only postgres first so we can restore dump
             if $do_migrate; then
                 run_cmd "Starting postgres container" \
-                    docker compose -f docker-compose.prod.yml up -d postgres
+                    docker compose -f docker-compose.yml up -d postgres
                 # Wait for postgres container to be ready
                 local i=0
                 printf "  Waiting for postgres"
                 while [ $i -lt 20 ]; do
-                    if docker compose -f docker-compose.prod.yml exec -T postgres \
+                    if docker compose -f docker-compose.yml exec -T postgres \
                             pg_isready -U "$db_user" >/dev/null 2>&1; then
                         echo " OK"
                         break
@@ -982,7 +1006,7 @@ function do_switch {
                 done
                 local restore_log; restore_log=$(mktemp)
                 printf "  ⠋ Restoring database..."
-                if docker compose -f docker-compose.prod.yml exec -T postgres \
+                if docker compose -f docker-compose.yml exec -T postgres \
                         psql -U "$db_user" "$db_name" < "$dump_file" >"$restore_log" 2>&1; then
                     printf "\r  ✓ База данных перенесена\n"
                 else
@@ -994,15 +1018,15 @@ function do_switch {
             fi
 
             run_cmd "Starting containers" \
-                docker compose -f docker-compose.prod.yml up -d
+                docker compose -f docker-compose.yml up -d
             local sw_port
             sw_port=$(_get_env_val "PORT" || true)
             sw_port="${sw_port:-$DEFAULT_PORT}"
-            wait_for_app "$sw_port" "docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs"
+            wait_for_app "$sw_port" "docker compose -f ${PROJECT_DIR}/docker-compose.yml logs"
             local host_ip; host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
             header "Switch complete"
             info "Access URL: http://${host_ip}:${sw_port}"
-            info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.prod.yml {ps|logs|down}"
+            info "Manage:     docker compose -f ${PROJECT_DIR}/docker-compose.yml {ps|logs|down}"
             ;;
 
         docker)
@@ -1019,12 +1043,12 @@ function do_switch {
 
             # Dump from Docker postgres before stopping
             local do_migrate=false
-            if [ -n "$db_name" ] && docker compose -f docker-compose.prod.yml ps postgres 2>/dev/null | grep -q "running\|Up"; then
+            if [ -n "$db_name" ] && docker compose -f docker-compose.yml ps postgres 2>/dev/null | grep -q "running\|Up"; then
                 if confirm "Перенести базу данных из Docker на хост? (Y/n) " "y"; then
                     do_migrate=true
                     local dump_log; dump_log=$(mktemp)
                     printf "  ⠋ Создаём дамп из Docker postgres..."
-                    if docker compose -f docker-compose.prod.yml exec -T postgres \
+                    if docker compose -f docker-compose.yml exec -T postgres \
                             pg_dump -U "$db_user" "$db_name" > "$dump_file" 2>"$dump_log"; then
                         printf "\r  ✓ Дамп создан\n"
                     else
@@ -1037,14 +1061,14 @@ function do_switch {
             fi
 
             # Stop containers (keep volumes)
-            docker compose -f docker-compose.prod.yml down 2>/dev/null || true
+            docker compose -f docker-compose.yml down 2>/dev/null || true
             info "Контейнеры остановлены. Docker volumes сохранены."
 
             # Offer to remove containers and images
             if confirm "Удалить Docker образы? (y/N) " "n"; then
                 docker rmi "movies-api-app" "${SERVICE_NAME}-app" 2>/dev/null || true
                 local pg_image
-                pg_image=$(grep "image:" "$PROJECT_DIR/docker-compose.prod.yml" 2>/dev/null | grep postgres | awk '{print $2}' | tr -d '\r' || true)
+                pg_image=$(grep "image:" "$PROJECT_DIR/docker-compose.yml" 2>/dev/null | grep postgres | awk '{print $2}' | tr -d '\r' || true)
                 [ -n "$pg_image" ] && docker rmi "$pg_image" 2>/dev/null || true
                 info "Docker образы удалены."
             fi
@@ -1113,10 +1137,10 @@ function do_uninstall {
         docker)
             cd "$PROJECT_DIR" 2>/dev/null || true
             if confirm "Remove Docker volumes (database data)? (y/N) " "n"; then
-                docker compose -f docker-compose.prod.yml down -v 2>/dev/null || true
+                docker compose -f docker-compose.yml down -v 2>/dev/null || true
                 info "Docker stack and volumes removed."
             else
-                docker compose -f docker-compose.prod.yml down 2>/dev/null || true
+                docker compose -f docker-compose.yml down 2>/dev/null || true
                 info "Docker stack removed (volumes kept)."
             fi
             if confirm "Remove Docker images for this project? (y/N) " "n"; then
@@ -1124,7 +1148,7 @@ function do_uninstall {
                 docker rmi "movies-api-app" "${SERVICE_NAME}-app" 2>/dev/null || true
                 # Remove postgres image used by compose
                 local pg_image
-                pg_image=$(grep "image:" "$PROJECT_DIR/docker-compose.prod.yml" 2>/dev/null | grep postgres | awk '{print $2}' | tr -d '\r' || true)
+                pg_image=$(grep "image:" "$PROJECT_DIR/docker-compose.yml" 2>/dev/null | grep postgres | awk '{print $2}' | tr -d '\r' || true)
                 [ -n "$pg_image" ] && docker rmi "$pg_image" 2>/dev/null || true
                 info "Docker images removed."
             fi
@@ -1224,7 +1248,7 @@ function do_status {
             ;;
         docker)
             echo ""
-            docker compose -f "$PROJECT_DIR/docker-compose.prod.yml" ps 2>/dev/null || true
+            docker compose -f "$PROJECT_DIR/docker-compose.yml" ps 2>/dev/null || true
             ;;
         none)
             warn "Movies API is not installed."
