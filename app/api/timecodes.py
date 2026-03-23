@@ -197,12 +197,14 @@ async def _merge_favorite_history(
     device_id: int,
     profile_id: str,
     entries: list[dict],
+    user_role: str = "simple",
 ) -> None:
     """
     Добавляет записи в favorite Lampa-формата:
       history — список TMDB ID (int)
       card    — список объектов с метаданными карточек
     Не перезаписывает существующие записи (дедупликация по tmdb_id).
+    Применяет лимит по роли пользователя.
     Не делает commit — вызывающий код коммитит сам.
     """
     if not entries:
@@ -249,6 +251,11 @@ async def _merge_favorite_history(
 
     existing_fav["history"] = new_ids + existing_history
     existing_fav["card"]    = new_cards + existing_cards
+
+    limit = settings_cache.get_role_limit(user_role, "favorite_limit")
+    if limit is not None:
+        existing_fav = _trim_favorite(existing_fav, limit)
+
     lp.favorite = json.dumps(existing_fav, ensure_ascii=False)
 
 
@@ -592,7 +599,7 @@ async def import_from_lampac(
         )
         entries = [_media_card_to_entry(mc) for mc in mc_result.scalars().all()]
         if entries:
-            await _merge_favorite_history(db, device.id, lp, entries)
+            await _merge_favorite_history(db, device.id, lp, entries, user_role)
             await db.commit()
 
     return {"success": True, "saved": saved, "trimmed": trimmed}
@@ -1036,7 +1043,8 @@ async def get_favorite(
             mc_result = await db.execute(select(MediaCard).where(MediaCard.card_id.in_(valid_ids)))
             entries = [_media_card_to_entry(mc) for mc in mc_result.scalars().all()]
             if entries:
-                await _merge_favorite_history(db, device.id, profile_id, entries)
+                role = await _get_user_role(device, db)
+                await _merge_favorite_history(db, device.id, profile_id, entries, role)
                 await db.commit()
                 lp = (await db.execute(
                     select(LampaProfile).where(
@@ -1052,6 +1060,31 @@ class _FavoriteBody(BaseModel):
     favorite: Any
 
 
+_FAV_CATEGORIES = ("like", "wath", "book", "history", "look", "viewed", "scheduled", "continued", "thrown")
+
+
+def _trim_favorite(fav: dict, limit: int) -> dict:
+    """Обрезает каждую категорию favorite до limit записей (новые идут первыми).
+    Затем чистит 'card' — оставляет только карточки, чьи id есть хотя бы в одной категории.
+    """
+    fav = dict(fav)
+    for cat in _FAV_CATEGORIES:
+        if cat in fav and isinstance(fav[cat], list) and len(fav[cat]) > limit:
+            fav[cat] = fav[cat][:limit]
+
+    # Собираем актуальный набор id
+    allowed_ids: set = set()
+    for cat in _FAV_CATEGORIES:
+        if isinstance(fav.get(cat), list):
+            for item in fav[cat]:
+                allowed_ids.add(item)
+
+    if isinstance(fav.get("card"), list):
+        fav["card"] = [c for c in fav["card"] if isinstance(c, dict) and c.get("id") in allowed_ids]
+
+    return fav
+
+
 @router.put("/favorite")
 async def put_favorite(
     body: _FavoriteBody,
@@ -1061,6 +1094,15 @@ async def put_favorite(
 ):
     """Сохраняет закладки. ?token=KEY&profile_id=ID (profile_id опционален)"""
     _require_device(device)
+
+    favorite = body.favorite
+
+    # Применяем лимит по роли пользователя
+    if isinstance(favorite, dict):
+        role = await _get_user_role(device, db)
+        limit = settings_cache.get_role_limit(role, "favorite_limit")
+        if limit is not None:
+            favorite = _trim_favorite(favorite, limit)
 
     lp = (await db.execute(
         select(LampaProfile).where(
@@ -1074,13 +1116,13 @@ async def put_favorite(
         db.add(lp)
         await db.flush()
 
-    lp.favorite = json.dumps(body.favorite, ensure_ascii=False) if body.favorite is not None else None
+    lp.favorite = json.dumps(favorite, ensure_ascii=False) if favorite is not None else None
     await db.commit()
 
     # Рассылаем обновление закладок другим соединениям пользователя
     asyncio.create_task(ws_manager.broadcast(
         device.user_id, None,
-        {"type": "favorite", "profile_id": profile_id, "favorite": body.favorite},
+        {"type": "favorite", "profile_id": profile_id, "favorite": favorite},
     ))
 
     return {"ok": True}

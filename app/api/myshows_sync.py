@@ -398,7 +398,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 )
 
                 history_entries = [_media_card_to_entry(mc) for mc in db_cards_sorted]
-                await _merge_favorite_history(db, device.id, profile_id, history_entries)
+                await _merge_favorite_history(db, device.id, profile_id, history_entries, user_role)
 
             if all_timecodes or all_media_cards:
                 await db.commit()
