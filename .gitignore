@@ -279,3 +279,5 @@ __marimo__/
 .DS_Store
 
 dev/
+lampa-plugins/
+CLAUDE.md
