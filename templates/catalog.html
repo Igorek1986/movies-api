@@ -3,7 +3,23 @@
 
 {% block body %}
 <main class="container" style="padding-top: 1.5rem; max-width: 1200px;">
-  <h2 style="margin-bottom: 1.25rem;">Каталог</h2>
+  <h2 style="margin-bottom: 1rem;">Каталог</h2>
+
+  {% if devices %}
+  <div class="history-controls" style="margin-bottom: 1.25rem;">
+    {% if devices|length > 1 %}
+    <select id="catalogDeviceSelect">
+      {% for d in devices %}
+      <option value="{{ d.id }}">{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="hidden" id="catalogDeviceSelect" value="{{ devices[0].id }}">
+    {% endif %}
+    <div id="catalogProfileTabs"></div>
+  </div>
+  {% endif %}
+
   <div id="catalogLoading" class="muted small" style="padding: 1rem 0;">Загрузка категорий...</div>
   <div id="catalogContainer"></div>
 </main>
@@ -12,4 +28,5 @@
 {% block scripts %}
 <script>window.IMAGE_BASE = {{ image_base | tojson }};</script>
 <script src="/static/js/catalog.js"></script>
+<script>initMainCatalog();</script>
 {% endblock %}

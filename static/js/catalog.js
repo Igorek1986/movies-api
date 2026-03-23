@@ -29,6 +29,17 @@
     }
   }
 
+  function _deviceParams() {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('history_prefs') || '{}');
+      const p = new URLSearchParams();
+      if (prefs.device_id) p.set('device_id', prefs.device_id);
+      if (prefs.profile_id != null) p.set('profile_id', prefs.profile_id);
+      const s = p.toString();
+      return s ? '&' + s : '';
+    } catch { return ''; }
+  }
+
   function createPosterCard(item) {
     const mediaType = item.media_type || (item.name ? 'tv' : 'movie');
     const title     = item.title || item.name || '';
@@ -39,7 +50,7 @@
 
     const a = document.createElement('a');
     a.className = 'catalog-poster-card';
-    a.href = `/card/${encodeURIComponent(cardId)}?back=${back}`;
+    a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_deviceParams()}`;
 
     if (poster) {
       a.innerHTML = `<img src="${esc(poster)}" alt="${esc(title)}" loading="lazy">`;
@@ -141,9 +152,10 @@
     });
   }
 
-  async function initCatalog() {
+  async function _initMainCatalog() {
     const container = document.getElementById('catalogContainer');
     const loading   = document.getElementById('catalogLoading');
+    if (!container || !loading) return;  // не главная страница каталога
 
     try {
       const resp = await fetch('/api/categories');
@@ -178,5 +190,178 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', initCatalog);
+  document.addEventListener('DOMContentLoaded', _initMainCatalog);
 })();
+
+
+// ─── Shared: prefs + profile tabs ────────────────────────────────────────────
+
+const _CATALOG_PREFS_KEY = 'history_prefs';
+
+function _catalogLoadPrefs() {
+  try { return JSON.parse(localStorage.getItem(_CATALOG_PREFS_KEY) || '{}'); } catch { return {}; }
+}
+function _catalogSavePrefs(patch) {
+  const p = Object.assign(_catalogLoadPrefs(), patch);
+  try { localStorage.setItem(_CATALOG_PREFS_KEY, JSON.stringify(p)); } catch {}
+}
+function _catalogDeviceParams() {
+  const p = _catalogLoadPrefs();
+  const q = new URLSearchParams();
+  if (p.device_id) q.set('device_id', p.device_id);
+  if (p.profile_id != null) q.set('profile_id', p.profile_id);
+  const s = q.toString();
+  return s ? '&' + s : '';
+}
+
+async function _catalogLoadProfileTabs(deviceId, currentProfileId, onSelect) {
+  const container = document.getElementById('catalogProfileTabs');
+  if (!container) return;
+  try {
+    const res  = await fetch(`/api/profile-ids?device_id=${deviceId}`);
+    const data = await res.json();
+    const profiles = data.profiles || [];
+    if (profiles.length === 0) { container.innerHTML = ''; container.classList.remove('stats-tabs'); return; }
+
+    // Если профиль не выбран — автоматически берём первый
+    if (currentProfileId === null) {
+      currentProfileId = profiles[0].profile_id;
+      _catalogSavePrefs({ profile_id: currentProfileId });
+      if (onSelect) onSelect(currentProfileId);
+    }
+
+    container.classList.add('stats-tabs');
+    const tabs = [];
+    profiles.forEach(p => {
+      const active = p.profile_id === currentProfileId ? ' active' : '';
+      const label  = p.name || (p.profile_id === '' ? 'Основной' : p.profile_id);
+      tabs.push(`<button class="tab-btn${active}" data-profile="${esc2(p.profile_id)}">${esc2(label)}</button>`);
+    });
+    container.innerHTML = tabs.join('');
+
+    container.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const pid = btn.dataset.profile;
+        _catalogSavePrefs({ profile_id: pid });
+        if (onSelect) onSelect(pid);
+      });
+    });
+  } catch { container.innerHTML = ''; }
+}
+
+function esc2(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _catalogInitFilter(onDeviceChange) {
+  const deviceSelect = document.getElementById('catalogDeviceSelect');
+  const prefs = _catalogLoadPrefs();
+
+  if (deviceSelect && deviceSelect.tagName === 'SELECT') {
+    if (prefs.device_id && deviceSelect.querySelector(`option[value="${prefs.device_id}"]`)) {
+      deviceSelect.value = prefs.device_id;
+    }
+    deviceSelect.addEventListener('change', () => {
+      const did = parseInt(deviceSelect.value);
+      _catalogSavePrefs({ device_id: did, profile_id: null });
+      // profile_id: null → _catalogLoadProfileTabs автоматически выберет первый профиль
+      _catalogLoadProfileTabs(did, null, onDeviceChange);
+    });
+  }
+
+  const deviceId = deviceSelect ? parseInt(deviceSelect.value) : null;
+  if (deviceId) {
+    _catalogSavePrefs({ device_id: deviceId });
+    const savedProfile = prefs.hasOwnProperty('profile_id') ? prefs.profile_id : null;
+    _catalogLoadProfileTabs(deviceId, savedProfile, onDeviceChange);
+  }
+}
+
+
+// ─── Main catalog page (/) ────────────────────────────────────────────────────
+
+function initMainCatalog() {
+  _catalogInitFilter(null);  // при смене фильтра ссылки в строках обновит _deviceParams внутри createPosterCard
+}
+
+
+// ─── Category page (/catalog/{id}) ───────────────────────────────────────────
+
+function initCatalog(categoryId, imageBase) {
+  function createCard(item) {
+    const mediaType = item.media_type || (item.name ? 'tv' : 'movie');
+    const title     = item.title || item.name || '';
+    const year      = (item.release_date || item.first_air_date || '').slice(0, 4);
+    const poster    = item.poster_path ? `${imageBase}/t/p/w300${item.poster_path}` : '';
+    const cardId    = `${item.id}_${mediaType}`;
+    const back      = encodeURIComponent('/catalog/' + categoryId);
+
+    const a = document.createElement('a');
+    a.className = 'catalog-poster-card';
+    a.href = `/card/${esc2(cardId)}?back=${back}${_catalogDeviceParams()}`;
+
+    if (poster) {
+      a.innerHTML = `<img src="${esc2(poster)}" alt="${esc2(title)}" loading="lazy">`;
+    } else {
+      a.innerHTML = `<div class="card-no-poster">${esc2(title)}</div>`;
+    }
+    a.innerHTML += `
+      <div class="catalog-poster-info">
+        <div class="catalog-poster-title">${esc2(title)}</div>
+        ${year ? `<div class="catalog-poster-year">${esc2(year)}</div>` : ''}
+      </div>`;
+    return a;
+  }
+
+  function updateCardLinks() {
+    document.querySelectorAll('.catalog-poster-card').forEach(a => {
+      const url  = new URL(a.href, location.origin);
+      const back = url.searchParams.get('back') || encodeURIComponent('/catalog/' + categoryId);
+      const q    = new URLSearchParams(_catalogDeviceParams().replace(/^&/, ''));
+      q.set('back', back);
+      url.search = q.toString();
+      a.href = url.toString();
+    });
+  }
+
+  _catalogInitFilter(updateCardLinks);
+
+  // Пагинация
+  let _page = 1, _totalPages = 1, _loading = false;
+
+  async function loadPage(page) {
+    if (_loading) return;
+    _loading = true;
+    try {
+      const resp = await fetch(`/${encodeURIComponent(categoryId)}?per_page=20&page=${page}`);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      _totalPages = data.total_pages || 1;
+      if (page === 1) document.getElementById('gridLoading').style.display = 'none';
+      const items = data.results || [];
+      if (items.length === 0 && page === 1) {
+        document.getElementById('gridEmpty').style.display = 'block';
+        return;
+      }
+      const grid = document.getElementById('catalogGrid');
+      for (const item of items) grid.appendChild(createCard(item));
+    } catch {
+      document.getElementById('gridLoading').textContent = 'Ошибка загрузки';
+    } finally {
+      _loading = false;
+    }
+  }
+
+  const sentinel = document.getElementById('loadSentinel');
+  const observer = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && _page < _totalPages && !_loading) loadPage(++_page);
+  }, { rootMargin: '300px' });
+
+  (async function () {
+    await loadPage(1);
+    if (_page < _totalPages) await loadPage(++_page);
+    observer.observe(sentinel);
+  })();
+}
