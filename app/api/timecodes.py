@@ -687,6 +687,8 @@ async def delete_timecode(
 @router.get("/history")
 async def get_watch_history(
     profile_id: str = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     device: Device = Depends(get_device_by_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -797,8 +799,8 @@ async def get_watch_history(
             "last_watched": agg["last_watched"].isoformat() if agg["last_watched"] else None,
             "max_percent": max_pct,
             "progress": progress,
-            "watched_episodes": watched_episodes,
-            "total_episodes": total_episodes,
+            "watched_episodes": watched_episodes if (watched_episodes is not None and total_episodes is not None and watched_episodes < total_episodes) else None,
+            "total_episodes": total_episodes if (watched_episodes is not None and total_episodes is not None and watched_episodes < total_episodes) else None,
             "is_complete": is_complete,
             "is_ongoing": is_ongoing,
             "last_ep_season": mc.last_ep_season if mc else None,
@@ -807,7 +809,16 @@ async def get_watch_history(
         history.append(entry)
 
     history.sort(key=lambda x: x["last_watched"] or "", reverse=True)
-    return history
+
+    total = len(history)
+    total_pages = max(1, (total + limit - 1) // limit)
+    page = min(page, total_pages)
+    start = (page - 1) * limit
+
+    return {
+        "results": history[start : start + limit],
+        "total_pages": total_pages,
+    }
 
 
 # ---------------------------------------------------------------------------

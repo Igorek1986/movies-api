@@ -97,6 +97,15 @@ function _renderCards(cards) {
       ? `<img src="${POSTER_BASE}${card.poster_path}" alt="" loading="lazy">`
       : `<div class="card-no-poster">${card.title || '—'}</div>`;
 
+    // Бейдж top-right: ✓ если завершён, для сериалов — число оставшихся
+    let topBadge = '';
+    if (card.is_complete) {
+      topBadge = '<div class="watched-badge">✓</div>';
+    } else if (card.media_type === 'tv' && card.watched_episodes != null && card.total_episodes != null) {
+      const remaining = card.total_episodes - card.watched_episodes;
+      if (remaining > 0) topBadge = `<div class="card-remaining">${remaining}</div>`;
+    }
+
     // Прогресс сериала: "12 / 24 эп."
     let episodeInfo = '';
     if (card.media_type === 'tv' && card.watched_episodes != null && card.total_episodes != null) {
@@ -107,7 +116,7 @@ function _renderCards(cards) {
     return `
       <div class="media-card" role="button" tabindex="0" data-card-id="${card.card_id}" style="cursor:pointer;">
         ${poster}
-        ${card.is_complete ? '<div class="watched-badge">✓</div>' : ''}
+        ${topBadge}
         <div class="card-info">
           ${episodeInfo}
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
