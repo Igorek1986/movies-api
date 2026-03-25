@@ -35,6 +35,7 @@ async def main():
                 is_special    BOOLEAN      NOT NULL DEFAULT false,
                 myshows_ep_id INTEGER      NULL,
                 hash          VARCHAR(20)  NULL,
+                air_date      DATE         NULL,
                 PRIMARY KEY (tmdb_show_id, season, episode)
             );
         """))
@@ -57,10 +58,11 @@ async def main():
             ALTER COLUMN duration_sec TYPE INTEGER;
         """))
 
-        # 4. Добавить hash если таблица уже существовала без него
+        # 4. Добавить hash и air_date если таблица уже существовала без них
         await session.execute(text("""
             ALTER TABLE episodes
-            ADD COLUMN IF NOT EXISTS hash VARCHAR(20) NULL;
+            ADD COLUMN IF NOT EXISTS hash     VARCHAR(20) NULL,
+            ADD COLUMN IF NOT EXISTS air_date DATE        NULL;
         """))
 
         await session.commit()

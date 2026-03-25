@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
 from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry
-from app.api.episodes import _should_sync
+from app.api.episodes import _should_sync, _parse_air_date
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -160,6 +160,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
     all_media_cards: list[dict] = []
     all_episode_rows: dict[int, list[dict]] = {}   # tmdb_id → episode rows
     all_myshows_ids:  dict[int, int]        = {}   # tmdb_id → myshows_show_id
+    all_media_cards_next_air: dict[int, str] = {}  # tmdb_id → next_ep_air_date из MyShows
     tmdb_cache: dict = {}
     stats = {"movies_ok": 0, "movies_err": 0, "shows_ok": 0, "shows_err": 0}
     not_found: list[str] = []
@@ -346,10 +347,21 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                                 "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
                                 "myshows_ep_id": ep.get("id"),
                                 "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
+                                "air_date":      _parse_air_date(ep),
                             })
                         if ep_rows:
                             all_episode_rows[tmdb_id] = ep_rows
                             all_myshows_ids[tmdb_id]  = show_details.get("id")
+
+                            # Если TMDB не знает о следующем эпизоде — берём дату из MyShows
+                            today = datetime.now().date()
+                            future_dates = [
+                                r["air_date"] for r in ep_rows
+                                if r["air_date"] and r["air_date"] > today and not r["is_special"]
+                            ]
+                            if future_dates:
+                                next_air_str = min(future_dates).isoformat()
+                                all_media_cards_next_air[tmdb_id] = next_air_str
 
                     stats["shows_ok"] += 1
 
@@ -452,15 +464,20 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                             "is_special":    stmt.excluded.is_special,
                             "myshows_ep_id": stmt.excluded.myshows_ep_id,
                             "hash":          stmt.excluded.hash,
+                            "air_date":      stmt.excluded.air_date,
                         },
                     )
                     await db.execute(stmt)
                 for tmdb_id in all_episode_rows:
                     myshows_id = all_myshows_ids.get(tmdb_id)
+                    upd: dict = {"myshows_show_id": myshows_id, "episodes_synced_at": now_utc}
+                    next_air = all_media_cards_next_air.get(tmdb_id)
+                    if next_air:
+                        upd["next_ep_air_date"] = next_air
                     await db.execute(
                         update(MediaCard)
                         .where(MediaCard.card_id == f"{tmdb_id}_tv")
-                        .values(myshows_show_id=myshows_id, episodes_synced_at=now_utc)
+                        .values(**upd)
                     )
                 logger.info(f"myshows_sync: episodes upserted for {len(all_episode_rows)} shows")
 

@@ -843,6 +843,7 @@ async def get_category(
                             Episode.tmdb_show_id.in_(tv_tmdb_ids),
                             Episode.is_special == False,  # noqa: E712
                             Episode.season > 0,
+                            (Episode.air_date == None) | (Episode.air_date <= _date.today()),  # noqa: E711
                         )
                         .order_by(Episode.tmdb_show_id, Episode.season, Episode.episode)
                     )

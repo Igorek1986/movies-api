@@ -869,8 +869,9 @@ async def get_watch_history(
         ep_rows = await db.execute(
             select(Episode.tmdb_show_id, Episode.season, Episode.episode)
             .where(
-                Episode.tmdb_show_id.in_(tv_tmdb_ids), Episode.is_special == False, Episode.season > 0
-            )  # noqa: E712
+                Episode.tmdb_show_id.in_(tv_tmdb_ids), Episode.is_special == False, Episode.season > 0,
+                (Episode.air_date == None) | (Episode.air_date <= date.today()),  # noqa: E711, E712
+            )
             .order_by(Episode.tmdb_show_id, Episode.season, Episode.episode)
         )
         for tid, s, e in ep_rows.all():

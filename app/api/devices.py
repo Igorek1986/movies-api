@@ -451,7 +451,8 @@ async def api_history(
     if tv_tmdb_ids:
         ep_rows = await db.execute(
             select(Episode.tmdb_show_id, Episode.season, Episode.episode)
-            .where(Episode.tmdb_show_id.in_(tv_tmdb_ids), Episode.is_special == False, Episode.season > 0)  # noqa: E712
+            .where(Episode.tmdb_show_id.in_(tv_tmdb_ids), Episode.is_special == False, Episode.season > 0,  # noqa: E712
+                   (Episode.air_date == None) | (Episode.air_date <= _date.today()))  # noqa: E711
             .order_by(Episode.tmdb_show_id, Episode.season, Episode.episode)
         )
         for tid, s, e in ep_rows.all():

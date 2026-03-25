@@ -193,6 +193,7 @@ class Episode(Base):
     is_special    = Column(Boolean, default=False, nullable=False, server_default="false")
     myshows_ep_id = Column(Integer, nullable=True)
     hash          = Column(String(20), nullable=True)     # lampa_hash для быстрого поиска
+    air_date      = Column(Date, nullable=True)           # дата выхода из MyShows
 
     def __repr__(self):
         return f"<Episode(show={self.tmdb_show_id}, s{self.season:02d}e{self.episode:02d}, special={self.is_special})>"

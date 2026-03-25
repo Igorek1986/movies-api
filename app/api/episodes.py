@@ -51,6 +51,19 @@ async def _ms_rpc(client: httpx.AsyncClient, method: str, params: dict) -> dict 
         return None
 
 
+def _parse_air_date(ep: dict) -> _date | None:
+    """Парсит дату выхода эпизода из полей airDateUTC / airDate."""
+    for field in ("airDateUTC", "airDate"):
+        val = ep.get(field)
+        if not val:
+            continue
+        try:
+            return datetime.fromisoformat(val[:10]).date()
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 # ─── Шаг 3: линковка TMDB → MyShows ─────────────────────────────────────────
 
 def _normalize(s: str) -> str:
@@ -188,6 +201,7 @@ async def sync_episodes(mc: MediaCard, db: AsyncSession, client: httpx.AsyncClie
             "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
             "myshows_ep_id": ep.get("id"),
             "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
+            "air_date":      _parse_air_date(ep),
         })
 
     if not rows:
@@ -198,6 +212,16 @@ async def sync_episodes(mc: MediaCard, db: AsyncSession, client: httpx.AsyncClie
     await db.execute(pg_insert(Episode).values(rows))
 
     mc.episodes_synced_at = datetime.now(timezone.utc)
+
+    # Если TMDB не знает о следующем эпизоде — берём дату из MyShows
+    today = _date.today()
+    future_dates = [
+        r["air_date"] for r in rows
+        if r["air_date"] and r["air_date"] > today and not r["is_special"]
+    ]
+    if future_dates and not mc.next_ep_air_date:
+        mc.next_ep_air_date = min(future_dates).isoformat()
+
     await db.commit()
 
     logger.info(f"sync_episodes: {mc.card_id} → {len(rows)} episodes synced")
