@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import select, func, delete, update
+from sqlalchemy import select, func, update
 from app.db.database import get_db
 from app.db.models import User, Device, Timecode, MediaCard, LampaProfile, Episode
 from app.utils import lampa_hash, build_episode_hash_string
@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
 from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry
+from app.api.episodes import _should_sync
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -319,26 +320,34 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         })
 
                     # Собираем ВСЕ эпизоды шоу (не только просмотренные) для таблицы episodes
-                    ep_rows = []
-                    for ep in show_details.get("episodes", []):
-                        snum = ep.get("seasonNumber")
-                        enum = ep.get("episodeNumber")
-                        if snum is None or enum is None:
-                            continue
-                        runtime_min = ep.get("runtime") or 0
-                        ep_rows.append({
-                            "tmdb_show_id": tmdb_id,
-                            "season":        snum,
-                            "episode":       enum,
-                            "title":         ep.get("title") or None,
-                            "duration_sec":  runtime_min * 60 if runtime_min else None,
-                            "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
-                            "myshows_ep_id": ep.get("id"),
-                            "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
-                        })
-                    if ep_rows:
-                        all_episode_rows[tmdb_id] = ep_rows
-                        all_myshows_ids[tmdb_id]  = show_details.get("id")
+                    # Пропускаем если другой пользователь уже синхронизировал и обновление не нужно
+                    needs_ep_sync = True
+                    mc_existing = await db.get(MediaCard, card_id_tv)
+                    if mc_existing is not None:
+                        mc_existing.myshows_show_id = show_details.get("id")  # для _should_sync
+                        needs_ep_sync = _should_sync(mc_existing)
+
+                    if needs_ep_sync:
+                        ep_rows = []
+                        for ep in show_details.get("episodes", []):
+                            snum = ep.get("seasonNumber")
+                            enum = ep.get("episodeNumber")
+                            if snum is None or enum is None:
+                                continue
+                            runtime_min = ep.get("runtime") or 0
+                            ep_rows.append({
+                                "tmdb_show_id": tmdb_id,
+                                "season":        snum,
+                                "episode":       enum,
+                                "title":         ep.get("title") or None,
+                                "duration_sec":  runtime_min * 60 if runtime_min else None,
+                                "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
+                                "myshows_ep_id": ep.get("id"),
+                                "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
+                            })
+                        if ep_rows:
+                            all_episode_rows[tmdb_id] = ep_rows
+                            all_myshows_ids[tmdb_id]  = show_details.get("id")
 
                     stats["shows_ok"] += 1
 
@@ -423,18 +432,29 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
             # ── Save Episodes ────────────────────────────────────────────────
             if all_episode_rows:
                 now_utc = datetime.now(timezone.utc)
-                for tmdb_id, ep_rows in all_episode_rows.items():
-                    await db.execute(delete(Episode).where(Episode.tmdb_show_id == tmdb_id))
-                    chunk_size = 1000
-                    for i in range(0, len(ep_rows), chunk_size):
-                        await db.execute(pg_insert(Episode).values(ep_rows[i:i + chunk_size]))
+                all_rows_flat = [row for rows in all_episode_rows.values() for row in rows]
+                chunk_size = 1000
+                for i in range(0, len(all_rows_flat), chunk_size):
+                    stmt = pg_insert(Episode).values(all_rows_flat[i:i + chunk_size])
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[Episode.tmdb_show_id, Episode.season, Episode.episode],
+                        set_={
+                            "title":         stmt.excluded.title,
+                            "duration_sec":  stmt.excluded.duration_sec,
+                            "is_special":    stmt.excluded.is_special,
+                            "myshows_ep_id": stmt.excluded.myshows_ep_id,
+                            "hash":          stmt.excluded.hash,
+                        },
+                    )
+                    await db.execute(stmt)
+                for tmdb_id in all_episode_rows:
                     myshows_id = all_myshows_ids.get(tmdb_id)
                     await db.execute(
                         update(MediaCard)
                         .where(MediaCard.card_id == f"{tmdb_id}_tv")
                         .values(myshows_show_id=myshows_id, episodes_synced_at=now_utc)
                     )
-                logger.info(f"myshows_sync: episodes saved for {len(all_episode_rows)} shows")
+                logger.info(f"myshows_sync: episodes upserted for {len(all_episode_rows)} shows")
 
             if all_timecodes or all_media_cards or all_episode_rows:
                 await db.commit()
