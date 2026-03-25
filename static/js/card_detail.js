@@ -768,11 +768,12 @@ function _setupTvProgressSection(episodes, cardId, deviceId, profileId, tcRows) 
 
   // Экспортируем функцию обновления чтобы вызывать из _renderEpisodes
   window._updateTvProgress = function () {
-    const rows  = document.querySelectorAll('.ep-row');
-    const total = rows.length;
+    const allRows    = document.querySelectorAll('.ep-row');
+    const regularRows = Array.from(allRows).filter(r => !r.dataset.special);
+    const total = regularRows.length;
     if (!total) return;
     let watched = 0;
-    rows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
+    regularRows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
     const pct = Math.round(watched / total * 100);
     fillEl.style.width = pct + '%';
     labelEl.textContent = `Просмотрено ${watched} / ${total} серий`;
@@ -869,16 +870,17 @@ async function _fetchEpisodes(cardId, deviceId, profileId) {
 // ─── Episodes accordion ───────────────────────────────────────────────────────
 
 function _epLabel(ep) {
-  return `S${String(ep.season).padStart(2,'0')}E${String(ep.episode).padStart(2,'0')}`;
+  const code = `S${String(ep.season).padStart(2,'0')}E${String(ep.episode).padStart(2,'0')}`;
+  return (ep.special && ep.title) ? `${code} — ${ep.title}` : code;
 }
 
 function _updateSeasonCount(snum) {
   const countEl = document.querySelector(`.ep-season-count[data-snum="${snum}"]`);
   if (!countEl) return;
-  const rows = document.querySelectorAll(`.ep-row[data-snum="${snum}"]`);
+  const regularRows = Array.from(document.querySelectorAll(`.ep-row[data-snum="${snum}"]`)).filter(r => !r.dataset.special);
   let watched = 0;
-  rows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
-  countEl.textContent = `${watched} / ${rows.length}`;
+  regularRows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
+  countEl.textContent = `${watched} / ${regularRows.length}`;
 }
 
 function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
@@ -945,10 +947,10 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
     seasons[ep.season].push(ep);
   }
 
-  // Первый сезон с непросмотренными
+  // Первый сезон с непросмотренными обычными сериями (спешлы не учитываем)
   let activeSeasonExpand = null;
   for (const snum of Object.keys(seasons).map(Number).sort((a, b) => a - b)) {
-    if (seasons[snum].some(e => e.percent < _WATCHED_THR)) { activeSeasonExpand = snum; break; }
+    if (seasons[snum].some(e => !e.special && e.percent < _WATCHED_THR)) { activeSeasonExpand = snum; break; }
   }
 
   container.innerHTML = '';
@@ -956,8 +958,9 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   container.style.borderTop = '1px solid var(--pico-muted-border-color)';
 
   for (const snum of Object.keys(seasons).map(Number).sort((a, b) => a - b)) {
-    const eps     = seasons[snum];
-    const watched = eps.filter(e => e.percent >= _WATCHED_THR).length;
+    const eps        = seasons[snum];
+    const regularEps = eps.filter(e => !e.special);
+    const watched    = regularEps.filter(e => e.percent >= _WATCHED_THR).length;
 
     const details = document.createElement('details');
     if (snum === activeSeasonExpand) details.open = true;
@@ -972,7 +975,7 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
     const countSpan = document.createElement('span');
     countSpan.className    = 'ep-season-count';
     countSpan.dataset.snum = snum;
-    countSpan.textContent  = `${watched} / ${eps.length}`;
+    countSpan.textContent  = `${watched} / ${regularEps.length}`;
 
     const markAllBtn = document.createElement('button');
     markAllBtn.className   = 'ep-mark-season';
@@ -1019,6 +1022,7 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
   row.dataset.snum    = ep.season;
   row.dataset.percent = curPct;
   row.dataset.epHash  = ep.hash;
+  if (ep.special) row.dataset.special = '1';
 
   // Метка серии
   const labelEl = document.createElement('span');

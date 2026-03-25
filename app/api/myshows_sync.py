@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete, update
 from app.db.database import get_db
-from app.db.models import User, Device, Timecode, MediaCard, LampaProfile
-from app.utils import lampa_hash
+from app.db.models import User, Device, Timecode, MediaCard, LampaProfile, Episode
+from app.utils import lampa_hash, build_episode_hash_string
 from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
@@ -142,10 +142,6 @@ def _lampa_hash_for_movie(movie: dict) -> str:
     return str(lampa_hash(title))
 
 
-def _lampa_hash_for_episode(season: int, episode: int, show_title: str) -> str:
-    season_prefix = f"{season}:" if season > 10 else str(season)
-    return str(lampa_hash(f"{season_prefix}{episode}{show_title}"))
-
 
 def _parse_watch_date(date_str: str | None) -> datetime:
     if date_str:
@@ -161,6 +157,8 @@ def _parse_watch_date(date_str: str | None) -> datetime:
 async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession, profile_id: str = "", user_role: str = "simple"):
     all_timecodes: list[dict] = []
     all_media_cards: list[dict] = []
+    all_episode_rows: dict[int, list[dict]] = {}   # tmdb_id → episode rows
+    all_myshows_ids:  dict[int, int]        = {}   # tmdb_id → myshows_show_id
     tmdb_cache: dict = {}
     stats = {"movies_ok": 0, "movies_err": 0, "shows_ok": 0, "shows_err": 0}
     not_found: list[str] = []
@@ -303,6 +301,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         "year": show_tmdb_data["year"] or str(show_details.get("year", "") or ""),
                     })
 
+                    orig = show_tmdb_data["original_title"] or show_title_myshows
                     for watched_ep in watched_episodes:
                         ep_info = episodes_map.get(watched_ep.get("id"))
                         if not ep_info:
@@ -314,11 +313,32 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         watch_date = _parse_watch_date(watched_ep.get("watchDate"))
                         all_timecodes.append({
                             "card_id": card_id_tv,
-                            "item": _lampa_hash_for_episode(season, episode,
-                                    show_tmdb_data["original_title"] or show_title_myshows),
+                            "item": lampa_hash(build_episode_hash_string(season, episode, orig)),
                             "data": json.dumps({"duration": duration, "time": duration, "percent": 100}),
                             "updated_at": watch_date,
                         })
+
+                    # Собираем ВСЕ эпизоды шоу (не только просмотренные) для таблицы episodes
+                    ep_rows = []
+                    for ep in show_details.get("episodes", []):
+                        snum = ep.get("seasonNumber")
+                        enum = ep.get("episodeNumber")
+                        if snum is None or enum is None:
+                            continue
+                        runtime_min = ep.get("runtime") or 0
+                        ep_rows.append({
+                            "tmdb_show_id": tmdb_id,
+                            "season":        snum,
+                            "episode":       enum,
+                            "title":         ep.get("title") or None,
+                            "duration_sec":  runtime_min * 60 if runtime_min else None,
+                            "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
+                            "myshows_ep_id": ep.get("id"),
+                            "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
+                        })
+                    if ep_rows:
+                        all_episode_rows[tmdb_id] = ep_rows
+                        all_myshows_ids[tmdb_id]  = show_details.get("id")
 
                     stats["shows_ok"] += 1
 
@@ -400,7 +420,23 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 history_entries = [_media_card_to_entry(mc) for mc in db_cards_sorted]
                 await _merge_favorite_history(db, device.id, profile_id, history_entries, user_role)
 
-            if all_timecodes or all_media_cards:
+            # ── Save Episodes ────────────────────────────────────────────────
+            if all_episode_rows:
+                now_utc = datetime.now(timezone.utc)
+                for tmdb_id, ep_rows in all_episode_rows.items():
+                    await db.execute(delete(Episode).where(Episode.tmdb_show_id == tmdb_id))
+                    chunk_size = 1000
+                    for i in range(0, len(ep_rows), chunk_size):
+                        await db.execute(pg_insert(Episode).values(ep_rows[i:i + chunk_size]))
+                    myshows_id = all_myshows_ids.get(tmdb_id)
+                    await db.execute(
+                        update(MediaCard)
+                        .where(MediaCard.card_id == f"{tmdb_id}_tv")
+                        .values(myshows_show_id=myshows_id, episodes_synced_at=now_utc)
+                    )
+                logger.info(f"myshows_sync: episodes saved for {len(all_episode_rows)} shows")
+
+            if all_timecodes or all_media_cards or all_episode_rows:
                 await db.commit()
 
             trimmed = 0

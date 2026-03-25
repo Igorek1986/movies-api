@@ -25,7 +25,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import init_db, async_session_maker
-from app.db.models import MediaCard, User, Timecode
+from app.db.models import MediaCard, User, Timecode, Episode
 from app.api.dependencies import get_current_user
 from app.config import get_settings
 from app.api import auth, myshows_sync, timecodes as timecodes_router
@@ -33,6 +33,7 @@ from app.api import devices
 from app.api import sessions as sessions_router
 from app.api import telegram as telegram_router
 from app.api import tg_miniapp as tg_miniapp_router
+from app.api import episodes as episodes_router
 from app.admin import router as admin_router
 from app.api.dependencies import get_device_by_token
 from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
@@ -168,6 +169,7 @@ async def favicon():
 
 
 app.include_router(auth.router)
+app.include_router(episodes_router.router)
 app.include_router(devices.router)
 app.include_router(sessions_router.router)
 app.include_router(timecodes_router.router)
@@ -590,33 +592,21 @@ def _item_card_id(item: dict) -> str | None:
 
 
 def _tv_show_watched(
-    item: dict, item_timecodes: dict[str, str], threshold: int | None = None
+    item: dict,
+    item_timecodes: dict[str, str],
+    threshold: int | None = None,
+    show_episodes: list[tuple[int, int]] | None = None,
 ) -> bool:
     """
     Проверяет, все ли нужные эпизоды сериала просмотрены.
 
-    Сериалы/мультсериалы (есть last_episode_to_air):
-      - для предыдущих сезонов — все серии по seasons[].episode_count
-      - для последнего сезона — только до last_episode_to_air.episode_number
-        (следующая серия могла ещё не выйти)
-
-    Аниме (нет last_episode_to_air):
-      - проверяем все серии во всех сезонах по seasons[].episode_count
+    Приоритет: show_episodes из таблицы episodes (MyShows, без спешлов).
+    Fallback: TMDB seasons + last_episode_to_air.
     """
     if threshold is None:
         threshold = _sc.get_int("watched_threshold")
     original_name = item.get("original_name") or item.get("original_title", "")
     if not original_name:
-        logger.debug(
-            f"[tv_watched] нет original_name/original_title, item keys={list(item.keys())}"
-        )
-        return False
-
-    seasons = [s for s in item.get("seasons", []) if s.get("season_number", 0) > 0]
-    if not seasons:
-        logger.debug(
-            f"[tv_watched] нет seasons для {original_name!r}, raw seasons={item.get('seasons')}"
-        )
         return False
 
     # Хеши эпизодов с достаточным прогрессом
@@ -628,78 +618,60 @@ def _tv_show_watched(
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # Приоритет: MyShows episodes table (только вышедшие, без спешлов)
+    if show_episodes:
+        for sn, ep in show_episodes:
+            h = lampa_hash(build_episode_hash_string(sn, ep, original_name))
+            if h not in watched_hashes:
+                return False
+        return True
+
+    # Fallback: TMDB seasons + last_episode_to_air
+    seasons = [s for s in item.get("seasons", []) if s.get("season_number", 0) > 0]
+    if not seasons:
+        return False
+
     last_ep = item.get("last_episode_to_air")
     if last_ep:
-        # Сериал/мультсериал: проверяем до последней вышедшей серии
         last_season = last_ep.get("season_number", 0)
         last_episode = last_ep.get("episode_number", 0)
         if not last_season or not last_episode:
-            logger.debug(
-                f"[tv_watched] {original_name!r}: last_episode_to_air без season/episode: {last_ep}"
-            )
             return False
         season_ep_count = {s["season_number"]: s["episode_count"] for s in seasons}
-        logger.debug(
-            f"[tv_watched] {original_name!r}: проверяем до S{last_season}E{last_episode}, "
-            f"watched_hashes={len(watched_hashes)}, season_ep_count={season_ep_count}"
-        )
         for sn in range(1, last_season + 1):
             ep_count = last_episode if sn == last_season else season_ep_count.get(sn, 0)
             for ep in range(1, ep_count + 1):
                 h = lampa_hash(build_episode_hash_string(sn, ep, original_name))
                 if h not in watched_hashes:
-                    logger.debug(
-                        f"[tv_watched] {original_name!r}: S{sn}E{ep} hash={h} НЕ просмотрен"
-                    )
                     return False
     else:
-        # Аниме: нет last_episode_to_air — проверяем все серии всех сезонов
         for s in seasons:
             sn = s["season_number"]
             for ep in range(1, s.get("episode_count", 0) + 1):
-                if (
-                    lampa_hash(build_episode_hash_string(sn, ep, original_name))
-                    not in watched_hashes
-                ):
+                if lampa_hash(build_episode_hash_string(sn, ep, original_name)) not in watched_hashes:
                     return False
 
     return True
 
 
 def _item_watched(
-    item: dict, timecodes: dict[str, dict[str, str]], watched_movies: set[str],
+    item: dict,
+    timecodes: dict[str, dict[str, str]],
+    watched_movies: set[str],
     threshold: int | None = None,
+    episodes_by_show: dict[int, list[tuple[int, int]]] | None = None,
 ) -> bool:
     """True если элемент уже полностью просмотрен и должен быть скрыт."""
     card_id = _item_card_id(item)
     if not card_id:
-        logger.debug(
-            f"[filter] нет card_id для item id={item.get('id')} media_type={item.get('media_type')}"
-        )
         return False
     if card_id.endswith("_tv"):
         if card_id not in timecodes:
-            logger.debug(
-                f"[filter] {card_id} не найден в таймкодах (всего tv-ключей: {sum(1 for k in timecodes if k.endswith('_tv'))})"
-            )
             return False
-        result = _tv_show_watched(item, timecodes[card_id], threshold=threshold)
-        logger.debug(
-            f"[filter] {card_id} → _tv_show_watched={result}, "
-            f"original_name={item.get('original_name') or item.get('original_title')!r}, "
-            f"seasons={len(item.get('seasons', []))}, "
-            f"last_episode_to_air={item.get('last_episode_to_air')}, "
-            f"timecode_keys={len(timecodes[card_id])}"
-        )
-        return result
-    is_watched = card_id in watched_movies
-    if is_watched:
-        logger.debug(f"[filter] {card_id} → фильм просмотрен")
-    else:
-        logger.debug(
-            f"[filter] {card_id} → не просмотрен (movie-ветка), media_type в item={item.get('media_type')!r}"
-        )
-    return is_watched
+        tmdb_id = item.get("id")
+        show_eps = episodes_by_show.get(tmdb_id) if episodes_by_show and tmdb_id else None
+        return _tv_show_watched(item, timecodes[card_id], threshold=threshold, show_episodes=show_eps)
+    return card_id in watched_movies
 
 
 @app.get("/health")
@@ -852,15 +824,30 @@ async def get_category(
         # Загружаем таймкоды устройства (если передан token)
         timecodes: dict = {}
         watched_movies: set[str] = set()
+        episodes_by_show: dict[int, list[tuple[int, int]]] = {}
         if token:
             device = await get_device_by_token(token=token, db=db)
             if device:
                 timecodes = await load_device_timecodes(db, device.id, profile_id or "")
                 watched_movies = get_watched_movie_ids(timecodes, threshold=min_progress)
-                logger.debug(
-                    f"Фильтрация: {len(watched_movies)} просмотренных фильмов, "
-                    f"{sum(1 for k in timecodes if k.endswith('_tv'))} сериалов в таймкодах"
-                )
+                # Загружаем эпизоды из MyShows для TV-шоу (приоритет над TMDB при фильтрации)
+                tv_tmdb_ids = [
+                    int(k[:-3]) for k in timecodes
+                    if k.endswith("_tv") and k[:-3].isdigit()
+                ]
+                if tv_tmdb_ids:
+                    from sqlalchemy import select as _select
+                    ep_rows = await db.execute(
+                        _select(Episode.tmdb_show_id, Episode.season, Episode.episode)
+                        .where(
+                            Episode.tmdb_show_id.in_(tv_tmdb_ids),
+                            Episode.is_special == False,  # noqa: E712
+                            Episode.season > 0,
+                        )
+                        .order_by(Episode.tmdb_show_id, Episode.season, Episode.episode)
+                    )
+                    for tid, s, e in ep_rows.all():
+                        episodes_by_show.setdefault(tid, []).append((s, e))
 
         # ── "Продолжить просмотр" — незавершённые из таймкодов ──────────────────
         if category == "continues" or category.startswith("continues_"):
@@ -1042,7 +1029,7 @@ async def get_category(
                 items = [
                     i
                     for i in map(_enrich_lampac_item, items)
-                    if not _item_watched(i, timecodes, watched_movies, threshold=min_progress)
+                    if not _item_watched(i, timecodes, watched_movies, threshold=min_progress, episodes_by_show=episodes_by_show)
                 ]
 
             total = len(items)
@@ -1084,7 +1071,7 @@ async def get_category(
             all_items = [
                 i
                 for i in map(_enrich_numparser_item, all_items)
-                if not _item_watched(i, timecodes, watched_movies)
+                if not _item_watched(i, timecodes, watched_movies, episodes_by_show=episodes_by_show)
             ]
 
         total = len(all_items)
