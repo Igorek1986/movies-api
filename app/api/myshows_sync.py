@@ -6,7 +6,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import select, func, update
 from app.db.database import get_db
 from app.db.models import User, Device, Timecode, MediaCard, LampaProfile, Episode
@@ -334,6 +334,8 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                             enum = ep.get("episodeNumber")
                             if snum is None or enum is None:
                                 continue
+                            if not ep.get("airDate") and not ep.get("airDateUTC"):
+                                continue  # эпизод без даты — анонс, пропускаем
                             runtime_min = ep.get("runtime") or 0
                             ep_rows.append({
                                 "tmdb_show_id": tmdb_id,
@@ -380,7 +382,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 chunk_size = 5000
                 for i in range(0, len(values), chunk_size):
                     chunk = values[i:i + chunk_size]
-                    stmt = insert(Timecode).values(chunk)
+                    stmt = pg_insert(Timecode).values(chunk)
                     stmt = stmt.on_conflict_do_update(
                         index_elements=[
                             Timecode.device_id, Timecode.lampa_profile_id,
@@ -394,7 +396,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
             if all_media_cards:
                 # Deduplicate by card_id (last write wins)
                 mc_unique = {mc["card_id"]: mc for mc in all_media_cards}
-                mc_stmt = insert(MediaCard).values(list(mc_unique.values()))
+                mc_stmt = pg_insert(MediaCard).values(list(mc_unique.values()))
                 mc_stmt = mc_stmt.on_conflict_do_update(
                     index_elements=["card_id"],
                     set_={
@@ -432,7 +434,13 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
             # ── Save Episodes ────────────────────────────────────────────────
             if all_episode_rows:
                 now_utc = datetime.now(timezone.utc)
-                all_rows_flat = [row for rows in all_episode_rows.values() for row in rows]
+                # Дедуплицируем по (tmdb_show_id, season, episode) — MyShows может вернуть дубли
+                seen: dict[tuple, dict] = {}
+                for rows in all_episode_rows.values():
+                    for row in rows:
+                        key = (row["tmdb_show_id"], row["season"], row["episode"])
+                        seen[key] = row
+                all_rows_flat = list(seen.values())
                 chunk_size = 1000
                 for i in range(0, len(all_rows_flat), chunk_size):
                     stmt = pg_insert(Episode).values(all_rows_flat[i:i + chunk_size])

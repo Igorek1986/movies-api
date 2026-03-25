@@ -174,6 +174,8 @@ async def sync_episodes(mc: MediaCard, db: AsyncSession, client: httpx.AsyncClie
         enum = ep.get("episodeNumber")
         if snum is None or enum is None:
             continue
+        if not ep.get("airDate") and not ep.get("airDateUTC"):
+            continue  # эпизод без даты — анонс, пропускаем
         runtime_min = ep.get("runtime") or 0
         duration_sec = runtime_min * 60 if runtime_min else None
         orig = mc.original_title or ""
