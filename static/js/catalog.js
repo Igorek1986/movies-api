@@ -328,14 +328,40 @@ function initCatalog(categoryId, imageBase) {
 
   _catalogInitFilter(updateCardLinks);
 
+  // Поиск
+  let _searchQuery = '';
+  const searchInput = document.getElementById('catalogSearch');
+  let _searchTimer = null;
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(() => {
+        _searchQuery = searchInput.value.trim();
+        resetGrid();
+      }, 300);
+    });
+  }
+
   // Пагинация
   let _page = 1, _totalPages = 1, _loading = false;
+
+  function resetGrid() {
+    _page = 1;
+    _totalPages = 1;
+    const grid = document.getElementById('catalogGrid');
+    grid.innerHTML = '';
+    document.getElementById('gridEmpty').style.display = 'none';
+    document.getElementById('gridLoading').style.display = 'none';
+    loadPage(1);
+  }
 
   async function loadPage(page) {
     if (_loading) return;
     _loading = true;
     try {
-      const resp = await fetch(`/${encodeURIComponent(categoryId)}?per_page=20&page=${page}`);
+      let url = `/${encodeURIComponent(categoryId)}?per_page=20&page=${page}`;
+      if (_searchQuery) url += `&search=${encodeURIComponent(_searchQuery)}`;
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
       _totalPages = data.total_pages || 1;

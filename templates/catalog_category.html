@@ -6,8 +6,8 @@
   <a href="/" class="catalog-back">← Каталог</a>
   <h2 style="margin-bottom: 1rem;">{{ category_name }}</h2>
 
-  {% if devices %}
   <div class="history-controls" style="margin-bottom: 1.25rem;">
+    {% if devices %}
     {% if devices|length > 1 %}
     <select id="catalogDeviceSelect">
       {% for d in devices %}
@@ -18,8 +18,11 @@
     <input type="hidden" id="catalogDeviceSelect" value="{{ devices[0].id }}">
     {% endif %}
     <div id="catalogProfileTabs"></div>
+    {% endif %}
+    <div style="margin-left: auto; width: 200px;">
+      <input type="search" id="catalogSearch" placeholder="Поиск…" class="history-search">
+    </div>
   </div>
-  {% endif %}
 
   <div id="gridLoading" class="muted small" style="text-align:center; padding: 2rem 0;">Загрузка...</div>
   <div id="gridEmpty" class="history-empty" style="display:none">Нет данных</div>

@@ -811,6 +811,7 @@ async def get_category(
     token: str = Query(None),
     profile_id: str = Query(None),
     min_progress: int = Query(None, ge=1, le=100),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     if not re.match(r"^[\w\-]+$", category):
@@ -1033,6 +1034,11 @@ async def get_category(
                     if not _item_watched(i, timecodes, watched_movies, threshold=min_progress, episodes_by_show=episodes_by_show)
                 ]
 
+            if search:
+                sq = search.lower()
+                items = [i for i in items if sq in (i.get("title") or i.get("name") or "").lower()
+                         or sq in (i.get("original_title") or i.get("original_name") or "").lower()]
+
             total = len(items)
             start = (page - 1) * per_page
             return {
@@ -1074,6 +1080,15 @@ async def get_category(
                 for i in map(_enrich_numparser_item, all_items)
                 if not _item_watched(i, timecodes, watched_movies, episodes_by_show=episodes_by_show)
             ]
+
+        if search:
+            sq = search.lower()
+            def _matches_search(item):
+                cached = tmdb_cache.get((item.get("media_type"), int(item["id"]))) if item.get("id") else None
+                t  = (cached or item).get("title") or (cached or item).get("name") or ""
+                ot = (cached or item).get("original_title") or (cached or item).get("original_name") or ""
+                return sq in t.lower() or sq in ot.lower()
+            all_items = [i for i in all_items if _matches_search(i)]
 
         total = len(all_items)
         start = (page - 1) * per_page
