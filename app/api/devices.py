@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, TelegramUser
+from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, TelegramUser, Episode
 from app import rate_limit, settings_cache
 from app.api.timecodes import _trim_to_limit
 
@@ -49,7 +49,7 @@ def _import_ctx(user: User) -> dict:
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string, backup_codes_count
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_device_by_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -441,6 +441,23 @@ async def api_history(
     )
     media_cards = {mc.card_id: mc for mc in mc_result.scalars().all()}
 
+    # Батч-запрос неспешловых эпизодов из MyShows для TV-сериалов
+    tv_tmdb_ids = [
+        int(_CARD_ID_RE.match(cid).group(1))
+        for cid in card_agg.keys()
+        if cid.endswith("_tv") and _CARD_ID_RE.match(cid)
+    ]
+    episodes_by_show: dict[int, list[tuple[int, int]]] = {}
+    if tv_tmdb_ids:
+        ep_rows = await db.execute(
+            select(Episode.tmdb_show_id, Episode.season, Episode.episode)
+            .where(Episode.tmdb_show_id.in_(tv_tmdb_ids), Episode.is_special == False, Episode.season > 0,  # noqa: E712
+                   (Episode.air_date == None) | (Episode.air_date <= _date.today()))  # noqa: E711
+            .order_by(Episode.tmdb_show_id, Episode.season, Episode.episode)
+        )
+        for tid, s, e in ep_rows.all():
+            episodes_by_show.setdefault(tid, []).append((s, e))
+
     today_str = _date.today().isoformat()
     history = []
     for card_id, agg in card_agg.items():
@@ -455,43 +472,80 @@ async def api_history(
         is_ongoing = False
         progress = max_pct
 
-        if card_id.endswith("_tv") and mc.seasons_json:
+        if card_id.endswith("_tv"):
             try:
-                seasons = json.loads(mc.seasons_json)
                 last_ep_s = mc.last_ep_season or 0
                 last_ep_e = mc.last_ep_number or 0
-                total_aired = 0
-                total_all = 0
-                for s in seasons:
-                    snum = s.get("season_number") or 0
-                    if snum == 0:
-                        continue
-                    ep_count = s.get("episode_count") or 0
-                    total_all += ep_count
-                    if last_ep_s > 0:
-                        if snum < last_ep_s:
-                            total_aired += ep_count
-                        elif snum == last_ep_s:
-                            total_aired += last_ep_e
-                    else:
-                        # Нет данных о последней серии — используем дату сезона
-                        s_air = s.get("air_date") or ""
-                        if s_air and s_air <= today_str:
-                            total_aired += ep_count
 
-                watched_episodes = sum(1 for p in items.values() if p >= _WATCHED_PCT)
-                total_episodes = total_aired
                 if mc.next_ep_air_date is not None:
-                    is_ongoing = bool(mc.next_ep_air_date) or bool(mc.last_air_date and mc.last_air_date > today_str)
-                else:
-                    is_ongoing = (total_all > total_aired) or bool(mc.last_air_date and mc.last_air_date > today_str)
-                progress = min(round(watched_episodes / total_aired * 100), 100) if total_aired > 0 else 0
+                    is_ongoing = bool(mc.next_ep_air_date) or bool(
+                        mc.last_air_date and mc.last_air_date > today_str
+                    )
+
+                # Приоритет: таблица episodes (MyShows, без спешлов)
+                show_eps = episodes_by_show.get(mc.tmdb_id)
+                if show_eps:
+                    # MyShows хранит только вышедшие серии — фильтр по TMDB last_ep не нужен
+                    aired = show_eps
+
+                    orig = mc.original_title or ""
+                    valid_hashes = {
+                        lampa_hash(build_episode_hash_string(s, e, orig))
+                        for s, e in aired
+                    }
+                    total_aired = len(aired)
+                    watched_episodes = sum(
+                        1 for h, p in items.items() if h in valid_hashes and p >= _WATCHED_PCT
+                    )
+                    total_episodes = total_aired
+                    if mc.next_ep_air_date is None and mc.seasons_json:
+                        try:
+                            seasons = json.loads(mc.seasons_json)
+                            total_all = sum(
+                                s.get("episode_count", 0) for s in seasons
+                                if (s.get("season_number") or 0) > 0
+                            )
+                            is_ongoing = (total_all > total_aired) or bool(
+                                mc.last_air_date and mc.last_air_date > today_str
+                            )
+                        except Exception:
+                            pass
+
+                elif mc.seasons_json:
+                    # Fallback: TMDB seasons_json
+                    seasons = json.loads(mc.seasons_json)
+                    total_aired = 0
+                    total_all = 0
+                    for s in seasons:
+                        snum = s.get("season_number") or 0
+                        if snum == 0:
+                            continue
+                        ep_count = s.get("episode_count") or 0
+                        total_all += ep_count
+                        if last_ep_s > 0:
+                            if snum < last_ep_s:
+                                total_aired += ep_count
+                            elif snum == last_ep_s:
+                                total_aired += last_ep_e
+                        else:
+                            s_air = s.get("air_date") or ""
+                            if s_air and s_air <= today_str:
+                                total_aired += ep_count
+                    watched_episodes = sum(1 for p in items.values() if p >= _WATCHED_PCT)
+                    total_episodes = total_aired
+                    if mc.next_ep_air_date is None:
+                        is_ongoing = (total_all > total_aired) or bool(
+                            mc.last_air_date and mc.last_air_date > today_str
+                        )
+
+                if total_episodes is not None and total_episodes > 0:
+                    progress = min(round((watched_episodes or 0) / total_episodes * 100), 100)
             except Exception:
                 pass
 
         is_complete = (
             (watched_episodes is not None and total_episodes is not None
-             and watched_episodes >= total_episodes > 0 and not is_ongoing)
+             and watched_episodes >= total_episodes > 0)
             if card_id.endswith("_tv")
             else progress >= _WATCHED_PCT
         )
@@ -887,104 +941,6 @@ async def api_media_card(
 
 
 # ---------------------------------------------------------------------------
-# API: список серий с хэшами и статусом просмотра
-# ---------------------------------------------------------------------------
-
-@router.get("/api/episodes")
-async def api_episodes(
-    device_id: int = Query(...),
-    card_id: str = Query(...),
-    profile_id: str | None = Query(None),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Возвращает список вышедших серий сериала с хэшами и флагом watched.
-    Используется для отображения непросмотренных серий в модальном окне.
-    """
-    if not current_user:
-        raise HTTPException(status_code=401)
-    await _get_device_or_404(device_id, current_user, db)
-
-    m = _CARD_ID_RE.match(card_id)
-    if not m or m.group(2) != "tv":
-        raise HTTPException(status_code=400, detail="Только для сериалов")
-
-    mc_result = await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))
-    mc = mc_result.scalar_one_or_none()
-    if not mc or not mc.seasons_json or not mc.original_title:
-        return {"episodes": []}
-
-    # Загружаем таймкоды (item + data) для определения watched и special
-    tc_where = [Timecode.device_id == device_id, Timecode.card_id == card_id]
-    if profile_id is not None:
-        tc_where.append(Timecode.lampa_profile_id == profile_id)
-    tc_result = await db.execute(select(Timecode.item, Timecode.data).where(*tc_where))
-    watched_items: set[str] = set()
-    special_items: set[str] = set()
-    timecode_data: dict[str, dict] = {}
-    for item, data_raw in tc_result.all():
-        try:
-            d = json.loads(data_raw)
-            pct = d.get("percent", 0)
-            timecode_data[item] = d
-            if pct >= 90:
-                watched_items.add(item)
-            if d.get("special"):
-                special_items.add(item)
-        except Exception:
-            pass
-
-    try:
-        seasons = json.loads(mc.seasons_json)
-    except Exception:
-        return {"episodes": []}
-
-    last_s = mc.last_ep_season or 0
-    last_e = mc.last_ep_number or 0
-    today_str = _date.today().isoformat()
-    orig_title = mc.original_title
-    duration_sec = (mc.episode_run_time * 60) if mc.episode_run_time else None
-
-    episodes = []
-    for s in seasons:
-        snum = s.get("season_number") or 0
-        if snum == 0:
-            continue
-        ep_count = s.get("episode_count") or 0
-
-        # Определяем сколько серий вышло в этом сезоне
-        if last_s > 0:
-            if snum < last_s:
-                aired_to = ep_count
-            elif snum == last_s:
-                aired_to = last_e
-            else:
-                continue  # сезон ещё не вышел
-        else:
-            s_air = s.get("air_date") or ""
-            if s_air and s_air <= today_str:
-                aired_to = ep_count
-            else:
-                continue
-
-        for ep in range(1, aired_to + 1):
-            h = lampa_hash(build_episode_hash_string(snum, ep, orig_title))
-            td = timecode_data.get(h, {})
-            episodes.append({
-                "season": snum,
-                "episode": ep,
-                "hash": h,
-                "watched": h in watched_items,
-                "special": h in special_items,
-                "percent": td.get("percent", 0),
-                "duration_sec": duration_sec,
-            })
-
-    return {"episodes": episodes, "original_title": orig_title}
-
-
-# ---------------------------------------------------------------------------
 # API: отметить эпизод просмотренным (percent=100)
 # ---------------------------------------------------------------------------
 
@@ -1180,4 +1136,81 @@ async def api_unmark_special(
     )
     await db.execute(stmt)
     await db.commit()
+    return {"ok": True}
+
+
+# ─── check-ongoing ────────────────────────────────────────────────────────────
+
+# Rate limit: раз в сутки на device_id
+_check_ongoing_cache: dict[int, _date] = {}
+
+
+async def _bg_check_ongoing(device_id: int) -> None:
+    """Фоновое обновление эпизодов всех сериалов устройства (раз в сутки)."""
+    from app.db.database import async_session_maker
+    from app.api.episodes import sync_episodes
+    from datetime import datetime as _dt, timezone as _tz
+
+    today_start = _dt.combine(_date.today(), _dt.min.time())
+    batch_size = settings_cache.get_int("episodes_refresh_batch") or 10
+    delay_sec  = settings_cache.get_int("episodes_refresh_delay") or 2
+
+    try:
+        async with async_session_maker() as db:
+            # Все TV-карточки с таймкодами данного устройства, уже линкованные с MyShows
+            # и не обновлявшиеся сегодня
+            card_ids_q = (
+                select(distinct(Timecode.card_id))
+                .where(
+                    Timecode.device_id == device_id,
+                    Timecode.card_id.like("%_tv"),
+                )
+            )
+            card_ids = (await db.execute(card_ids_q)).scalars().all()
+
+            if not card_ids:
+                return
+
+            result = await db.execute(
+                select(MediaCard).where(
+                    MediaCard.card_id.in_(card_ids),
+                    MediaCard.myshows_show_id.isnot(None),
+                    (MediaCard.episodes_synced_at == None) |
+                    (MediaCard.episodes_synced_at < today_start),
+                )
+            )
+            cards = result.scalars().all()
+            logger.info(f"check_ongoing device={device_id}: {len(cards)} shows to refresh")
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                for i in range(0, len(cards), batch_size):
+                    batch = cards[i:i + batch_size]
+                    for mc in batch:
+                        try:
+                            await sync_episodes(mc, db, client)
+                        except Exception as e:
+                            logger.warning(f"check_ongoing: {mc.card_id} failed: {e}")
+                            await db.rollback()
+                    if i + batch_size < len(cards):
+                        import asyncio as _aio
+                        await _aio.sleep(delay_sec)
+
+    except Exception as e:
+        logger.error(f"check_ongoing device={device_id} failed: {e}", exc_info=True)
+
+
+@router.get("/api/check-ongoing")
+async def api_check_ongoing(
+    device: Device = Depends(get_device_by_token),
+):
+    """Fire-and-forget: обновляет эпизоды всех сериалов устройства раз в сутки."""
+    if not device:
+        raise HTTPException(status_code=401)
+
+    today = _date.today()
+    if _check_ongoing_cache.get(device.id) != today:
+        _check_ongoing_cache[device.id] = today
+        import asyncio
+        asyncio.create_task(_bg_check_ongoing(device.id))
+
     return {"ok": True}

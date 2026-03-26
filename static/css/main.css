@@ -543,8 +543,8 @@ button.danger-btn {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 2rem .5rem .4rem;
-  background: linear-gradient(transparent, rgba(0,0,0,.85));
+  padding: 2.5rem .5rem .4rem;
+  background: linear-gradient(transparent, rgba(0,0,0,.6) 30%, rgba(0,0,0,.95));
 }
 .media-card .progress-bar {
   height: 3px;
@@ -569,7 +569,7 @@ button.danger-btn {
 }
 .media-card .card-eps {
   font-size: .65rem;
-  color: rgba(255,255,255,.5);
+  color: rgba(255,255,255,.75);
   margin: 0;
 }
 .media-card .progress-fill {
@@ -590,6 +590,26 @@ button.danger-btn {
   align-items: center;
   justify-content: center;
   font-size: .75rem;
+  line-height: 1;
+}
+/* Число оставшихся серий (top-right, тёмный) */
+.media-card .card-remaining {
+  position: absolute;
+  top: .35rem;
+  right: .35rem;
+  background: rgba(0,0,0,.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #fff;
+  border-radius: 4px;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 .3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .72rem;
+  font-weight: 600;
   line-height: 1;
 }
 

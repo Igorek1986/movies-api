@@ -22,6 +22,126 @@ logger = logging.getLogger(__name__)
 _check_task: asyncio.Task | None = None
 _delivery_task: asyncio.Task | None = None
 
+# ─── Episode refresh progress ──────────────────────────────────────────────────
+
+_refresh_progress: dict = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "current": "",
+}
+
+
+def get_refresh_progress() -> dict:
+    return dict(_refresh_progress)
+
+
+# ─── Find MyShows IDs progress ────────────────────────────────────────────────
+
+_find_progress: dict = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "found": 0,
+    "current": "",
+}
+
+
+def get_find_progress() -> dict:
+    return dict(_find_progress)
+
+
+async def _fetch_tmdb_tv_info(tmdb_id: int, client) -> tuple[str | None, str | None]:
+    """
+    Запрашивает imdb_id и английское название из TMDB одним запросом.
+    Возвращает (imdb_id, name_en).
+    """
+    from app.config import get_settings
+    cfg = get_settings()
+    try:
+        resp = await client.get(
+            f"https://api.themoviedb.org/3/tv/{tmdb_id}",
+            params={"language": "en-US", "append_to_response": "external_ids"},
+            headers={"Authorization": cfg.TMDB_TOKEN},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            imdb_id = (data.get("external_ids") or {}).get("imdb_id") or None
+            name_en = data.get("name") or data.get("original_name") or None
+            return imdb_id, name_en
+    except Exception:
+        pass
+    return None, None
+
+
+async def run_find_myshows_ids() -> None:
+    """
+    Ищет myshows_show_id для сериалов у которых его ещё нет.
+    Шаг 1: если imdb_id отсутствует — подтягивает из TMDB /tv/{id}/external_ids.
+    Шаг 2: find_myshows_show (imdb_id → название+год → fallback).
+    """
+    from app.db.database import async_session_maker
+    from app.db.models import MediaCard
+    from app.api.episodes import find_myshows_show
+    from sqlalchemy import select
+    import httpx
+
+    logger.info("run_find_myshows_ids: start")
+
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(MediaCard).where(
+                MediaCard.media_type == "tv",
+                MediaCard.myshows_show_id.is_(None),
+                MediaCard.original_title.isnot(None),
+            )
+        )
+        cards = result.scalars().all()
+        card_names = {mc.card_id: mc.title or mc.original_title or mc.card_id for mc in cards}
+
+        logger.info(f"run_find_myshows_ids: {len(cards)} shows without myshows_show_id")
+
+        _find_progress["running"] = True
+        _find_progress["total"] = len(cards)
+        _find_progress["done"] = 0
+        _find_progress["found"] = 0
+        _find_progress["current"] = ""
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            for mc in cards:
+                _find_progress["current"] = card_names.get(mc.card_id, mc.card_id)
+                try:
+                    # Шаг 1: подтягиваем imdb_id и английское название из TMDB
+                    name_en = None
+                    if mc.tmdb_id:
+                        imdb_id, name_en = await _fetch_tmdb_tv_info(mc.tmdb_id, client)
+                        if imdb_id and not mc.imdb_id:
+                            mc.imdb_id = imdb_id
+                            logger.info(f"run_find_myshows_ids: {mc.card_id} imdb_id={imdb_id} from TMDB")
+                        logger.info(f"run_find_myshows_ids: {mc.card_id} imdb={mc.imdb_id} title_en='{name_en}'")
+
+                    # Шаг 2: ищем в MyShows (с английским названием как дополнительным вариантом)
+                    logger.info(f"run_find_myshows_ids: searching '{mc.original_title}' ({mc.year}) imdb={mc.imdb_id}")
+                    show_id = await find_myshows_show(mc, client, title_en=name_en)
+                    if show_id:
+                        mc.myshows_show_id = show_id
+                        _find_progress["found"] += 1
+                        logger.info(f"run_find_myshows_ids: {mc.card_id} → show_id={show_id} ✓")
+                    else:
+                        logger.info(f"run_find_myshows_ids: {mc.card_id} — not found in MyShows")
+                except Exception as e:
+                    logger.warning(f"run_find_myshows_ids: {mc.card_id} failed: {e}")
+                    await db.rollback()
+                _find_progress["done"] += 1
+                await asyncio.sleep(0.3)
+
+        await db.commit()
+
+    _find_progress["running"] = False
+    _find_progress["current"] = ""
+    logger.info(f"run_find_myshows_ids: done, found {_find_progress['found']} of {_find_progress['total']}")
+
 
 # ─── Timezone helpers ──────────────────────────────────────────────────────────
 
@@ -272,6 +392,92 @@ async def run_premium_expiry_check(_now: datetime | None = None) -> None:
         await db.commit()
 
     logger.info("Premium expiry check complete.")
+
+
+# ─── Episodes refresh (daily) ─────────────────────────────────────────────────
+
+
+async def run_episodes_refresh(force: bool = False) -> None:
+    """
+    Обновляет эпизоды онгоинг-сериалов из MyShows.
+    Критерий: мало будущих серий (< episodes_future_threshold) ИЛИ force=True.
+    """
+    from app.db.database import async_session_maker
+    from app.db.models import MediaCard, Episode
+    from app.api.episodes import sync_episodes
+    from app import settings_cache
+    from sqlalchemy import select, func, or_
+    from sqlalchemy.orm import aliased
+    import httpx
+
+    threshold  = settings_cache.get_int("episodes_future_threshold") or 5
+    batch_size = settings_cache.get_int("episodes_refresh_batch") or 10
+    delay_sec  = settings_cache.get_int("episodes_refresh_delay") or 2
+
+    logger.info(f"run_episodes_refresh: force={force}, threshold={threshold}")
+
+    async with async_session_maker() as db:
+        today = date.today()
+
+        if force:
+            result = await db.execute(
+                select(MediaCard).where(
+                    MediaCard.media_type == "tv",
+                    MediaCard.myshows_show_id.isnot(None),
+                )
+            )
+        else:
+            # Подзапрос: кол-во будущих невышедших серий по каждому шоу
+            future_sq = (
+                select(Episode.tmdb_show_id, func.count().label("cnt"))
+                .where(Episode.air_date > today, Episode.is_special == False)  # noqa: E712
+                .group_by(Episode.tmdb_show_id)
+                .subquery()
+            )
+            result = await db.execute(
+                select(MediaCard)
+                .outerjoin(future_sq, MediaCard.tmdb_id == future_sq.c.tmdb_show_id)
+                .where(
+                    MediaCard.media_type == "tv",
+                    MediaCard.myshows_show_id.isnot(None),
+                    MediaCard.episodes_synced_at.isnot(None),
+                    or_(
+                        future_sq.c.cnt.is_(None),
+                        future_sq.c.cnt < threshold,
+                    ),
+                )
+            )
+
+        cards = result.scalars().all()
+        logger.info(f"run_episodes_refresh: {len(cards)} shows to process")
+
+        # Извлекаем названия пока объекты свежие — после rollback они становятся expired
+        card_names = {mc.card_id: mc.title or mc.original_title or mc.card_id for mc in cards}
+
+        _refresh_progress["running"] = True
+        _refresh_progress["total"] = len(cards)
+        _refresh_progress["done"] = 0
+        _refresh_progress["current"] = ""
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            for i in range(0, len(cards), batch_size):
+                batch = cards[i:i + batch_size]
+                for mc in batch:
+                    _refresh_progress["current"] = card_names.get(mc.card_id, mc.card_id)
+                    try:
+                        synced = await sync_episodes(mc, db, client)
+                        if synced:
+                            logger.info(f"run_episodes_refresh: updated {mc.card_id}")
+                    except Exception as e:
+                        logger.warning(f"run_episodes_refresh: {mc.card_id} failed: {e}")
+                        await db.rollback()
+                    _refresh_progress["done"] += 1
+                if i + batch_size < len(cards):
+                    await asyncio.sleep(delay_sec)
+
+    _refresh_progress["running"] = False
+    _refresh_progress["current"] = ""
+    logger.info("run_episodes_refresh: done")
 
 
 # ─── Notification delivery (every 10 minutes) ─────────────────────────────────
@@ -628,6 +834,10 @@ async def _check_loop() -> None:
             await run_premium_expiry_check()
         except Exception as e:
             logger.error(f"Premium expiry check failed: {e}", exc_info=True)
+        try:
+            await run_episodes_refresh()
+        except Exception as e:
+            logger.error(f"Episodes refresh failed: {e}", exc_info=True)
 
 
 async def _delivery_loop() -> None:

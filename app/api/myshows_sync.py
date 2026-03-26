@@ -6,15 +6,16 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import select, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select, func, update
 from app.db.database import get_db
-from app.db.models import User, Device, Timecode, MediaCard, LampaProfile
-from app.utils import lampa_hash
+from app.db.models import User, Device, Timecode, MediaCard, LampaProfile, Episode
+from app.utils import lampa_hash, build_episode_hash_string
 from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
-from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry
+from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry, _cleanup_orphan_timecodes
+from app.api.episodes import _should_sync, _parse_air_date
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -142,18 +143,24 @@ def _lampa_hash_for_movie(movie: dict) -> str:
     return str(lampa_hash(title))
 
 
-def _lampa_hash_for_episode(season: int, episode: int, show_title: str) -> str:
-    season_prefix = f"{season}:" if season > 10 else str(season)
-    return str(lampa_hash(f"{season_prefix}{episode}{show_title}"))
+def _format_imdb(raw_id) -> str | None:
+    """Форматирует imdbId из MyShows (число без tt) в стандартный формат tt0123456."""
+    if not raw_id:
+        return None
+    try:
+        return f"tt{int(raw_id):07d}"
+    except (ValueError, TypeError):
+        return None
+
 
 
 def _parse_watch_date(date_str: str | None) -> datetime:
     if date_str:
         try:
-            return datetime.fromisoformat(date_str)
+            return datetime.fromisoformat(date_str).replace(tzinfo=None)
         except (ValueError, TypeError):
             pass
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 
 # ─── Sync stream generator ─────────────────────────────────────────────────────
@@ -161,6 +168,9 @@ def _parse_watch_date(date_str: str | None) -> datetime:
 async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: AsyncSession, profile_id: str = "", user_role: str = "simple"):
     all_timecodes: list[dict] = []
     all_media_cards: list[dict] = []
+    all_episode_rows: dict[int, list[dict]] = {}   # tmdb_id → episode rows
+    all_myshows_ids:  dict[int, int]        = {}   # tmdb_id → myshows_show_id
+    all_media_cards_next_air: dict[int, str] = {}  # tmdb_id → next_ep_air_date из MyShows
     tmdb_cache: dict = {}
     stats = {"movies_ok": 0, "movies_err": 0, "shows_ok": 0, "shows_err": 0}
     not_found: list[str] = []
@@ -225,6 +235,8 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         "original_title": tmdb_data["original_title"] or movie.get("titleOriginal", ""),
                         "poster_path": tmdb_data["poster_path"],
                         "year": tmdb_data["year"] or str(movie.get("year", "") or ""),
+                        "kinopoisk_id": movie.get("kinopoiskId"),
+                        "imdb_id": _format_imdb(movie.get("imdbId")),
                     })
                     stats["movies_ok"] += 1
                 else:
@@ -266,9 +278,6 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         client, token, "profile.Episodes", {"showId": show_id}
                     )
                     watched_episodes = episodes_result if isinstance(episodes_result, list) else []
-                    if not watched_episodes:
-                        stats["shows_ok"] += 1
-                        continue
 
                     show_title_myshows = show_details.get("titleOriginal") or show_details.get("title", "")
                     show_tmdb_data = await _find_tmdb_data(
@@ -301,8 +310,29 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         "original_title": show_tmdb_data["original_title"] or show_details.get("titleOriginal", ""),
                         "poster_path": show_tmdb_data["poster_path"],
                         "year": show_tmdb_data["year"] or str(show_details.get("year", "") or ""),
+                        "kinopoisk_id": show_details.get("kinopoiskId"),
+                        "imdb_id": _format_imdb(show_details.get("imdbId")),
                     })
 
+                    orig = show_tmdb_data["original_title"] or show_title_myshows
+                    if not watched_episodes:
+                        # Нет просмотренных — добавляем первый эпизод с percent=0 (как кнопка "Смотрю")
+                        first_ep = min(
+                            (ep for ep in show_details.get("episodes", [])
+                             if ep.get("seasonNumber") and ep.get("episodeNumber")),
+                            key=lambda e: (e["seasonNumber"], e["episodeNumber"]),
+                            default=None,
+                        )
+                        if first_ep:
+                            runtime = first_ep.get("runtime") or default_runtime
+                            all_timecodes.append({
+                                "card_id": card_id_tv,
+                                "item": lampa_hash(build_episode_hash_string(
+                                    first_ep["seasonNumber"], first_ep["episodeNumber"], orig
+                                )),
+                                "data": json.dumps({"duration": runtime * 60, "time": 0, "percent": 0}),
+                                "updated_at": datetime.now(),
+                            })
                     for watched_ep in watched_episodes:
                         ep_info = episodes_map.get(watched_ep.get("id"))
                         if not ep_info:
@@ -314,11 +344,53 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         watch_date = _parse_watch_date(watched_ep.get("watchDate"))
                         all_timecodes.append({
                             "card_id": card_id_tv,
-                            "item": _lampa_hash_for_episode(season, episode,
-                                    show_tmdb_data["original_title"] or show_title_myshows),
+                            "item": lampa_hash(build_episode_hash_string(season, episode, orig)),
                             "data": json.dumps({"duration": duration, "time": duration, "percent": 100}),
                             "updated_at": watch_date,
                         })
+
+                    # Собираем ВСЕ эпизоды шоу (не только просмотренные) для таблицы episodes
+                    # Пропускаем если другой пользователь уже синхронизировал и обновление не нужно
+                    needs_ep_sync = True
+                    mc_existing = await db.get(MediaCard, card_id_tv)
+                    if mc_existing is not None:
+                        mc_existing.myshows_show_id = show_details.get("id")  # для _should_sync
+                        needs_ep_sync = _should_sync(mc_existing)
+
+                    if needs_ep_sync:
+                        ep_rows = []
+                        for ep in show_details.get("episodes", []):
+                            snum = ep.get("seasonNumber")
+                            enum = ep.get("episodeNumber")
+                            if snum is None or enum is None:
+                                continue
+                            if not ep.get("airDate") and not ep.get("airDateUTC"):
+                                continue  # эпизод без даты — анонс, пропускаем
+                            runtime_min = ep.get("runtime") or 0
+                            ep_rows.append({
+                                "tmdb_show_id": tmdb_id,
+                                "season":        snum,
+                                "episode":       enum,
+                                "title":         ep.get("title") or None,
+                                "duration_sec":  runtime_min * 60 if runtime_min else None,
+                                "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
+                                "myshows_ep_id": ep.get("id"),
+                                "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
+                                "air_date":      _parse_air_date(ep),
+                            })
+                        if ep_rows:
+                            all_episode_rows[tmdb_id] = ep_rows
+                            all_myshows_ids[tmdb_id]  = show_details.get("id")
+
+                            # Если TMDB не знает о следующем эпизоде — берём дату из MyShows
+                            today = datetime.now().date()
+                            future_dates = [
+                                r["air_date"] for r in ep_rows
+                                if r["air_date"] and r["air_date"] > today and not r["is_special"]
+                            ]
+                            if future_dates:
+                                next_air_str = min(future_dates).isoformat()
+                                all_media_cards_next_air[tmdb_id] = next_air_str
 
                     stats["shows_ok"] += 1
 
@@ -351,7 +423,7 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 chunk_size = 5000
                 for i in range(0, len(values), chunk_size):
                     chunk = values[i:i + chunk_size]
-                    stmt = insert(Timecode).values(chunk)
+                    stmt = pg_insert(Timecode).values(chunk)
                     stmt = stmt.on_conflict_do_update(
                         index_elements=[
                             Timecode.device_id, Timecode.lampa_profile_id,
@@ -365,14 +437,17 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
             if all_media_cards:
                 # Deduplicate by card_id (last write wins)
                 mc_unique = {mc["card_id"]: mc for mc in all_media_cards}
-                mc_stmt = insert(MediaCard).values(list(mc_unique.values()))
+                mc_stmt = pg_insert(MediaCard).values(list(mc_unique.values()))
                 mc_stmt = mc_stmt.on_conflict_do_update(
                     index_elements=["card_id"],
                     set_={
-                        "title": mc_stmt.excluded.title,
+                        "title":          mc_stmt.excluded.title,
                         "original_title": mc_stmt.excluded.original_title,
-                        "poster_path": mc_stmt.excluded.poster_path,
-                        "year": mc_stmt.excluded.year,
+                        "poster_path":    mc_stmt.excluded.poster_path,
+                        "year":           mc_stmt.excluded.year,
+                        # Не перезаписываем если уже заполнено из TMDB
+                        "kinopoisk_id":   func.coalesce(MediaCard.kinopoisk_id, mc_stmt.excluded.kinopoisk_id),
+                        "imdb_id":        func.coalesce(MediaCard.imdb_id,      mc_stmt.excluded.imdb_id),
                     },
                 )
                 await db.execute(mc_stmt)
@@ -400,7 +475,51 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 history_entries = [_media_card_to_entry(mc) for mc in db_cards_sorted]
                 await _merge_favorite_history(db, device.id, profile_id, history_entries, user_role)
 
-            if all_timecodes or all_media_cards:
+            # ── Save Episodes ────────────────────────────────────────────────
+            if all_episode_rows:
+                now_utc = datetime.now(timezone.utc)
+                # Дедуплицируем по (tmdb_show_id, season, episode) — MyShows может вернуть дубли
+                seen: dict[tuple, dict] = {}
+                for rows in all_episode_rows.values():
+                    for row in rows:
+                        key = (row["tmdb_show_id"], row["season"], row["episode"])
+                        seen[key] = row
+                all_rows_flat = list(seen.values())
+                chunk_size = 1000
+                for i in range(0, len(all_rows_flat), chunk_size):
+                    stmt = pg_insert(Episode).values(all_rows_flat[i:i + chunk_size])
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[Episode.tmdb_show_id, Episode.season, Episode.episode],
+                        set_={
+                            "title":         stmt.excluded.title,
+                            "duration_sec":  stmt.excluded.duration_sec,
+                            "is_special":    stmt.excluded.is_special,
+                            "myshows_ep_id": stmt.excluded.myshows_ep_id,
+                            "hash":          stmt.excluded.hash,
+                            "air_date":      stmt.excluded.air_date,
+                        },
+                    )
+                    await db.execute(stmt)
+                for tmdb_id in all_episode_rows:
+                    myshows_id = all_myshows_ids.get(tmdb_id)
+                    upd: dict = {"myshows_show_id": myshows_id, "episodes_synced_at": now_utc}
+                    next_air = all_media_cards_next_air.get(tmdb_id)
+                    if next_air:
+                        upd["next_ep_air_date"] = next_air
+                    await db.execute(
+                        update(MediaCard)
+                        .where(MediaCard.card_id == f"{tmdb_id}_tv")
+                        .values(**upd)
+                    )
+                logger.info(f"myshows_sync: episodes upserted for {len(all_episode_rows)} shows")
+
+            if all_timecodes or all_media_cards or all_episode_rows:
+                await db.commit()
+
+            # ── Cleanup orphan timecodes ─────────────────────────────────────
+            if all_episode_rows:
+                tv_card_ids = [f"{tid}_tv" for tid in all_episode_rows]
+                await _cleanup_orphan_timecodes(db, device.id, profile_id, tv_card_ids)
                 await db.commit()
 
             trimmed = 0

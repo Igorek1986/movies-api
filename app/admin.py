@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.templates import get_templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -394,6 +394,64 @@ async def cleanup_user_limits(
 # ---------------------------------------------------------------------------
 # Ручной запуск проверки истечения Premium
 # ---------------------------------------------------------------------------
+
+@router.post("/episodes/force-refresh")
+async def episodes_force_refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    from app.tasks import run_episodes_refresh, get_refresh_progress
+    import asyncio
+    if not get_refresh_progress()["running"]:
+        asyncio.create_task(run_episodes_refresh(force=True))
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@router.get("/episodes/refresh-status")
+async def episodes_refresh_status(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    from app.tasks import get_refresh_progress
+    return JSONResponse(get_refresh_progress())
+
+
+@router.post("/episodes/find-myshows-ids")
+async def episodes_find_myshows_ids(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    from app.tasks import run_find_myshows_ids, get_find_progress
+    import asyncio
+    if not get_find_progress()["running"]:
+        asyncio.create_task(run_find_myshows_ids())
+    return RedirectResponse(url="/admin", status_code=302)
+
+
+@router.get("/episodes/find-status")
+async def episodes_find_status(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+
+    from app.tasks import get_find_progress
+    return JSONResponse(get_find_progress())
+
 
 @router.post("/run-expiry-check")
 async def run_expiry_check(

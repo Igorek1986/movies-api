@@ -2,6 +2,7 @@ from sqlalchemy import (
     Column,
     Integer,
     BigInteger,
+    SmallInteger,
     String,
     Boolean,
     DateTime,
@@ -170,10 +171,33 @@ class MediaCard(Base):
     next_ep_air_date = Column(String(20), nullable=True)  # next_episode_to_air.air_date; "" = нет; NULL = не обновлено
     runtime = Column(Integer, nullable=True)              # movie: продолжительность в минутах
     episode_run_time = Column(Integer, nullable=True)     # tv: продолжительность серии в минутах (первый элемент)
+    imdb_id            = Column(String(20), nullable=True)   # tt1234567
+    kinopoisk_id       = Column(Integer, nullable=True)      # ID Кинопоиска из MyShows
+    myshows_show_id    = Column(Integer, nullable=True)   # маппинг tmdb_id → myshows show id
+    episodes_synced_at = Column(DateTime(timezone=True), nullable=True)  # дата последней синхронизации эпизодов
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
         return f"<MediaCard(card_id={self.card_id}, title={self.title})>"
+
+
+class Episode(Base):
+    """Метаданные эпизода сериала. Источники: MyShows (runtime, isSpecial), Lampa (duration_sec)."""
+
+    __tablename__ = "episodes"
+
+    tmdb_show_id  = Column(Integer, primary_key=True)
+    season        = Column(SmallInteger, primary_key=True)
+    episode       = Column(SmallInteger, primary_key=True)
+    title         = Column(String(500), nullable=True)    # название из MyShows
+    duration_sec  = Column(Integer, nullable=True)        # уточняется из Lampa/Lampac
+    is_special    = Column(Boolean, default=False, nullable=False, server_default="false")
+    myshows_ep_id = Column(Integer, nullable=True)
+    hash          = Column(String(20), nullable=True)     # lampa_hash для быстрого поиска
+    air_date      = Column(Date, nullable=True)           # дата выхода из MyShows
+
+    def __repr__(self):
+        return f"<Episode(show={self.tmdb_show_id}, s{self.season:02d}e{self.episode:02d}, special={self.is_special})>"
 
 
 class LampaProfile(Base):
