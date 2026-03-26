@@ -294,6 +294,90 @@ async def _merge_favorite_history(
     lp.favorite = json.dumps(existing_fav, ensure_ascii=False)
 
 
+async def _cleanup_orphan_timecodes(
+    db: AsyncSession,
+    device_id: int,
+    profile_id: str,
+    tv_card_ids: list[str],
+) -> None:
+    """
+    Удаляет таймкоды для TV-карточек у которых item не совпадает ни с одним хешем в episodes.
+    Если после удаления у карточки не осталось таймкодов — убирает её из истории профиля.
+    """
+    from sqlalchemy import delete as sa_delete
+
+    removed_card_ids = []
+
+    # Batch-запрос названий для логирования
+    mc_titles: dict[str, str] = {}
+    if tv_card_ids:
+        mc_rows = await db.execute(select(MediaCard).where(MediaCard.card_id.in_(tv_card_ids)))
+        for mc in mc_rows.scalars().all():
+            mc_titles[mc.card_id] = mc.title or mc.original_title or mc.card_id
+
+    for card_id in tv_card_ids:
+        try:
+            tmdb_id = int(card_id.split("_")[0])
+        except (ValueError, IndexError):
+            continue
+
+        valid_hashes = set((await db.execute(
+            select(Episode.hash).where(
+                Episode.tmdb_show_id == tmdb_id,
+                Episode.hash.isnot(None),
+            )
+        )).scalars().all())
+
+        if not valid_hashes:
+            continue
+
+        tcs = (await db.execute(
+            select(Timecode).where(
+                Timecode.device_id == device_id,
+                Timecode.lampa_profile_id == profile_id,
+                Timecode.card_id == card_id,
+            )
+        )).scalars().all()
+
+        orphan_ids = [tc.id for tc in tcs if tc.item not in valid_hashes]
+        if not orphan_ids:
+            continue
+
+        await db.execute(sa_delete(Timecode).where(Timecode.id.in_(orphan_ids)))
+        title = mc_titles.get(card_id, card_id)
+        logger.info(f"cleanup_orphans: «{title}» ({card_id}) — удалено {len(orphan_ids)} мусорных таймкодов из {len(tcs)}")
+
+        if len(orphan_ids) == len(tcs):
+            removed_card_ids.append(card_id)
+
+    if not removed_card_ids:
+        return
+
+    # Убираем карточки без таймкодов из истории профиля
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == device_id,
+            LampaProfile.lampa_profile_id == profile_id,
+        )
+    )).scalar_one_or_none()
+
+    if lp and lp.favorite:
+        try:
+            fav = json.loads(lp.favorite)
+            remove_tmdb_ids = set()
+            for cid in removed_card_ids:
+                try:
+                    remove_tmdb_ids.add(int(cid.split("_")[0]))
+                except (ValueError, IndexError):
+                    pass
+            fav["history"] = [i for i in fav.get("history", []) if i not in remove_tmdb_ids]
+            fav["card"]    = [c for c in fav.get("card", [])    if c.get("id") not in remove_tmdb_ids]
+            lp.favorite = json.dumps(fav, ensure_ascii=False)
+            logger.info(f"cleanup_orphans: removed {len(remove_tmdb_ids)} cards from history")
+        except Exception as e:
+            logger.warning(f"cleanup_orphans: failed to update favorite: {e}")
+
+
 async def _upsert_timecodes(
     db: AsyncSession,
     device_id: int,
@@ -497,8 +581,8 @@ async def _fetch_and_store_media_card(
         logger.warning(f"MediaCard fetch failed for {card_id}: {e}")
 
 
-async def _update_episode_duration(tmdb_show_id: int, ep_hash: str, duration: int) -> None:
-    """Обновляет duration_sec в episodes если расхождение > 60 сек."""
+async def _update_episode_duration(tmdb_show_id: int, ep_hash: str, duration: int, threshold: int = 60) -> None:
+    """Обновляет duration_sec в episodes если расхождение > threshold сек."""
     try:
         async with async_session_maker() as db:
             ep = await db.scalar(
@@ -510,7 +594,7 @@ async def _update_episode_duration(tmdb_show_id: int, ep_hash: str, duration: in
             if ep is None:
                 return
             current = ep.duration_sec or 0
-            if abs(duration - current) > 60:
+            if abs(duration - current) > threshold:
                 ep.duration_sec = duration
                 await db.commit()
                 logger.debug(f"Episode duration updated: show={tmdb_show_id} hash={ep_hash} {current}→{duration}s")
@@ -589,10 +673,12 @@ async def save_timecode(
         if m.group(2) == "tv":
             try:
                 duration = json.loads(data).get("duration")
-                if duration and int(duration) > 0:
-                    asyncio.create_task(
-                        _update_episode_duration(int(m.group(1)), item, int(duration))
-                    )
+                if duration:
+                    dur_int = round(float(duration))
+                    if dur_int > 0:
+                        asyncio.create_task(
+                            _update_episode_duration(int(m.group(1)), item, dur_int)
+                        )
             except Exception:
                 pass
 
@@ -721,6 +807,28 @@ async def import_from_lampac(
         if entries:
             await _merge_favorite_history(db, device.id, lp, entries, user_role)
             await db.commit()
+
+    # Обновляем duration_sec для серий TV-карточек (порог 40с — импорт считается надёжным источником)
+    tv_card_ids = [cid for cid in valid_card_ids if cid.endswith("_tv")]
+    for card_id in tv_card_ids:
+        m = _CARD_ID_RE.match(card_id)
+        if not m:
+            continue
+        tmdb_id = int(m.group(1))
+        for item, tc_data in data.get(card_id, {}).items():
+            try:
+                dur = json.loads(tc_data).get("duration")
+                if dur:
+                    dur_int = round(float(dur))
+                    if dur_int > 0:
+                        asyncio.create_task(_update_episode_duration(tmdb_id, item, dur_int, threshold=40))
+            except Exception:
+                pass
+
+    # Удаляем мусорные таймкоды для TV-карточек (хеши не совпадают с episodes)
+    if tv_card_ids:
+        await _cleanup_orphan_timecodes(db, device.id, lp, tv_card_ids)
+        await db.commit()
 
     return {"success": True, "saved": saved, "trimmed": trimmed}
 
@@ -975,7 +1083,6 @@ async def get_watch_history(
                 watched_episodes is not None
                 and total_episodes is not None
                 and watched_episodes >= total_episodes > 0
-                and not is_ongoing
             )
             if card_id.endswith("_tv")
             else progress >= _WATCHED_PCT

@@ -30,8 +30,25 @@
             onsubmit="return confirm('Продлить Premium всем активным пользователям?')">
         <button type="submit" class="btn-sm outline secondary">➕ Продлить всем</button>
       </form>
+      <form method="POST" action="/admin/episodes/force-refresh" style="margin:0" id="refreshForm"
+            onsubmit="return startRefresh(event)">
+        <button type="submit" class="btn-sm outline secondary" id="refreshBtn" title="Принудительно синхронизировать эпизоды всех сериалов из MyShows">♻ Обновить эпизоды</button>
+      </form>
+      <form method="POST" action="/admin/episodes/find-myshows-ids" style="margin:0" id="findForm"
+            onsubmit="return startFind(event)">
+        <button type="submit" class="btn-sm outline secondary" id="findBtn" title="Найти MyShows ID для сериалов без него">🔍 Найти MyShows ID</button>
+      </form>
       <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
     </div>
+  </div>
+
+  <div id="refreshProgress" style="display:none;padding:.6rem 1rem;border:1px solid var(--pico-table-border-color);border-radius:var(--pico-border-radius);margin-bottom:.5rem;font-size:.9rem">
+    <span id="refreshText">Инициализация…</span>
+    <progress id="refreshBar" value="0" max="100" style="width:100%;height:.5rem;margin-top:.4rem"></progress>
+  </div>
+  <div id="findProgress" style="display:none;padding:.6rem 1rem;border:1px solid var(--pico-table-border-color);border-radius:var(--pico-border-radius);margin-bottom:.5rem;font-size:.9rem">
+    <span id="findText">Инициализация…</span>
+    <progress id="findBar" value="0" max="100" style="width:100%;height:.5rem;margin-top:.4rem"></progress>
   </div>
 
   <div style="display:flex;flex-direction:column;gap:.6rem">
@@ -149,6 +166,107 @@
   .is-admin     { color: #16a34a; border-color: #16a34a55; }
 </style>
 <script>
+let _refreshPoll = null;
+
+function startRefresh(e) {
+  e.preventDefault();
+  document.getElementById('refreshBtn').disabled = true;
+  document.getElementById('refreshProgress').style.display = 'block';
+  document.getElementById('refreshText').textContent = 'Запуск…';
+  document.getElementById('refreshBar').value = 0;
+  fetch('/admin/episodes/force-refresh', {method:'POST', redirect:'manual'})
+    .finally(() => { _refreshPoll = setInterval(pollRefresh, 1500); });
+  return false;
+}
+
+async function pollRefresh() {
+  try {
+    const r = await fetch('/admin/episodes/refresh-status');
+    const d = await r.json();
+    const prog = document.getElementById('refreshProgress');
+    const txt  = document.getElementById('refreshText');
+    const bar  = document.getElementById('refreshBar');
+    if (d.total > 0) {
+      const pct = Math.round(d.done / d.total * 100);
+      bar.value = pct;
+      txt.textContent = d.running
+        ? `${d.done} / ${d.total}  —  ${d.current}`
+        : `Готово: обновлено ${d.done} из ${d.total}`;
+    } else {
+      txt.textContent = d.running ? 'Поиск сериалов…' : 'Готово';
+    }
+    if (!d.running) {
+      clearInterval(_refreshPoll);
+      _refreshPoll = null;
+      document.getElementById('refreshBtn').disabled = false;
+      setTimeout(() => { prog.style.display = 'none'; }, 4000);
+    }
+  } catch(e) { /* ignore */ }
+}
+
+// Проверяем статус при загрузке страницы (если обновление уже идёт)
+(async function() {
+  try {
+    const r = await fetch('/admin/episodes/refresh-status');
+    const d = await r.json();
+    if (d.running) {
+      document.getElementById('refreshBtn').disabled = true;
+      document.getElementById('refreshProgress').style.display = 'block';
+      _refreshPoll = setInterval(pollRefresh, 1500);
+    }
+  } catch(e) {}
+})();
+
+let _findPoll = null;
+
+function startFind(e) {
+  e.preventDefault();
+  document.getElementById('findBtn').disabled = true;
+  document.getElementById('findProgress').style.display = 'block';
+  document.getElementById('findText').textContent = 'Запуск…';
+  document.getElementById('findBar').value = 0;
+  fetch('/admin/episodes/find-myshows-ids', {method:'POST', redirect:'manual'})
+    .finally(() => { _findPoll = setInterval(pollFind, 1500); });
+  return false;
+}
+
+async function pollFind() {
+  try {
+    const r = await fetch('/admin/episodes/find-status');
+    const d = await r.json();
+    const prog = document.getElementById('findProgress');
+    const txt  = document.getElementById('findText');
+    const bar  = document.getElementById('findBar');
+    if (d.total > 0) {
+      const pct = Math.round(d.done / d.total * 100);
+      bar.value = pct;
+      txt.textContent = d.running
+        ? `${d.done} / ${d.total}  найдено: ${d.found}  —  ${d.current}`
+        : `Готово: найдено ${d.found} из ${d.total}`;
+    } else {
+      txt.textContent = d.running ? 'Поиск…' : 'Готово';
+    }
+    if (!d.running) {
+      clearInterval(_findPoll);
+      _findPoll = null;
+      document.getElementById('findBtn').disabled = false;
+      setTimeout(() => { prog.style.display = 'none'; }, 5000);
+    }
+  } catch(e) { /* ignore */ }
+}
+
+(async function() {
+  try {
+    const r = await fetch('/admin/episodes/find-status');
+    const d = await r.json();
+    if (d.running) {
+      document.getElementById('findBtn').disabled = true;
+      document.getElementById('findProgress').style.display = 'block';
+      _findPoll = setInterval(pollFind, 1500);
+    }
+  } catch(e) {}
+})();
+
 function blockUser(uid, username) {
   const reason = prompt('Причина блокировки ' + username + ':');
   if (reason === null) return;

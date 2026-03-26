@@ -52,7 +52,7 @@ function _updateFilterCounts(cards) {
     all:      cards.length,
     movie:    cards.filter(c => c.media_type === 'movie').length,
     tv:       cards.filter(c => c.media_type === 'tv').length,
-    watching: cards.filter(c => !c.is_complete).length,
+    watching: cards.filter(c => !c.is_complete && (c.media_type !== 'tv' || c.total_episodes !== 0)).length,
   };
   const labels = { all: 'Все', movie: 'Фильмы', tv: 'Сериалы', watching: 'В&nbspпроцессе' };
   const ids = {
@@ -72,7 +72,7 @@ function _renderCards(cards) {
   let filtered = _activeFilter === 'all'
     ? cards
     : _activeFilter === 'watching'
-      ? cards.filter(c => !c.is_complete)
+      ? cards.filter(c => !c.is_complete && (c.media_type !== 'tv' || c.total_episodes !== 0))
       : cards.filter(c => c.media_type === _activeFilter);
 
   if (_searchQuery) {

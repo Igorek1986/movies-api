@@ -172,6 +172,7 @@ class MediaCard(Base):
     runtime = Column(Integer, nullable=True)              # movie: продолжительность в минутах
     episode_run_time = Column(Integer, nullable=True)     # tv: продолжительность серии в минутах (первый элемент)
     imdb_id            = Column(String(20), nullable=True)   # tt1234567
+    kinopoisk_id       = Column(Integer, nullable=True)      # ID Кинопоиска из MyShows
     myshows_show_id    = Column(Integer, nullable=True)   # маппинг tmdb_id → myshows show id
     episodes_synced_at = Column(DateTime(timezone=True), nullable=True)  # дата последней синхронизации эпизодов
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

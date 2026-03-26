@@ -48,6 +48,7 @@ async def main():
         await session.execute(text("""
             ALTER TABLE media_cards
             ADD COLUMN IF NOT EXISTS imdb_id            VARCHAR(20)  NULL,
+            ADD COLUMN IF NOT EXISTS kinopoisk_id       INTEGER      NULL,
             ADD COLUMN IF NOT EXISTS myshows_show_id    INTEGER      NULL,
             ADD COLUMN IF NOT EXISTS episodes_synced_at TIMESTAMPTZ  NULL;
         """))

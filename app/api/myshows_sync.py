@@ -14,7 +14,7 @@ from app.utils import lampa_hash, build_episode_hash_string
 from app.config import get_settings
 from app.api.dependencies import get_current_user
 from app import rate_limit
-from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry
+from app.api.timecodes import _trim_to_limit, _merge_favorite_history, _media_card_to_entry, _cleanup_orphan_timecodes
 from app.api.episodes import _should_sync, _parse_air_date
 
 logger = logging.getLogger(__name__)
@@ -143,14 +143,24 @@ def _lampa_hash_for_movie(movie: dict) -> str:
     return str(lampa_hash(title))
 
 
+def _format_imdb(raw_id) -> str | None:
+    """Форматирует imdbId из MyShows (число без tt) в стандартный формат tt0123456."""
+    if not raw_id:
+        return None
+    try:
+        return f"tt{int(raw_id):07d}"
+    except (ValueError, TypeError):
+        return None
+
+
 
 def _parse_watch_date(date_str: str | None) -> datetime:
     if date_str:
         try:
-            return datetime.fromisoformat(date_str)
+            return datetime.fromisoformat(date_str).replace(tzinfo=None)
         except (ValueError, TypeError):
             pass
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 
 # ─── Sync stream generator ─────────────────────────────────────────────────────
@@ -225,6 +235,8 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         "original_title": tmdb_data["original_title"] or movie.get("titleOriginal", ""),
                         "poster_path": tmdb_data["poster_path"],
                         "year": tmdb_data["year"] or str(movie.get("year", "") or ""),
+                        "kinopoisk_id": movie.get("kinopoiskId"),
+                        "imdb_id": _format_imdb(movie.get("imdbId")),
                     })
                     stats["movies_ok"] += 1
                 else:
@@ -266,9 +278,6 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         client, token, "profile.Episodes", {"showId": show_id}
                     )
                     watched_episodes = episodes_result if isinstance(episodes_result, list) else []
-                    if not watched_episodes:
-                        stats["shows_ok"] += 1
-                        continue
 
                     show_title_myshows = show_details.get("titleOriginal") or show_details.get("title", "")
                     show_tmdb_data = await _find_tmdb_data(
@@ -301,9 +310,29 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                         "original_title": show_tmdb_data["original_title"] or show_details.get("titleOriginal", ""),
                         "poster_path": show_tmdb_data["poster_path"],
                         "year": show_tmdb_data["year"] or str(show_details.get("year", "") or ""),
+                        "kinopoisk_id": show_details.get("kinopoiskId"),
+                        "imdb_id": _format_imdb(show_details.get("imdbId")),
                     })
 
                     orig = show_tmdb_data["original_title"] or show_title_myshows
+                    if not watched_episodes:
+                        # Нет просмотренных — добавляем первый эпизод с percent=0 (как кнопка "Смотрю")
+                        first_ep = min(
+                            (ep for ep in show_details.get("episodes", [])
+                             if ep.get("seasonNumber") and ep.get("episodeNumber")),
+                            key=lambda e: (e["seasonNumber"], e["episodeNumber"]),
+                            default=None,
+                        )
+                        if first_ep:
+                            runtime = first_ep.get("runtime") or default_runtime
+                            all_timecodes.append({
+                                "card_id": card_id_tv,
+                                "item": lampa_hash(build_episode_hash_string(
+                                    first_ep["seasonNumber"], first_ep["episodeNumber"], orig
+                                )),
+                                "data": json.dumps({"duration": runtime * 60, "time": 0, "percent": 0}),
+                                "updated_at": datetime.now(),
+                            })
                     for watched_ep in watched_episodes:
                         ep_info = episodes_map.get(watched_ep.get("id"))
                         if not ep_info:
@@ -412,10 +441,13 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 mc_stmt = mc_stmt.on_conflict_do_update(
                     index_elements=["card_id"],
                     set_={
-                        "title": mc_stmt.excluded.title,
+                        "title":          mc_stmt.excluded.title,
                         "original_title": mc_stmt.excluded.original_title,
-                        "poster_path": mc_stmt.excluded.poster_path,
-                        "year": mc_stmt.excluded.year,
+                        "poster_path":    mc_stmt.excluded.poster_path,
+                        "year":           mc_stmt.excluded.year,
+                        # Не перезаписываем если уже заполнено из TMDB
+                        "kinopoisk_id":   func.coalesce(MediaCard.kinopoisk_id, mc_stmt.excluded.kinopoisk_id),
+                        "imdb_id":        func.coalesce(MediaCard.imdb_id,      mc_stmt.excluded.imdb_id),
                     },
                 )
                 await db.execute(mc_stmt)
@@ -482,6 +514,12 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                 logger.info(f"myshows_sync: episodes upserted for {len(all_episode_rows)} shows")
 
             if all_timecodes or all_media_cards or all_episode_rows:
+                await db.commit()
+
+            # ── Cleanup orphan timecodes ─────────────────────────────────────
+            if all_episode_rows:
+                tv_card_ids = [f"{tid}_tv" for tid in all_episode_rows]
+                await _cleanup_orphan_timecodes(db, device.id, profile_id, tv_card_ids)
                 await db.commit()
 
             trimmed = 0

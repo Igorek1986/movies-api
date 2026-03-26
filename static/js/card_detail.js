@@ -769,7 +769,7 @@ function _setupTvProgressSection(episodes, cardId, deviceId, profileId, tcRows) 
   // Экспортируем функцию обновления чтобы вызывать из _renderEpisodes
   window._updateTvProgress = function () {
     const allRows    = document.querySelectorAll('.ep-row');
-    const regularRows = Array.from(allRows).filter(r => !r.dataset.special);
+    const regularRows = Array.from(allRows).filter(r => !r.dataset.special && !r.dataset.future);
     const total = regularRows.length;
     if (!total) return;
     let watched = 0;
@@ -877,7 +877,7 @@ function _epLabel(ep) {
 function _updateSeasonCount(snum) {
   const countEl = document.querySelector(`.ep-season-count[data-snum="${snum}"]`);
   if (!countEl) return;
-  const regularRows = Array.from(document.querySelectorAll(`.ep-row[data-snum="${snum}"]`)).filter(r => !r.dataset.special);
+  const regularRows = Array.from(document.querySelectorAll(`.ep-row[data-snum="${snum}"]`)).filter(r => !r.dataset.special && !r.dataset.future);
   let watched = 0;
   regularRows.forEach(r => { if (parseFloat(r.dataset.percent) >= _WATCHED_THR) watched++; });
   countEl.textContent = `${watched} / ${regularRows.length}`;
@@ -950,7 +950,8 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   // Первый сезон с непросмотренными обычными сериями (спешлы не учитываем)
   let activeSeasonExpand = null;
   for (const snum of Object.keys(seasons).map(Number).sort((a, b) => a - b)) {
-    if (seasons[snum].some(e => !e.special && e.percent < _WATCHED_THR)) { activeSeasonExpand = snum; break; }
+    // Раскрываем только если есть вышедшие (не future) непросмотренные обычные серии
+    if (seasons[snum].some(e => !e.special && !e.future && e.percent < _WATCHED_THR)) { activeSeasonExpand = snum; break; }
   }
 
   container.innerHTML = '';
@@ -975,7 +976,7 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
     const countSpan = document.createElement('span');
     countSpan.className    = 'ep-season-count';
     countSpan.dataset.snum = snum;
-    countSpan.textContent  = `${watched} / ${regularEps.length}`;
+    countSpan.textContent  = `${watched} / ${regularEps.filter(e => !e.future).length}`;
 
     const markAllBtn = document.createElement('button');
     markAllBtn.className   = 'ep-mark-season';
@@ -1023,6 +1024,7 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
   row.dataset.percent = curPct;
   row.dataset.epHash  = ep.hash;
   if (ep.special) row.dataset.special = '1';
+  if (ep.future)  row.dataset.future  = '1';
 
   // Метка серии
   const labelEl = document.createElement('span');

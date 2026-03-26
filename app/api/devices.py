@@ -49,7 +49,7 @@ def _import_ctx(user: User) -> dict:
 
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
 from app.utils import generate_profile_api_key, generate_device_code, validate_name, lampa_hash, build_episode_hash_string, backup_codes_count
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_device_by_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -545,7 +545,7 @@ async def api_history(
 
         is_complete = (
             (watched_episodes is not None and total_episodes is not None
-             and watched_episodes >= total_episodes > 0 and not is_ongoing)
+             and watched_episodes >= total_episodes > 0)
             if card_id.endswith("_tv")
             else progress >= _WATCHED_PCT
         )
@@ -1136,4 +1136,81 @@ async def api_unmark_special(
     )
     await db.execute(stmt)
     await db.commit()
+    return {"ok": True}
+
+
+# ─── check-ongoing ────────────────────────────────────────────────────────────
+
+# Rate limit: раз в сутки на device_id
+_check_ongoing_cache: dict[int, _date] = {}
+
+
+async def _bg_check_ongoing(device_id: int) -> None:
+    """Фоновое обновление эпизодов всех сериалов устройства (раз в сутки)."""
+    from app.db.database import async_session_maker
+    from app.api.episodes import sync_episodes
+    from datetime import datetime as _dt, timezone as _tz
+
+    today_start = _dt.combine(_date.today(), _dt.min.time())
+    batch_size = settings_cache.get_int("episodes_refresh_batch") or 10
+    delay_sec  = settings_cache.get_int("episodes_refresh_delay") or 2
+
+    try:
+        async with async_session_maker() as db:
+            # Все TV-карточки с таймкодами данного устройства, уже линкованные с MyShows
+            # и не обновлявшиеся сегодня
+            card_ids_q = (
+                select(distinct(Timecode.card_id))
+                .where(
+                    Timecode.device_id == device_id,
+                    Timecode.card_id.like("%_tv"),
+                )
+            )
+            card_ids = (await db.execute(card_ids_q)).scalars().all()
+
+            if not card_ids:
+                return
+
+            result = await db.execute(
+                select(MediaCard).where(
+                    MediaCard.card_id.in_(card_ids),
+                    MediaCard.myshows_show_id.isnot(None),
+                    (MediaCard.episodes_synced_at == None) |
+                    (MediaCard.episodes_synced_at < today_start),
+                )
+            )
+            cards = result.scalars().all()
+            logger.info(f"check_ongoing device={device_id}: {len(cards)} shows to refresh")
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                for i in range(0, len(cards), batch_size):
+                    batch = cards[i:i + batch_size]
+                    for mc in batch:
+                        try:
+                            await sync_episodes(mc, db, client)
+                        except Exception as e:
+                            logger.warning(f"check_ongoing: {mc.card_id} failed: {e}")
+                            await db.rollback()
+                    if i + batch_size < len(cards):
+                        import asyncio as _aio
+                        await _aio.sleep(delay_sec)
+
+    except Exception as e:
+        logger.error(f"check_ongoing device={device_id} failed: {e}", exc_info=True)
+
+
+@router.get("/api/check-ongoing")
+async def api_check_ongoing(
+    device: Device = Depends(get_device_by_token),
+):
+    """Fire-and-forget: обновляет эпизоды всех сериалов устройства раз в сутки."""
+    if not device:
+        raise HTTPException(status_code=401)
+
+    today = _date.today()
+    if _check_ongoing_cache.get(device.id) != today:
+        _check_ongoing_cache[device.id] = today
+        import asyncio
+        asyncio.create_task(_bg_check_ongoing(device.id))
+
     return {"ok": True}

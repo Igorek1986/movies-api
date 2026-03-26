@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import Device, Episode, MediaCard, Timecode, User
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_device_by_token
 from app.utils import lampa_hash, build_episode_hash_string
 
 logger = logging.getLogger(__name__)
@@ -67,16 +67,25 @@ def _parse_air_date(ep: dict) -> _date | None:
 # ─── Шаг 3: линковка TMDB → MyShows ─────────────────────────────────────────
 
 def _normalize(s: str) -> str:
-    """Упрощённая нормализация для сравнения названий."""
-    return s.lower().strip()
+    """Нормализация для сравнения названий."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFD", s)           # é → e + combining accent
+    s = re.sub(r"[\u0300-\u036f]", "", s)         # убираем комбинирующие знаки
+    s = s.lower().strip()
+    s = s.replace("-", " ").replace("_", " ")
+    s = re.sub(r"[^\w\s]", "", s)                 # убираем пунктуацию
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
-async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient) -> int | None:
+async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: str | None = None) -> int | None:
     """
     Ищет сериал в MyShows. Порядок:
-    1. По imdb_id (shows.GetByExternalId) с верификацией названия
-    2. По названию + году (shows.GetCatalog)
-    3. По названию без года (fallback)
+    1. По imdb_id (shows.GetByExternalId) с верификацией названия (оригинал + английский)
+    2. По оригинальному названию + году (shows.GetCatalog)
+    3. По английскому названию + году (если передан title_en)
+    4. Fallback без года
     Возвращает myshows_show_id или None.
     """
     if not mc.original_title:
@@ -84,6 +93,7 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient) -> int | N
 
     orig = _normalize(mc.original_title)
     year = mc.year  # строка "2020" или None
+    orig_en = _normalize(title_en) if title_en else None
 
     # 1. Поиск по IMDB ID
     if mc.imdb_id:
@@ -94,14 +104,16 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient) -> int | N
         })
         if result and isinstance(result, dict):
             found_title = _normalize(result.get("titleOriginal") or result.get("title") or "")
-            # Верифицируем название (MyShows иногда возвращает неверные совпадения по IMDB)
-            if found_title and (found_title == orig or found_title in orig or orig in found_title):
+            # Верифицируем по оригинальному или английскому названию
+            title_match = (found_title == orig or found_title in orig or orig in found_title or
+                           (orig_en and (found_title == orig_en or found_title in orig_en or orig_en in found_title)))
+            if found_title and title_match:
                 logger.info(f"MyShows link: {mc.card_id} → show_id={result['id']} (imdb)")
                 return result["id"]
             else:
-                logger.debug(f"MyShows link: IMDB match rejected '{found_title}' != '{orig}'")
+                logger.info(f"MyShows link: IMDB match rejected '{found_title}' != '{orig}' / '{orig_en}'")
 
-    # 2. Поиск по каталогу с годом
+    # 2. Поиск по оригинальному названию + году
     params: dict = {"search": {"query": mc.original_title}}
     if year:
         params["search"]["year"] = int(year)
@@ -116,23 +128,90 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient) -> int | N
         if show and isinstance(show, dict):
             shows.append(show)
 
-    # Точное совпадение по названию и году
+    def _title_match(show, query: str, year: str | None) -> bool:
+        t = _normalize(show.get("titleOriginal") or show.get("title") or "")
+        y = str(show.get("year") or "")
+        return t == query and (not year or y == year)
+
+    # Точное совпадение по оригинальному названию + году
     for show in shows:
-        title_orig = _normalize(show.get("titleOriginal") or show.get("title") or "")
-        show_year = str(show.get("year") or "")
-        if title_orig == orig and (not year or show_year == year):
+        if _title_match(show, orig, year):
             logger.info(f"MyShows link: {mc.card_id} → show_id={show['id']} (catalog+year)")
             return show["id"]
 
-    # 3. Fallback: только по названию без года
+    def _search_catalog(query: str, year: str | None):
+        return _ms_rpc(client, "shows.GetCatalog", {
+            "search": {"query": query, **({"year": int(year)} if year else {})}
+        })
+
+    def _extract_shows(result):
+        out = []
+        for item in (result or []):
+            show = item.get("show") if isinstance(item, dict) and "show" in item else item
+            if show and isinstance(show, dict):
+                out.append(show)
+        return out
+
+    def _find_in(shows_list, query: str, with_year: str | None) -> int | None:
+        """Точное совпадение с годом, потом без года."""
+        for show in shows_list:
+            if _title_match(show, query, with_year):
+                return show["id"]
+        if with_year:
+            for show in shows_list:
+                t = _normalize(show.get("titleOriginal") or show.get("title") or "")
+                if t == query:
+                    return show["id"]
+        return None
+
+    # Поиск по английскому названию + году (для аниме и нелатинских шоу)
+    if orig_en:
+        en_result = await _search_catalog(title_en, year)
+        en_shows = _extract_shows(en_result)
+        sid = _find_in(en_shows, orig_en, year)
+        if sid:
+            logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_en+year)")
+            return sid
+
+        # Год ±1 для новых шоу (TMDB и MyShows могут расходиться)
+        if year:
+            for adj_year in (str(int(year) - 1), str(int(year) + 1)):
+                adj_result = await _search_catalog(title_en, adj_year)
+                adj_shows = _extract_shows(adj_result)
+                sid = _find_in(adj_shows, orig_en, adj_year)
+                if sid:
+                    logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_en, year±1={adj_year})")
+                    return sid
+
+        # Сокращённое название до первого «:» (TMDB часто добавляет подзаголовок)
+        short_en = title_en.split(":")[0].strip() if title_en and ":" in title_en else None
+        if short_en:
+            short_norm = _normalize(short_en)
+            short_result = await _search_catalog(short_en, year)
+            short_shows = _extract_shows(short_result)
+            sid = _find_in(short_shows, short_norm, year)
+            if sid:
+                logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_en_short+year)")
+                return sid
+            if year:
+                for adj_year in (str(int(year) - 1), str(int(year) + 1)):
+                    adj_result = await _search_catalog(short_en, adj_year)
+                    adj_shows = _extract_shows(adj_result)
+                    sid = _find_in(adj_shows, short_norm, adj_year)
+                    if sid:
+                        logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_en_short, year±1={adj_year})")
+                        return sid
+
+    # Fallback: оригинальное название без года
     if year:
         for show in shows:
-            title_orig = _normalize(show.get("titleOriginal") or show.get("title") or "")
-            if title_orig == orig:
+            t = _normalize(show.get("titleOriginal") or show.get("title") or "")
+            if t == orig:
                 logger.info(f"MyShows link: {mc.card_id} → show_id={show['id']} (catalog, no year)")
                 return show["id"]
 
-    logger.debug(f"MyShows link: {mc.card_id} not found for '{mc.original_title}' ({year})")
+    top = [(s.get("titleOriginal") or s.get("title"), s.get("year")) for s in shows[:3]]
+    logger.info(f"MyShows link: {mc.card_id} not found for '{mc.original_title}' / '{title_en}' ({year}), catalog top-3: {top}")
     return None
 
 
@@ -156,7 +235,7 @@ def _should_sync(mc: MediaCard) -> bool:
         # онгоинг: перепроверяем только если новый эпизод уже вышел и мы не синхронизировали после него
         synced_date = mc.episodes_synced_at.replace(tzinfo=None)
         try:
-            next_air = datetime.fromisoformat(mc.next_ep_air_date)
+            next_air = datetime.fromisoformat(mc.next_ep_air_date).replace(tzinfo=None)
             now = datetime.now()
             if next_air <= now and synced_date < next_air:
                 return True
@@ -207,11 +286,37 @@ async def sync_episodes(mc: MediaCard, db: AsyncSession, client: httpx.AsyncClie
     if not rows:
         return False
 
+    # Дедупликация: MyShows иногда возвращает один эпизод дважды
+    seen: set[tuple] = set()
+    deduped = []
+    for r in rows:
+        key = (r["season"], r["episode"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(r)
+    rows = deduped
+
     # Удаляем старые эпизоды шоу и вставляем заново
     await db.execute(delete(Episode).where(Episode.tmdb_show_id == mc.tmdb_id))
     await db.execute(pg_insert(Episode).values(rows))
 
     mc.episodes_synced_at = datetime.now(timezone.utc)
+
+    # imdb_id / kinopoisk_id — заполняем если ещё пустые
+    if not mc.imdb_id:
+        raw_imdb = result.get("imdbId")
+        if raw_imdb:
+            try:
+                mc.imdb_id = f"tt{int(raw_imdb):07d}"
+            except (ValueError, TypeError):
+                pass
+    if not mc.kinopoisk_id:
+        kp = result.get("kinopoiskId")
+        if kp:
+            try:
+                mc.kinopoisk_id = int(kp)
+            except (ValueError, TypeError):
+                pass
 
     # Если TMDB не знает о следующем эпизоде — берём дату из MyShows
     today = _date.today()
@@ -252,8 +357,59 @@ async def _ensure_synced(mc: MediaCard, db: AsyncSession) -> bool:
 
 # ─── Шаг 5: /api/episodes ────────────────────────────────────────────────────
 
+import asyncio
 import re
 _CARD_ID_RE = re.compile(r"^(\d+)_(movie|tv)$")
+
+async def _bg_refresh_card(card_id: str) -> None:
+    """Фоновое обновление эпизодов одной карточки (вызывается при открытии, раз в сутки)."""
+    from app.db.database import async_session_maker
+    from app.config import get_settings as _get_settings
+    try:
+        async with async_session_maker() as db:
+            mc = (await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))).scalar_one_or_none()
+
+            # Уже обновляли сегодня — пропускаем
+            if mc is not None and mc.episodes_synced_at is not None and mc.episodes_synced_at.date() >= _date.today():
+                return
+
+            if mc is None:
+                # Карточки нет в БД — создаём через TMDB API
+                m = _CARD_ID_RE.match(card_id)
+                if not m:
+                    return
+                tmdb_id = int(m.group(1))
+                cfg = _get_settings()
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(
+                        f"https://api.themoviedb.org/3/tv/{tmdb_id}",
+                        headers={"Authorization": cfg.TMDB_TOKEN},
+                        params={"language": "ru-RU"},
+                        timeout=15,
+                    )
+                    if r.status_code != 200:
+                        logger.debug(f"_bg_refresh_card {card_id}: TMDB {r.status_code}")
+                        return
+                    data = r.json()
+                    from app.main import upsert_tmdb_cache
+                    await upsert_tmdb_cache("tv", tmdb_id, data)
+                # Перечитываем после upsert
+                mc = (await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))).scalar_one_or_none()
+                if not mc:
+                    return
+
+            # Линкуем если нужно, затем синхронизируем (минуя _should_sync — rate limit снаружи)
+            async with httpx.AsyncClient() as client:
+                if mc.myshows_show_id is None:
+                    show_id = await find_myshows_show(mc, client)
+                    if show_id:
+                        mc.myshows_show_id = show_id
+                        await db.commit()
+                    else:
+                        return
+                await sync_episodes(mc, db, client)
+    except Exception as e:
+        logger.debug(f"_bg_refresh_card {card_id}: {e}")
 
 
 @router.get("/api/episodes")
@@ -307,6 +463,9 @@ async def api_episodes(
     # Пробуем синхронизировать и использовать таблицу episodes
     has_ep_table = await _ensure_synced(mc, db)
 
+    # Фоновый refresh раз в сутки при открытии карточки (линковка + обновление эпизодов)
+    asyncio.create_task(_bg_refresh_card(card_id))
+
     if has_ep_table:
         return await _episodes_from_table(mc, db, orig_title, watched_items, special_items, timecode_data, include_specials)
 
@@ -327,6 +486,7 @@ async def _episodes_from_table(
     Спешлы всегда включаются в список (с пометкой special=True),
     но не учитываются в счётчике watched/total на карточке.
     """
+    today = _date.today()
     query = (
         select(Episode)
         .where(Episode.tmdb_show_id == mc.tmdb_id)
@@ -343,6 +503,7 @@ async def _episodes_from_table(
         if snum == 0 and not include_specials:
             continue
 
+        future = bool(ep.air_date and ep.air_date > today)
         h = lampa_hash(build_episode_hash_string(snum, enum, orig_title))
         td = timecode_data.get(h, {})
         duration_sec = ep.duration_sec or td.get("duration") or ((mc.episode_run_time * 60) if mc.episode_run_time else None)
@@ -356,6 +517,7 @@ async def _episodes_from_table(
             "special":      ep.is_special or h in special_items,
             "percent":      td.get("percent", 0),
             "duration_sec": duration_sec,
+            "future":       future,
         })
 
     return {"episodes": episodes, "original_title": orig_title, "source": "myshows"}
@@ -417,3 +579,18 @@ def _episodes_from_tmdb(
             })
 
     return {"episodes": episodes, "original_title": orig_title, "source": "tmdb"}
+
+
+@router.get("/api/refresh-card-episodes")
+async def api_refresh_card_episodes(
+    card_id: str = Query(...),
+    device: "Device" = Depends(get_device_by_token),
+):
+    """Fire-and-forget обновление эпизодов одной карточки (из плагина при открытии)."""
+    if not device:
+        raise HTTPException(status_code=401)
+    m = _CARD_ID_RE.match(card_id)
+    if not m or m.group(2) != "tv":
+        return {"ok": False}
+    asyncio.create_task(_bg_refresh_card(card_id))
+    return {"ok": True}

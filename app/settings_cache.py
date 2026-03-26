@@ -44,6 +44,10 @@ DEFAULTS: dict[str, str] = {
     "default_timezone": "Europe/Moscow",
     # ── General ────────────────────────────────────────────────────────────────
     "daily_task_hour": "2",
+    # ── Episodes refresh ───────────────────────────────────────────────────────
+    "episodes_future_threshold": "5",   # мин. кол-во будущих серий; если меньше — обновляем
+    "episodes_refresh_batch":    "10",  # размер пачки при обработке шоу
+    "episodes_refresh_delay":    "2",   # пауза в секундах между пачками
     "watched_threshold": "90",
     "session_ttl_days": "30",
     "session_renew_days": "15",
@@ -103,6 +107,9 @@ LABELS: dict[str, str] = {
     "premium_extend_all_days": "Продлить всем Premium (дней)",
     "default_timezone": "Таймзона по умолчанию (fallback)",
     "daily_task_hour": "Час запуска ежедневной задачи (0–23)",
+    "episodes_future_threshold": "Эпизоды: порог будущих серий (меньше — обновляем)",
+    "episodes_refresh_batch": "Эпизоды: размер пачки при обновлении",
+    "episodes_refresh_delay": "Эпизоды: пауза между пачками (сек)",
     "watched_threshold": "Порог «просмотрено» (%)",
     "session_ttl_days": "Срок сессии (дней)",
     "session_renew_days": "Продление сессии (дней до истечения)",
@@ -165,6 +172,14 @@ GROUPS: list[tuple[str, list[str]]] = [
             "super_favorite_limit",
             "super_import_daily",
             "super_myshows_daily",
+        ],
+    ),
+    (
+        "Обновление эпизодов",
+        [
+            "episodes_future_threshold",
+            "episodes_refresh_batch",
+            "episodes_refresh_delay",
         ],
     ),
     (
