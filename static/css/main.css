@@ -787,6 +787,31 @@ figure { overflow-x: auto; }
 }
 .card-detail-back:hover { background: rgba(0,0,0,.75); color: #fff; }
 
+.card-detail-back-float {
+  position: fixed;
+  top: 110px;
+  left: .75rem;
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  background: rgba(0,0,0,.65);
+  color: #fff;
+  text-decoration: none;
+  font-size: .85rem;
+  padding: .3rem .7rem;
+  border-radius: 2em;
+  backdrop-filter: blur(6px);
+  transition: opacity .2s, background .15s;
+  opacity: 0;
+  pointer-events: none;
+}
+.card-detail-back-float.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.card-detail-back-float:hover { background: rgba(0,0,0,.85); color: #fff; }
+
 .card-detail-body {
   padding: 1.25rem var(--pico-spacing) 2rem;
 }

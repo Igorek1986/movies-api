@@ -24,6 +24,12 @@ const _WATCHED_THR   = 90;
   }
 
   document.getElementById('cardBack').href = backUrl;
+  const floatBack = document.getElementById('cardBackFloat');
+  if (floatBack) {
+    floatBack.href = backUrl;
+    const onScroll = () => floatBack.classList.toggle('visible', window.scrollY > 120);
+    window.addEventListener('scroll', onScroll, { passive: true });
+  }
 
   try {
     const res = await fetch(`/api/media-card/${encodeURIComponent(cardId)}`);
