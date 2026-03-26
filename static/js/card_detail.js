@@ -927,7 +927,7 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   // Предложить отметить предыдущие если не просмотрены
   async function offerMarkPrev(ep) {
     const idx  = sortedEps.findIndex(e => e.hash === ep.hash);
-    const prev = sortedEps.slice(0, idx).filter(e => getRowPct(e) < _WATCHED_THR);
+    const prev = sortedEps.slice(0, idx).filter(e => !e.special && getRowPct(e) < _WATCHED_THR);
     if (prev.length && confirm(`Отметить ${prev.length} предыд. серий как просмотренные?`))
       await batchSave(prev, 100);
   }
@@ -935,7 +935,7 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   // Предложить сбросить последующие если есть прогресс
   async function offerResetNext(ep) {
     const idx  = sortedEps.findIndex(e => e.hash === ep.hash);
-    const next = sortedEps.slice(idx + 1).filter(e => getRowPct(e) > 0);
+    const next = sortedEps.slice(idx + 1).filter(e => !e.special && getRowPct(e) > 0);
     if (next.length && confirm(`Сбросить прогресс ${next.length} следующих серий?`))
       await batchReset(next);
   }
@@ -1170,6 +1170,8 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
   specBtn.title       = ep.special ? 'Снять отметку спецэпизода' : 'Отметить как спецэпизод';
 
   specBtn.addEventListener('click', async () => {
+    const msg = ep.special ? 'Снять отметку спецэпизода?' : 'Отметить как спецэпизод?';
+    if (!confirm(msg)) return;
     specBtn.disabled = true;
     specBtn.textContent = '…';
     const url    = ep.special ? '/api/unmark-special' : '/api/mark-watched';
