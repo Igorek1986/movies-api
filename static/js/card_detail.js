@@ -1000,7 +1000,13 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
 
     const epList = document.createElement('div');
     epList.className = 'ep-list';
-    for (const ep of eps) {
+    const sortedSeasonEps = [...eps].sort((a, b) => {
+      if (a.air_date && b.air_date) return a.air_date < b.air_date ? -1 : a.air_date > b.air_date ? 1 : 0;
+      if (a.air_date) return -1;
+      if (b.air_date) return 1;
+      return a.episode - b.episode;
+    });
+    for (const ep of sortedSeasonEps) {
       epList.appendChild(_makeEpRow(
         ep, card, cardId, deviceId, profileId, pp,
         rowUpdaters, offerMarkPrev, offerResetNext
@@ -1026,10 +1032,19 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
   if (ep.special) row.dataset.special = '1';
   if (ep.future)  row.dataset.future  = '1';
 
-  // Метка серии
-  const labelEl = document.createElement('span');
-  labelEl.className   = 'ep-row-label';
-  labelEl.textContent = _epLabel(ep);
+  // Метка серии (для спешлов — отдельный заголовок на всю ширину)
+  let labelEl = null;
+  let specialTitleEl = null;
+  if (ep.special) {
+    specialTitleEl = document.createElement('span');
+    specialTitleEl.className   = 'ep-row-special-title';
+    specialTitleEl.textContent = ep.title || _epLabel(ep);
+    specialTitleEl.title       = ep.title || _epLabel(ep);
+  } else {
+    labelEl = document.createElement('span');
+    labelEl.className   = 'ep-row-label';
+    labelEl.textContent = _epLabel(ep);
+  }
 
   // Прогресс-бар
   const barWrap = document.createElement('div');
@@ -1148,10 +1163,11 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
     delBtn.disabled = false;
   });
 
-  // Кнопка Спецэпизод / Отменить
+  // Кнопка Спецэпизод (★ — отмечен, ☆ — не отмечен)
   const specBtn = document.createElement('button');
   specBtn.className   = `ep-row-spec${ep.special ? ' unmark' : ''}`;
-  specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+  specBtn.textContent = ep.special ? '★' : '☆';
+  specBtn.title       = ep.special ? 'Снять отметку спецэпизода' : 'Отметить как спецэпизод';
 
   specBtn.addEventListener('click', async () => {
     specBtn.disabled = true;
@@ -1166,16 +1182,19 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
       ep.special = !ep.special;
       updateRow(ep.special ? 100 : 0);
       specBtn.className   = `ep-row-spec${ep.special ? ' unmark' : ''}`;
-      specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+      specBtn.textContent = ep.special ? '★' : '☆';
+      specBtn.title       = ep.special ? 'Снять отметку спецэпизода' : 'Отметить как спецэпизод';
       if (ep.special) await offerMarkPrev(ep);
       else            await offerResetNext(ep);
     } else {
-      specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+      specBtn.textContent = ep.special ? '★' : '☆';
     }
     specBtn.disabled = false;
   });
 
-  row.appendChild(labelEl);
+  if (specialTitleEl) row.appendChild(specialTitleEl);
+  if (labelEl)        row.appendChild(labelEl);
+  if (specialTitleEl) row.appendChild(document.createElement('span')); // spacer под 5.5rem колонку
   row.appendChild(barWrap);
   row.appendChild(pctEl);
   row.appendChild(delBtn);

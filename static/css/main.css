@@ -898,12 +898,29 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   gap: .4rem;
   min-height: 1.8rem;
 }
+.ep-row[data-special="1"] {
+  row-gap: .15rem;
+}
+.ep-row-special-title {
+  grid-column: 1 / -1;
+  font-size: .78rem;
+  font-family: monospace;
+  color: var(--pico-muted-color);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 
 .ep-row-label {
   font-size: .78rem;
   font-family: monospace;
   color: var(--pico-muted-color);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .ep-row-bar {
@@ -942,21 +959,25 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
 .ep-row-del:hover:not(:disabled) { opacity: 1; }
 
 .ep-row-spec {
-  padding: .1rem .35rem;
-  font-size: .7rem;
-  border-radius: var(--pico-border-radius);
+  background: none;
+  border: none;
   cursor: pointer;
-  border: 1px solid var(--pico-muted-border-color);
-  background: transparent;
+  font-size: .95rem;
+  padding: 0 .1rem;
+  opacity: .35;
+  line-height: 1;
   color: var(--pico-muted-color);
-  white-space: nowrap;
 }
 .ep-row-spec:hover:not(:disabled) {
-  border-color: var(--pico-primary);
+  opacity: 1;
   color: var(--pico-primary);
 }
+.ep-row-spec.unmark {
+  opacity: .7;
+  color: var(--pico-ins-color, #1a7f3c);
+}
 .ep-row-spec.unmark:hover:not(:disabled) {
-  border-color: var(--pico-del-color, #c00);
+  opacity: 1;
   color: var(--pico-del-color, #c00);
 }
 
