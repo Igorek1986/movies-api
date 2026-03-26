@@ -283,7 +283,74 @@ function _catalogInitFilter(onDeviceChange) {
 // ─── Main catalog page (/) ────────────────────────────────────────────────────
 
 function initMainCatalog() {
-  _catalogInitFilter(null);  // при смене фильтра ссылки в строках обновит _deviceParams внутри createPosterCard
+  _catalogInitFilter(null);
+
+  const searchInput   = document.getElementById('globalSearch');
+  const catalogCont   = document.getElementById('catalogContainer');
+  const catalogLoad   = document.getElementById('catalogLoading');
+  const searchResults = document.getElementById('searchResults');
+  const searchLoading = document.getElementById('searchLoading');
+  const searchEmpty   = document.getElementById('searchEmpty');
+  const searchGrid    = document.getElementById('searchGrid');
+  if (!searchInput) return;
+
+  function esc3(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function createSearchCard(item) {
+    const title  = item.title || '';
+    const imgBase = window.IMAGE_BASE || 'https://image.tmdb.org';
+    const poster = item.poster_path ? `${imgBase}/t/p/w300${item.poster_path}` : '';
+    const cardId = `${item.id}_${item.media_type}`;
+    const back   = encodeURIComponent('/');
+    const a = document.createElement('a');
+    a.className = 'catalog-poster-card';
+    a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_catalogDeviceParams()}`;
+    if (poster) {
+      a.innerHTML = `<img src="${esc3(poster)}" alt="${esc3(title)}" loading="lazy">`;
+    } else {
+      a.innerHTML = `<div class="card-no-poster">${esc3(title)}</div>`;
+    }
+    a.innerHTML += `
+      <div class="catalog-poster-info">
+        <div class="catalog-poster-title">${esc3(title)}</div>
+        ${item.year ? `<div class="catalog-poster-year">${esc3(item.year)}</div>` : ''}
+        <div class="catalog-poster-cat">${esc3(item.category_name || '')}</div>
+      </div>`;
+    return a;
+  }
+
+  let _searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(_searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 3) {
+      searchResults.style.display = 'none';
+      catalogCont.style.display   = '';
+      if (catalogLoad) catalogLoad.style.display = '';
+      return;
+    }
+    catalogCont.style.display = 'none';
+    if (catalogLoad) catalogLoad.style.display = 'none';
+    searchResults.style.display = 'block';
+    _searchTimer = setTimeout(async () => {
+      searchLoading.style.display = 'block';
+      searchEmpty.style.display   = 'none';
+      searchGrid.innerHTML        = '';
+      try {
+        const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const data = await resp.json();
+        searchLoading.style.display = 'none';
+        const items = data.results || [];
+        if (!items.length) { searchEmpty.style.display = 'block'; return; }
+        for (const item of items) searchGrid.appendChild(createSearchCard(item));
+      } catch {
+        searchLoading.style.display = 'none';
+        searchEmpty.style.display   = 'block';
+      }
+    }, 400);
+  });
 }
 
 
@@ -336,7 +403,8 @@ function initCatalog(categoryId, imageBase) {
     searchInput.addEventListener('input', () => {
       clearTimeout(_searchTimer);
       _searchTimer = setTimeout(() => {
-        _searchQuery = searchInput.value.trim();
+        const v = searchInput.value.trim();
+        _searchQuery = v.length >= 3 ? v : '';
         resetGrid();
       }, 300);
     });

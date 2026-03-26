@@ -1257,6 +1257,12 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   overflow: hidden;
 }
 
+.catalog-poster-cat {
+  font-size: .6rem;
+  color: rgba(255,255,255,.5);
+  margin-top: .1rem;
+  font-style: italic;
+}
 .catalog-poster-year {
   font-size: .6rem;
   color: rgba(255,255,255,.6);
