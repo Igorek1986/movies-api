@@ -78,7 +78,7 @@
       const cardId = item.id + '_' + item.media_type;
       const poster = item.poster_path ? `<img src="${esc(imgBase + '/t/p/w300' + item.poster_path)}" alt="" loading="lazy">` : `<div class="card-no-poster">${esc(item.title)}</div>`;
       const a = document.createElement('a');
-      a.className = 'catalog-poster-card';
+      a.className = 'catalog-poster-card' + (item.media_type === 'tv' ? ' is-tv' : '');
       a.href = `/card/${encodeURIComponent(cardId)}?back=${encodeURIComponent(location.href)}`;
       a.innerHTML = `${poster}
         <div class="catalog-poster-info">

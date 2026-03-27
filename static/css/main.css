@@ -1304,6 +1304,24 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
 
 .catalog-poster-card:hover { transform: scale(1.04); }
 
+.catalog-poster-card.is-tv::before {
+  content: 'СЕРИАЛ';
+  position: absolute;
+  top: .45rem;
+  right: .45rem;
+  z-index: 2;
+  font-size: .55rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: .25rem .5rem;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(59,130,246,.85), rgba(139,92,246,.85));
+  color: #fff;
+  letter-spacing: .08em;
+  pointer-events: none;
+  box-shadow: 0 1px 6px rgba(0,0,0,.4);
+}
+
 .catalog-poster-card img {
   position: absolute;
   inset: 0;

@@ -50,7 +50,7 @@
 
     const a = document.createElement('a');
     a.id = 'card-' + cardId;
-    a.className = 'catalog-poster-card';
+    a.className = 'catalog-poster-card' + (mediaType === 'tv' ? ' is-tv' : '');
     a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_deviceParams()}`;
 
     if (poster) {
@@ -309,7 +309,7 @@ function initMainCatalog() {
     const back   = encodeURIComponent('/');
     const a = document.createElement('a');
     a.id = 'card-' + cardId;
-    a.className = 'catalog-poster-card';
+    a.className = 'catalog-poster-card' + (item.media_type === 'tv' ? ' is-tv' : '');
     a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_catalogDeviceParams()}`;
     if (poster) {
       a.innerHTML = `<img src="${esc3(poster)}" alt="${esc3(title)}" loading="lazy">`;
@@ -385,7 +385,7 @@ function initCatalog(categoryId, imageBase) {
 
     const a = document.createElement('a');
     a.id = 'card-' + cardId;
-    a.className = 'catalog-poster-card';
+    a.className = 'catalog-poster-card' + (mediaType === 'tv' ? ' is-tv' : '');
     a.href = `/card/${esc2(cardId)}?back=${back}${_catalogDeviceParams()}`;
 
     if (poster) {
