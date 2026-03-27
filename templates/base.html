@@ -135,8 +135,8 @@
       }
     }
 
-    // Начальная загрузка — фокус на первую карточку
-    _restoreOrFirst(null);
+    // Начальная загрузка — фокус на первую карточку (пропускаем на страницах с флагом)
+    if (!document.querySelector('[data-no-card-autofocus]')) _restoreOrFirst(null);
 
     // Сохраняем карточку перед переходом
     document.addEventListener('click', function (e) {
@@ -168,14 +168,14 @@
       var cards   = Array.from(document.querySelectorAll('.catalog-poster-card'));
       if (!cards.length) return;
 
-      // Если фокус не на карточке — фокусируем первую видимую
+      // Если фокус не на карточке — фокусируем первую видимую, центрируем вертикально
       if (!focused || !focused.classList.contains('catalog-poster-card')) {
         var first = cards.find(function (c) {
           var r = c.getBoundingClientRect();
           return r.top >= 0 && r.bottom <= window.innerHeight;
         }) || cards[0];
         e.preventDefault();
-        _focusCard(first, e.key);
+        _focusCard(first, 'initial');
         return;
       }
 
@@ -206,9 +206,10 @@
 
     function _focusCard(card, key) {
       card.focus({ preventScroll: true });
+      var initial  = key === 'initial';
       var vertical = key === 'ArrowUp' || key === 'ArrowDown';
       card.scrollIntoView({
-        block:    vertical ? 'center' : 'nearest',
+        block:    (initial || vertical) ? 'center' : 'nearest',
         inline:   vertical ? 'nearest' : 'center',
         behavior: 'smooth'
       });
