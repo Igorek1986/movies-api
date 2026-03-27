@@ -49,6 +49,7 @@
     const back      = encodeURIComponent('/');
 
     const a = document.createElement('a');
+    a.id = 'card-' + cardId;
     a.className = 'catalog-poster-card';
     a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_deviceParams()}`;
 
@@ -194,6 +195,8 @@
 })();
 
 
+
+
 // ─── Shared: prefs + profile tabs ────────────────────────────────────────────
 
 const _CATALOG_PREFS_KEY = 'history_prefs';
@@ -305,6 +308,7 @@ function initMainCatalog() {
     const cardId = `${item.id}_${item.media_type}`;
     const back   = encodeURIComponent('/');
     const a = document.createElement('a');
+    a.id = 'card-' + cardId;
     a.className = 'catalog-poster-card';
     a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_catalogDeviceParams()}`;
     if (poster) {
@@ -321,35 +325,49 @@ function initMainCatalog() {
     return a;
   }
 
-  let _searchTimer = null;
-  searchInput.addEventListener('input', () => {
-    clearTimeout(_searchTimer);
-    const q = searchInput.value.trim();
+  const SS_KEY = 'catalog_global_search';
+
+  function runSearch(q) {
     if (q.length < 3) {
+      sessionStorage.removeItem(SS_KEY);
       searchResults.style.display = 'none';
       catalogCont.style.display   = '';
       if (catalogLoad) catalogLoad.style.display = '';
       return;
     }
+    sessionStorage.setItem(SS_KEY, q);
     catalogCont.style.display = 'none';
     if (catalogLoad) catalogLoad.style.display = 'none';
     searchResults.style.display = 'block';
-    _searchTimer = setTimeout(async () => {
-      searchLoading.style.display = 'block';
-      searchEmpty.style.display   = 'none';
-      searchGrid.innerHTML        = '';
-      try {
-        const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-        const data = await resp.json();
+    searchLoading.style.display = 'block';
+    searchEmpty.style.display   = 'none';
+    searchGrid.innerHTML        = '';
+    fetch(`/api/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json())
+      .then(data => {
         searchLoading.style.display = 'none';
         const items = data.results || [];
         if (!items.length) { searchEmpty.style.display = 'block'; return; }
         for (const item of items) searchGrid.appendChild(createSearchCard(item));
-      } catch {
+      })
+      .catch(() => {
         searchLoading.style.display = 'none';
         searchEmpty.style.display   = 'block';
-      }
-    }, 400);
+      });
+  }
+
+  // Восстановить поиск при возврате назад
+  const saved = sessionStorage.getItem(SS_KEY);
+  if (saved) {
+    searchInput.value = saved;
+    runSearch(saved);
+  }
+
+  let _searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(_searchTimer);
+    const q = searchInput.value.trim();
+    _searchTimer = setTimeout(() => runSearch(q), 400);
   });
 }
 
@@ -366,6 +384,7 @@ function initCatalog(categoryId, imageBase) {
     const back      = encodeURIComponent('/catalog/' + categoryId);
 
     const a = document.createElement('a');
+    a.id = 'card-' + cardId;
     a.className = 'catalog-poster-card';
     a.href = `/card/${esc2(cardId)}?back=${back}${_catalogDeviceParams()}`;
 

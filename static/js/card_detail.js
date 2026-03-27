@@ -23,10 +23,23 @@ const _WATCHED_THR   = 90;
     } catch { /* ignore */ }
   }
 
-  document.getElementById('cardBack').href = backUrl;
+  function goBack(e) {
+    e.preventDefault();
+    if (history.length > 1) {
+      history.back();
+    } else {
+      location.href = backUrl;
+    }
+  }
+
+  const backBtn = document.getElementById('cardBack');
+  backBtn.href = backUrl;
+  backBtn.addEventListener('click', goBack);
+
   const floatBack = document.getElementById('cardBackFloat');
   if (floatBack) {
     floatBack.href = backUrl;
+    floatBack.addEventListener('click', goBack);
     const onScroll = () => floatBack.classList.toggle('visible', window.scrollY > 120);
     window.addEventListener('scroll', onScroll, { passive: true });
   }

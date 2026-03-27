@@ -3,7 +3,8 @@
 
 {% block body %}
 <main class="container" style="padding-top: 1.5rem; max-width: 1200px;">
-  <a href="/" class="catalog-back">← Каталог</a>
+  <a href="/" class="catalog-back" id="categoryBack">← Каталог</a>
+  <a href="/" class="card-detail-back-float" id="categoryBackFloat">← Каталог</a>
   <h2 style="margin-bottom: 1rem;">{{ category_name }}</h2>
 
   <div class="history-controls" style="margin-bottom: 1.25rem;">
@@ -35,5 +36,21 @@
 <script src="/static/js/catalog.js"></script>
 <script>
 initCatalog({{ category | tojson }}, {{ image_base | tojson }});
+
+function _catGoBack(e) {
+  e.preventDefault();
+  if (history.length > 1) history.back(); else location.href = '/';
+}
+
+const _catBack = document.getElementById('categoryBack');
+const _catBackFloat = document.getElementById('categoryBackFloat');
+_catBack.addEventListener('click', _catGoBack);
+_catBackFloat.addEventListener('click', _catGoBack);
+
+new IntersectionObserver(function(entries) {
+  var visible = entries[0].isIntersecting;
+  _catBack.classList.toggle('hidden', !visible);
+  _catBackFloat.classList.toggle('visible', !visible);
+}, { threshold: 0.5 }).observe(_catBack);
 </script>
 {% endblock %}

@@ -1299,10 +1299,12 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   color: var(--pico-muted-color);
   font-size: .82rem;
   padding: .5rem;
-  height: 210px;
+  height: 300px; /* = 200px card × 3/2 */
   display: flex;
   align-items: center;
 }
+@media (min-width: 480px) { .catalog-row-loading, .catalog-row-empty { height: 345px; } } /* 230px × 3/2 */
+@media (min-width: 768px) { .catalog-row-loading, .catalog-row-empty { height: 270px; } } /* 180px × 3/2 */
 
 /* Catalog category page grid */
 .catalog-grid {
@@ -1322,9 +1324,15 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   display: inline-flex;
   align-items: center;
   gap: .3rem;
-  color: var(--pico-muted-color);
+  color: #fff;
   text-decoration: none;
-  font-size: .88rem;
+  font-size: .85rem;
   margin-bottom: 1rem;
+  margin-left: 1em;
+  padding: .3rem .7rem;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 2em;
+  transition: opacity .2s, color .15s;
 }
-.catalog-back:hover { color: var(--pico-color); }
+.catalog-back:hover { color: #fff; border-color: #fff; }
+.catalog-back.hidden { opacity: 0; pointer-events: none; }
