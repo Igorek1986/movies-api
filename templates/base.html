@@ -140,7 +140,7 @@
 
     // Сохраняем карточку перед переходом
     document.addEventListener('click', function (e) {
-      var card = e.target.closest('.catalog-poster-card');
+      var card = e.target.closest('.catalog-poster-card, a.cast-card');
       if (card && card.id) sessionStorage.setItem(_FOCUS_KEY, card.id);
     });
 
@@ -165,11 +165,12 @@
       if (!KEYS[e.key]) return;
 
       var focused = document.activeElement;
-      var cards   = Array.from(document.querySelectorAll('.catalog-poster-card'));
+      var cards   = Array.from(document.querySelectorAll('.catalog-poster-card, a.cast-card'));
       if (!cards.length) return;
 
-      // Если фокус не на карточке — фокусируем первую видимую, центрируем вертикально
-      if (!focused || !focused.classList.contains('catalog-poster-card')) {
+      // Если фокус не на карточке/актёре — фокусируем первую видимую, центрируем вертикально
+      var onCard = focused && (focused.classList.contains('catalog-poster-card') || focused.classList.contains('cast-card'));
+      if (!onCard) {
         var first = cards.find(function (c) {
           var r = c.getBoundingClientRect();
           return r.top >= 0 && r.bottom <= window.innerHeight;

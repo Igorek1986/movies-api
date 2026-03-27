@@ -868,6 +868,7 @@ figure { overflow-x: auto; }
 }
 .cast-card {
   flex-shrink: 0;
+  position: relative;
   width: 80px;
   text-align: center;
   text-decoration: none;
@@ -875,6 +876,27 @@ figure { overflow-x: auto; }
   transition: opacity .15s;
 }
 a.cast-card:hover { opacity: .75; }
+.card-cast-list a.cast-card:focus,
+.card-cast-list a.cast-card:focus-visible { outline: none; box-shadow: none; opacity: 1; }
+
+/* Анимированная рамка вокруг фото актёра (80×80px, круг) */
+a.cast-card::before,
+a.cast-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.9);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.35);
+  pointer-events: none;
+  z-index: 2;
+  transition: clip-path .4s ease;
+}
+a.cast-card::before { clip-path: inset(0 100% 49% 0); }
+a.cast-card::after  { clip-path: inset(49% 0 0 100%); }
+a.cast-card:focus-visible::before { clip-path: inset(0 0% 49% 0); }
+a.cast-card:focus-visible::after  { clip-path: inset(49% 0 0 0%); }
 .cast-card img, .cast-card .cast-no-photo {
   width: 80px;
   height: 80px;

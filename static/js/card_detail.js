@@ -73,7 +73,7 @@ const _WATCHED_THR   = 90;
           const href = p.id ? `/actor/${p.id}?back=${encodeURIComponent(location.href)}` : null;
           const inner = `${photo}<div class="cast-name">${p.name}</div>${p.character ? `<div class="cast-character">${p.character}</div>` : ''}`;
           return href
-            ? `<a class="cast-card" href="${href}">${inner}</a>`
+            ? `<a id="cast-${p.id}" class="cast-card" href="${href}">${inner}</a>`
             : `<div class="cast-card">${inner}</div>`;
         }).join('');
         section.style.display = 'block';
