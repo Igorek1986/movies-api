@@ -50,7 +50,7 @@
 
     const a = document.createElement('a');
     a.id = 'card-' + cardId;
-    a.className = 'catalog-poster-card' + (mediaType === 'tv' ? ' is-tv' : '');
+    a.className = 'catalog-poster-card';
     a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_deviceParams()}`;
 
     if (poster) {
@@ -58,6 +58,7 @@
     } else {
       a.innerHTML = `<div class="card-no-poster">${esc(title)}</div>`;
     }
+    if (mediaType === 'tv') a.innerHTML += '<span class="card-tv-badge">СЕРИАЛ</span>';
     a.innerHTML += `
       <div class="catalog-poster-info">
         <div class="catalog-poster-title">${esc(title)}</div>
@@ -309,13 +310,14 @@ function initMainCatalog() {
     const back   = encodeURIComponent('/');
     const a = document.createElement('a');
     a.id = 'card-' + cardId;
-    a.className = 'catalog-poster-card' + (item.media_type === 'tv' ? ' is-tv' : '');
+    a.className = 'catalog-poster-card';
     a.href = `/card/${encodeURIComponent(cardId)}?back=${back}${_catalogDeviceParams()}`;
     if (poster) {
       a.innerHTML = `<img src="${esc3(poster)}" alt="${esc3(title)}" loading="lazy">`;
     } else {
       a.innerHTML = `<div class="card-no-poster">${esc3(title)}</div>`;
     }
+    if (item.media_type === 'tv') a.innerHTML += '<span class="card-tv-badge">СЕРИАЛ</span>';
     a.innerHTML += `
       <div class="catalog-poster-info">
         <div class="catalog-poster-title">${esc3(title)}</div>
@@ -385,7 +387,7 @@ function initCatalog(categoryId, imageBase) {
 
     const a = document.createElement('a');
     a.id = 'card-' + cardId;
-    a.className = 'catalog-poster-card' + (mediaType === 'tv' ? ' is-tv' : '');
+    a.className = 'catalog-poster-card';
     a.href = `/card/${esc2(cardId)}?back=${back}${_catalogDeviceParams()}`;
 
     if (poster) {
@@ -393,6 +395,7 @@ function initCatalog(categoryId, imageBase) {
     } else {
       a.innerHTML = `<div class="card-no-poster">${esc2(title)}</div>`;
     }
+    if (mediaType === 'tv') a.innerHTML += '<span class="card-tv-badge">СЕРИАЛ</span>';
     a.innerHTML += `
       <div class="catalog-poster-info">
         <div class="catalog-poster-title">${esc2(title)}</div>

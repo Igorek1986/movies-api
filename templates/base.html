@@ -115,6 +115,77 @@
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
   <script>
+    // ─── Auto-focus первой карточки при загрузке ─────────────────────────────
+    (function () {
+      function tryFocus() {
+        var card = document.querySelector('.catalog-poster-card');
+        if (card) { card.focus({ preventScroll: true }); return true; }
+        return false;
+      }
+      if (!tryFocus()) {
+        var obs = new MutationObserver(function () {
+          if (tryFocus()) obs.disconnect();
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+      }
+    })();
+
+    // ─── Keyboard navigation for poster cards ────────────────────────────────
+    document.addEventListener('keydown', function (e) {
+      var KEYS = { ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1 };
+      if (!KEYS[e.key]) return;
+
+      var focused = document.activeElement;
+      var cards   = Array.from(document.querySelectorAll('.catalog-poster-card'));
+      if (!cards.length) return;
+
+      // Если фокус не на карточке — фокусируем первую видимую
+      if (!focused || !focused.classList.contains('catalog-poster-card')) {
+        var first = cards.find(function (c) {
+          var r = c.getBoundingClientRect();
+          return r.top >= 0 && r.bottom <= window.innerHeight;
+        }) || cards[0];
+        e.preventDefault();
+        _focusCard(first, e.key);
+        return;
+      }
+
+      e.preventDefault();
+      var r0 = focused.getBoundingClientRect();
+      var cx = r0.left + r0.width  / 2;
+      var cy = r0.top  + r0.height / 2;
+
+      var best = null, bestScore = Infinity;
+      cards.forEach(function (card) {
+        if (card === focused) return;
+        var r   = card.getBoundingClientRect();
+        var ncx = r.left + r.width  / 2;
+        var ncy = r.top  + r.height / 2;
+        var dx  = ncx - cx, dy = ncy - cy;
+        var primary, perp;
+        if      (e.key === 'ArrowRight' && dx > 0)  { primary = dx;  perp = Math.abs(dy); }
+        else if (e.key === 'ArrowLeft'  && dx < 0)  { primary = -dx; perp = Math.abs(dy); }
+        else if (e.key === 'ArrowDown'  && dy > 0)  { primary = dy;  perp = Math.abs(dx); }
+        else if (e.key === 'ArrowUp'    && dy < 0)  { primary = -dy; perp = Math.abs(dx); }
+        else return;
+        var score = primary + perp * 3;
+        if (score < bestScore) { bestScore = score; best = card; }
+      });
+
+      if (best) _focusCard(best, e.key);
+    });
+
+    function _focusCard(card, key) {
+      card.focus({ preventScroll: true });
+      var vertical = key === 'ArrowUp' || key === 'ArrowDown';
+      card.scrollIntoView({
+        block:    vertical ? 'center' : 'nearest',
+        inline:   vertical ? 'nearest' : 'center',
+        behavior: 'smooth'
+      });
+    }
+  </script>
+  <script>
     // ─── Back button: static + floating ──────────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
       var staticBtn = document.querySelector('[data-back-btn]');

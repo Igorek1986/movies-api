@@ -90,8 +90,9 @@ const _WATCHED_THR   = 90;
           const poster = item.poster_path
             ? `<img src="${imgBase}/t/p/w300${item.poster_path}" alt="" loading="lazy">`
             : `<div class="card-no-poster">${_esc(item.title)}</div>`;
-          return `<a class="catalog-poster-card${item.media_type === 'tv' ? ' is-tv' : ''}" href="/card/${encodeURIComponent(recCardId)}?back=${encodeURIComponent(location.href)}">
+          return `<a class="catalog-poster-card" href="/card/${encodeURIComponent(recCardId)}?back=${encodeURIComponent(location.href)}">
             ${poster}
+            ${item.media_type === 'tv' ? '<span class="card-tv-badge">СЕРИАЛ</span>' : ''}
             <div class="catalog-poster-info">
               <div class="catalog-poster-title">${_esc(item.title)}</div>
               ${item.year ? `<div class="catalog-poster-year">${_esc(item.year)}</div>` : ''}

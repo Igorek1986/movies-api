@@ -1304,8 +1304,29 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
 
 .catalog-poster-card:hover { transform: scale(1.04); }
 
-.catalog-poster-card.is-tv::before {
-  content: 'СЕРИАЛ';
+/* Анимированная рамка при фокусе — два псевдоэлемента, как у кнопки назад */
+.catalog-poster-card:focus-visible {
+  outline: none;
+  z-index: 2;
+}
+.catalog-poster-card::before,
+.catalog-poster-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  border: 3px solid rgba(255,255,255,.95);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.35);
+  pointer-events: none;
+  z-index: 10;
+  transition: clip-path .4s ease;
+}
+.catalog-poster-card::before { clip-path: inset(0 100% 49% 0); }
+.catalog-poster-card::after  { clip-path: inset(49% 0 0 100%); }
+.catalog-poster-card:focus-visible::before { clip-path: inset(0 0% 49% 0); }
+.catalog-poster-card:focus-visible::after  { clip-path: inset(49% 0 0 0%); }
+
+.card-tv-badge {
   position: absolute;
   top: .45rem;
   right: .45rem;

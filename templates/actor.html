@@ -78,9 +78,10 @@
       const cardId = item.id + '_' + item.media_type;
       const poster = item.poster_path ? `<img src="${esc(imgBase + '/t/p/w300' + item.poster_path)}" alt="" loading="lazy">` : `<div class="card-no-poster">${esc(item.title)}</div>`;
       const a = document.createElement('a');
-      a.className = 'catalog-poster-card' + (item.media_type === 'tv' ? ' is-tv' : '');
+      a.className = 'catalog-poster-card';
       a.href = `/card/${encodeURIComponent(cardId)}?back=${encodeURIComponent(location.href)}`;
       a.innerHTML = `${poster}
+        ${item.media_type === 'tv' ? '<span class="card-tv-badge">СЕРИАЛ</span>' : ''}
         <div class="catalog-poster-info">
           <div class="catalog-poster-title">${esc(item.title)}</div>
           ${item.year ? `<div class="catalog-poster-year">${esc(item.year)}</div>` : ''}
