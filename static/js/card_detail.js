@@ -65,11 +65,11 @@ const _WATCHED_THR   = 90;
           const photo = p.profile_path
             ? `<img src="${imgBase}/t/p/w185${p.profile_path}" alt="" loading="lazy">`
             : `<div class="cast-no-photo">👤</div>`;
-          return `<div class="cast-card">
-            ${photo}
-            <div class="cast-name">${p.name}</div>
-            ${p.character ? `<div class="cast-character">${p.character}</div>` : ''}
-          </div>`;
+          const href = p.id ? `/actor/${p.id}?back=${encodeURIComponent(location.href)}` : null;
+          const inner = `${photo}<div class="cast-name">${p.name}</div>${p.character ? `<div class="cast-character">${p.character}</div>` : ''}`;
+          return href
+            ? `<a class="cast-card" href="${href}">${inner}</a>`
+            : `<div class="cast-card">${inner}</div>`;
         }).join('');
         section.style.display = 'block';
       })

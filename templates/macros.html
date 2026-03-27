@@ -1,0 +1,4 @@
+{% macro back_button(label="← Назад", fallback="/") %}
+<a href="{{ fallback }}" class="catalog-back" data-back-btn data-back-fallback="{{ fallback }}">{{ label }}</a>
+<a href="{{ fallback }}" class="card-detail-back-float" data-back-float>{{ label }}</a>
+{% endmacro %}

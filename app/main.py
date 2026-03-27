@@ -849,6 +849,23 @@ async def catalog_category_page(
     })
 
 
+@app.get("/actor/{person_id}", response_class=HTMLResponse)
+async def actor_page(
+    person_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    return _templates.TemplateResponse("actor.html", {
+        "request": request,
+        "user": current_user,
+        "person_id": person_id,
+        "image_base": image_base,
+    })
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(
     request: Request,

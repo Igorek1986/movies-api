@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -978,6 +979,7 @@ async def api_media_card_credits(
     data = resp.json()
     cast = [
         {
+            "id": p.get("id"),
             "name": p.get("name") or "",
             "character": p.get("character") or "",
             "profile_path": p.get("profile_path") or "",
@@ -986,6 +988,72 @@ async def api_media_card_credits(
         if p.get("name")
     ]
     return {"cast": cast}
+
+
+# ---------------------------------------------------------------------------
+# API: страница актёра — информация + фильмография
+# ---------------------------------------------------------------------------
+
+@router.get("/api/actor/{person_id}")
+async def api_actor(
+    person_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        raise HTTPException(status_code=503)
+
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    params  = {"language": "ru-RU"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            person_resp, credits_resp = await asyncio.gather(
+                client.get(f"https://api.themoviedb.org/3/person/{person_id}", headers=headers, params=params),
+                client.get(f"https://api.themoviedb.org/3/person/{person_id}/combined_credits", headers=headers, params=params),
+            )
+    except Exception:
+        raise HTTPException(status_code=502)
+
+    if person_resp.status_code != 200:
+        raise HTTPException(status_code=404)
+
+    person  = person_resp.json()
+    credits = credits_resp.json() if credits_resp.status_code == 200 else {}
+
+    cast = credits.get("cast") or []
+    # Сортируем по популярности, убираем дубликаты по id
+    seen: set = set()
+    works = []
+    for item in sorted(cast, key=lambda x: x.get("popularity") or 0, reverse=True):
+        iid = item.get("id")
+        if iid in seen:
+            continue
+        seen.add(iid)
+        media_type = item.get("media_type", "movie")
+        title = item.get("title") or item.get("name") or ""
+        works.append({
+            "id":             iid,
+            "media_type":     media_type,
+            "title":          title,
+            "original_title": item.get("original_title") or item.get("original_name") or "",
+            "poster_path":    item.get("poster_path") or "",
+            "year":           (item.get("release_date") or item.get("first_air_date") or "")[:4],
+            "vote_average":   item.get("vote_average") or 0,
+            "character":      item.get("character") or "",
+        })
+
+    return {
+        "id":           person.get("id"),
+        "name":         person.get("name") or "",
+        "biography":    person.get("biography") or "",
+        "birthday":     person.get("birthday") or "",
+        "profile_path": person.get("profile_path") or "",
+        "works":        works[:100],
+    }
 
 
 # ---------------------------------------------------------------------------

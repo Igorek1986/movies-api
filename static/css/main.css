@@ -868,7 +868,11 @@ figure { overflow-x: auto; }
   flex-shrink: 0;
   width: 80px;
   text-align: center;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity .15s;
 }
+a.cast-card:hover { opacity: .75; }
 .cast-card img, .cast-card .cast-no-photo {
   width: 80px;
   height: 80px;
