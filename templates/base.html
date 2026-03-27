@@ -135,8 +135,13 @@
       }
     }
 
-    // Начальная загрузка — фокус на первую карточку (пропускаем на страницах с флагом)
-    if (!document.querySelector('[data-no-card-autofocus]')) _restoreOrFirst(null);
+    // Начальная загрузка: восстанавливаем сохранённую карточку или фокусируем первую
+    var _savedId = sessionStorage.getItem(_FOCUS_KEY);
+    if (_savedId) {
+      _restoreOrFirst(_savedId);  // всегда восстанавливаем если есть сохранённая
+    } else if (!document.querySelector('[data-no-card-autofocus]')) {
+      _restoreOrFirst(null);      // автофокус только на страницах без флага
+    }
 
     // Сохраняем карточку перед переходом
     document.addEventListener('click', function (e) {
@@ -185,9 +190,14 @@
       var cx = r0.left + r0.width  / 2;
       var cy = r0.top  + r0.height / 2;
 
+      var isHoriz = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      var focusedRow = isHoriz ? focused.closest('.catalog-row, .catalog-grid, .card-cast-list, .catalog-grid--recs') : null;
+
       var best = null, bestScore = Infinity;
       cards.forEach(function (card) {
         if (card === focused) return;
+        // Для горизонтальных стрелок — только карточки того же ряда/секции
+        if (isHoriz && focusedRow && !focusedRow.contains(card)) return;
         var r   = card.getBoundingClientRect();
         var ncx = r.left + r.width  / 2;
         var ncy = r.top  + r.height / 2;
@@ -202,7 +212,53 @@
         if (score < bestScore) { bestScore = score; best = card; }
       });
 
-      if (best) _focusCard(best, e.key);
+      if (best) {
+        _focusCard(best, e.key);
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        // Перенос строки в grid-сетке (страница категории)
+        var grid = focused.closest('.catalog-grid');
+        if (grid) {
+          var gridCards = Array.from(grid.querySelectorAll('.catalog-poster-card'));
+          var halfH = r0.height / 2;
+          var wrap;
+          if (e.key === 'ArrowRight') {
+            // Первая карточка БЛИЖАЙШЕЙ следующей строки
+            var below = gridCards.filter(function (c) {
+              return c.getBoundingClientRect().top > cy + halfH;
+            });
+            if (below.length) {
+              var minTop = Math.min.apply(null, below.map(function (c) { return c.getBoundingClientRect().top; }));
+              var nextRow = below.filter(function (c) { return c.getBoundingClientRect().top <= minTop + halfH; });
+              wrap = nextRow.reduce(function (a, b) {
+                return a.getBoundingClientRect().left <= b.getBoundingClientRect().left ? a : b;
+              });
+            }
+          } else {
+            // Последняя карточка БЛИЖАЙШЕЙ предыдущей строки
+            var above = gridCards.filter(function (c) {
+              return c.getBoundingClientRect().bottom < cy - halfH;
+            });
+            if (above.length) {
+              var maxTop = Math.max.apply(null, above.map(function (c) { return c.getBoundingClientRect().top; }));
+              var prevRow = above.filter(function (c) { return c.getBoundingClientRect().top >= maxTop - halfH; });
+              wrap = prevRow.reduce(function (a, b) {
+                return a.getBoundingClientRect().right >= b.getBoundingClientRect().right ? a : b;
+              });
+            }
+          }
+          if (wrap) _focusCard(wrap, e.key === 'ArrowRight' ? 'ArrowDown' : 'ArrowUp');
+        } else if (e.key === 'ArrowRight') {
+          // Последняя карточка в ряду каталога — открываем категорию
+          var row = focused.closest('.catalog-row');
+          if (row) {
+            var more = row.querySelector('.catalog-row-more');
+            if (more) {
+              if (focused.id) sessionStorage.setItem(_FOCUS_KEY, focused.id);
+              location.href = more.href;
+            }
+          }
+        }
+      }
     });
 
     function _focusCard(card, key) {
