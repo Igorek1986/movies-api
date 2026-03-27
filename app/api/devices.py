@@ -991,6 +991,111 @@ async def api_media_card_credits(
 
 
 # ---------------------------------------------------------------------------
+# API: рекомендации похожих фильмов/сериалов
+# ---------------------------------------------------------------------------
+
+@router.get("/api/media-card/{card_id}/recommendations")
+async def api_media_card_recommendations(
+    card_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    m = _CARD_ID_RE.match(card_id)
+    if not m:
+        raise HTTPException(status_code=400)
+
+    tmdb_id, media_type = int(m.group(1)), m.group(2)
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        return {"items": []}
+
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    base = "https://api.themoviedb.org/3"
+
+    def _parse_items(results: list, mtype: str) -> list:
+        out = []
+        for r in results:
+            title = r.get("title") or r.get("name") or ""
+            if not title:
+                continue
+            date = r.get("release_date") or r.get("first_air_date") or ""
+            out.append({
+                "id": r.get("id"),
+                "media_type": mtype,
+                "title": title,
+                "year": date[:4] if date else "",
+                "poster_path": r.get("poster_path") or "",
+            })
+        return out
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Параллельно: детали карточки + рекомендации TMDB
+            detail_resp, rec_resp = await asyncio.gather(
+                client.get(f"{base}/{media_type}/{tmdb_id}", headers=headers, params={"language": "ru-RU"}),
+                client.get(f"{base}/{media_type}/{tmdb_id}/recommendations", headers=headers, params={"language": "ru-RU", "page": 1}),
+            )
+
+            orig_lang = ""
+            genre_ids = []
+            if detail_resp.status_code == 200:
+                detail = detail_resp.json()
+                orig_lang = detail.get("original_language") or ""
+                genre_ids = [g["id"] for g in (detail.get("genres") or [])]
+
+            rec_results = []
+            if rec_resp.status_code == 200:
+                rec_results = rec_resp.json().get("results") or []
+
+            # Если русский контент — дополнительно запрашиваем Discover с теми же жанрами
+            ru_results = []
+            if orig_lang == "ru":
+                discover_params = {
+                    "language": "ru-RU",
+                    "with_original_language": "ru",
+                    "sort_by": "popularity.desc",
+                    "page": 1,
+                    "vote_count.gte": 50,
+                }
+                if genre_ids:
+                    discover_params["with_genres"] = ",".join(str(g) for g in genre_ids[:2])
+                disc_resp = await client.get(
+                    f"{base}/discover/{media_type}",
+                    headers=headers,
+                    params=discover_params,
+                )
+                if disc_resp.status_code == 200:
+                    ru_results = disc_resp.json().get("results") or []
+
+    except Exception:
+        return {"items": []}
+
+    # Собираем итоговый список: сначала русские (если есть), затем рекомендации
+    seen_ids: set = {tmdb_id}  # исключаем саму карточку
+    items: list = []
+
+    for r in ru_results:
+        if len(items) >= 6:
+            break
+        if r.get("id") in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        items.extend(_parse_items([r], media_type))
+
+    for r in rec_results:
+        if len(items) >= 10:
+            break
+        if r.get("id") in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        items.extend(_parse_items([r], media_type))
+
+    return {"items": items}
+
+
+# ---------------------------------------------------------------------------
 # API: страница актёра — информация + фильмография
 # ---------------------------------------------------------------------------
 

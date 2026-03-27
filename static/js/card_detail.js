@@ -2,6 +2,8 @@
  * card_detail.js — полная страница карточки фильма/сериала.
  */
 
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 const _CD_IMG_BASE   = (window.TMDB_IMAGE_BASE || 'https://image.tmdb.org');
 const _BACKDROP_BASE = _CD_IMG_BASE + '/t/p/w780';
 const _WATCHED_THR   = 90;
@@ -70,6 +72,31 @@ const _WATCHED_THR   = 90;
           return href
             ? `<a class="cast-card" href="${href}">${inner}</a>`
             : `<div class="cast-card">${inner}</div>`;
+        }).join('');
+        section.style.display = 'block';
+      })
+      .catch(() => {});
+
+    // Рекомендации — fire-and-forget
+    fetch(`/api/media-card/${encodeURIComponent(cardId)}/recommendations`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.items || !data.items.length) return;
+        const section  = document.getElementById('cardRecsSection');
+        const list     = document.getElementById('cardRecsList');
+        const imgBase  = window.TMDB_IMAGE_BASE || window.IMAGE_BASE || 'https://image.tmdb.org';
+        list.innerHTML = data.items.map(item => {
+          const recCardId = item.id + '_' + item.media_type;
+          const poster = item.poster_path
+            ? `<img src="${imgBase}/t/p/w300${item.poster_path}" alt="" loading="lazy">`
+            : `<div class="card-no-poster">${_esc(item.title)}</div>`;
+          return `<a class="catalog-poster-card" href="/card/${encodeURIComponent(recCardId)}?back=${encodeURIComponent(location.href)}">
+            ${poster}
+            <div class="catalog-poster-info">
+              <div class="catalog-poster-title">${_esc(item.title)}</div>
+              ${item.year ? `<div class="catalog-poster-year">${_esc(item.year)}</div>` : ''}
+            </div>
+          </a>`;
         }).join('');
         section.style.display = 'block';
       })

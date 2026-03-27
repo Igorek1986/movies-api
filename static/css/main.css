@@ -1370,6 +1370,24 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   width: 100%;
 }
 
+/* Рекомендации в карточке: горизонтальный скролл */
+.catalog-grid--recs {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: .6rem;
+  padding-bottom: .5rem;
+  grid-template-columns: none;
+  scrollbar-width: thin;
+}
+.catalog-grid--recs .catalog-poster-card {
+  flex: 0 0 130px;
+  width: 130px;
+}
+@media (min-width: 480px) {
+  .catalog-grid--recs .catalog-poster-card { flex: 0 0 150px; width: 150px; }
+}
+
 .catalog-back {
   display: inline-flex;
   align-items: center;
