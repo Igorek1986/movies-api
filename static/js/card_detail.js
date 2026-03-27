@@ -2,6 +2,8 @@
  * card_detail.js — полная страница карточки фильма/сериала.
  */
 
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 const _CD_IMG_BASE   = (window.TMDB_IMAGE_BASE || 'https://image.tmdb.org');
 const _BACKDROP_BASE = _CD_IMG_BASE + '/t/p/w780';
 const _WATCHED_THR   = 90;
@@ -23,7 +25,29 @@ const _WATCHED_THR   = 90;
     } catch { /* ignore */ }
   }
 
-  document.getElementById('cardBack').href = backUrl;
+  function goBack(e) {
+    e.preventDefault();
+    if (history.length > 1) {
+      history.back();
+    } else {
+      location.href = backUrl;
+    }
+  }
+
+  const backBtn = document.getElementById('cardBack');
+  backBtn.href = backUrl;
+  backBtn.addEventListener('click', goBack);
+
+  const floatBack = document.getElementById('cardBackFloat');
+  if (floatBack) {
+    floatBack.href = backUrl;
+    floatBack.addEventListener('click', goBack);
+    const onScroll = () => floatBack.classList.toggle('visible', window.scrollY > 120);
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    const header = document.querySelector('.site-header');
+    if (header) floatBack.style.top = (header.offsetHeight + 12) + 'px';
+  }
 
   try {
     const res = await fetch(`/api/media-card/${encodeURIComponent(cardId)}`);
@@ -33,6 +57,54 @@ const _WATCHED_THR   = 90;
     }
     const card = await res.json();
     _renderCard(card, cardId);
+
+    // Актёры — загружаем параллельно, не блокируем основной рендер
+    fetch(`/api/media-card/${encodeURIComponent(cardId)}/credits`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.cast || !data.cast.length) return;
+        const section = document.getElementById('cardCastSection');
+        const list    = document.getElementById('cardCastList');
+        const imgBase = window.TMDB_IMAGE_BASE || window.IMAGE_BASE || 'https://image.tmdb.org';
+        list.innerHTML = data.cast.map(p => {
+          const photo = p.profile_path
+            ? `<img src="${imgBase}/t/p/w185${p.profile_path}" alt="" loading="lazy">`
+            : `<div class="cast-no-photo">👤</div>`;
+          const href = p.id ? `/actor/${p.id}?back=${encodeURIComponent(location.href)}` : null;
+          const inner = `${photo}<div class="cast-name">${p.name}</div>${p.character ? `<div class="cast-character">${p.character}</div>` : ''}`;
+          return href
+            ? `<a id="cast-${p.id}" class="cast-card" href="${href}">${inner}</a>`
+            : `<div class="cast-card">${inner}</div>`;
+        }).join('');
+        section.style.display = 'block';
+      })
+      .catch(() => {});
+
+    // Рекомендации — fire-and-forget
+    fetch(`/api/media-card/${encodeURIComponent(cardId)}/recommendations`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.items || !data.items.length) return;
+        const section  = document.getElementById('cardRecsSection');
+        const list     = document.getElementById('cardRecsList');
+        const imgBase  = window.TMDB_IMAGE_BASE || window.IMAGE_BASE || 'https://image.tmdb.org';
+        list.innerHTML = data.items.map(item => {
+          const recCardId = item.id + '_' + item.media_type;
+          const poster = item.poster_path
+            ? `<img src="${imgBase}/t/p/w300${item.poster_path}" alt="" loading="lazy">`
+            : `<div class="card-no-poster">${_esc(item.title)}</div>`;
+          return `<a class="catalog-poster-card" href="/card/${encodeURIComponent(recCardId)}?back=${encodeURIComponent(location.href)}">
+            ${poster}
+            ${item.media_type === 'tv' ? '<span class="card-tv-badge">СЕРИАЛ</span>' : ''}
+            <div class="catalog-poster-info">
+              <div class="catalog-poster-title">${_esc(item.title)}</div>
+              ${item.year ? `<div class="catalog-poster-year">${_esc(item.year)}</div>` : ''}
+            </div>
+          </a>`;
+        }).join('');
+        section.style.display = 'block';
+      })
+      .catch(() => {});
 
     if (!deviceId) return;
 
@@ -927,7 +999,7 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   // Предложить отметить предыдущие если не просмотрены
   async function offerMarkPrev(ep) {
     const idx  = sortedEps.findIndex(e => e.hash === ep.hash);
-    const prev = sortedEps.slice(0, idx).filter(e => getRowPct(e) < _WATCHED_THR);
+    const prev = sortedEps.slice(0, idx).filter(e => !e.special && getRowPct(e) < _WATCHED_THR);
     if (prev.length && confirm(`Отметить ${prev.length} предыд. серий как просмотренные?`))
       await batchSave(prev, 100);
   }
@@ -935,7 +1007,7 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
   // Предложить сбросить последующие если есть прогресс
   async function offerResetNext(ep) {
     const idx  = sortedEps.findIndex(e => e.hash === ep.hash);
-    const next = sortedEps.slice(idx + 1).filter(e => getRowPct(e) > 0);
+    const next = sortedEps.slice(idx + 1).filter(e => !e.special && getRowPct(e) > 0);
     if (next.length && confirm(`Сбросить прогресс ${next.length} следующих серий?`))
       await batchReset(next);
   }
@@ -1000,7 +1072,13 @@ function _renderEpisodes(epData, card, cardId, deviceId, profileId) {
 
     const epList = document.createElement('div');
     epList.className = 'ep-list';
-    for (const ep of eps) {
+    const sortedSeasonEps = [...eps].sort((a, b) => {
+      if (a.air_date && b.air_date) return a.air_date < b.air_date ? -1 : a.air_date > b.air_date ? 1 : 0;
+      if (a.air_date) return -1;
+      if (b.air_date) return 1;
+      return a.episode - b.episode;
+    });
+    for (const ep of sortedSeasonEps) {
       epList.appendChild(_makeEpRow(
         ep, card, cardId, deviceId, profileId, pp,
         rowUpdaters, offerMarkPrev, offerResetNext
@@ -1026,10 +1104,19 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
   if (ep.special) row.dataset.special = '1';
   if (ep.future)  row.dataset.future  = '1';
 
-  // Метка серии
-  const labelEl = document.createElement('span');
-  labelEl.className   = 'ep-row-label';
-  labelEl.textContent = _epLabel(ep);
+  // Метка серии (для спешлов — отдельный заголовок на всю ширину)
+  let labelEl = null;
+  let specialTitleEl = null;
+  if (ep.special) {
+    specialTitleEl = document.createElement('span');
+    specialTitleEl.className   = 'ep-row-special-title';
+    specialTitleEl.textContent = ep.title || _epLabel(ep);
+    specialTitleEl.title       = ep.title || _epLabel(ep);
+  } else {
+    labelEl = document.createElement('span');
+    labelEl.className   = 'ep-row-label';
+    labelEl.textContent = _epLabel(ep);
+  }
 
   // Прогресс-бар
   const barWrap = document.createElement('div');
@@ -1148,12 +1235,15 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
     delBtn.disabled = false;
   });
 
-  // Кнопка Спецэпизод / Отменить
+  // Кнопка Спецэпизод (★ — отмечен, ☆ — не отмечен)
   const specBtn = document.createElement('button');
   specBtn.className   = `ep-row-spec${ep.special ? ' unmark' : ''}`;
-  specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+  specBtn.textContent = ep.special ? '★' : '☆';
+  specBtn.title       = ep.special ? 'Снять отметку спецэпизода' : 'Отметить как спецэпизод';
 
   specBtn.addEventListener('click', async () => {
+    const msg = ep.special ? 'Снять отметку спецэпизода?' : 'Отметить как спецэпизод?';
+    if (!confirm(msg)) return;
     specBtn.disabled = true;
     specBtn.textContent = '…';
     const url    = ep.special ? '/api/unmark-special' : '/api/mark-watched';
@@ -1166,16 +1256,19 @@ function _makeEpRow(ep, card, cardId, deviceId, profileId, pp, rowUpdaters, offe
       ep.special = !ep.special;
       updateRow(ep.special ? 100 : 0);
       specBtn.className   = `ep-row-spec${ep.special ? ' unmark' : ''}`;
-      specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+      specBtn.textContent = ep.special ? '★' : '☆';
+      specBtn.title       = ep.special ? 'Снять отметку спецэпизода' : 'Отметить как спецэпизод';
       if (ep.special) await offerMarkPrev(ep);
       else            await offerResetNext(ep);
     } else {
-      specBtn.textContent = ep.special ? 'Отменить' : 'Спец.';
+      specBtn.textContent = ep.special ? '★' : '☆';
     }
     specBtn.disabled = false;
   });
 
-  row.appendChild(labelEl);
+  if (specialTitleEl) row.appendChild(specialTitleEl);
+  if (labelEl)        row.appendChild(labelEl);
+  if (specialTitleEl) row.appendChild(document.createElement('span')); // spacer под 5.5rem колонку
   row.appendChild(barWrap);
   row.appendChild(pctEl);
   row.appendChild(delBtn);

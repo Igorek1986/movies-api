@@ -518,6 +518,7 @@ async def _episodes_from_table(
             "percent":      td.get("percent", 0),
             "duration_sec": duration_sec,
             "future":       future,
+            "air_date":     ep.air_date.isoformat() if ep.air_date else None,
         })
 
     return {"episodes": episodes, "original_title": orig_title, "source": "myshows"}

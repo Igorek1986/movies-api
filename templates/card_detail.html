@@ -2,11 +2,14 @@
 {% block title %}Загрузка…{% endblock %}
 
 {% block body %}
-<div style="max-width:860px;margin:0 auto">
+<div style="max-width:860px;margin:0 auto" data-no-card-autofocus>
 
   <div id="cardLoading" style="text-align:center;padding:4rem 0;color:var(--pico-muted-color)">
     Загрузка…
   </div>
+
+  <!-- Floating back button (appears on scroll) -->
+  <a id="cardBackFloat" class="card-detail-back-float" href="/history">← Назад</a>
 
   <div id="cardContent" style="display:none">
 
@@ -36,6 +39,18 @@
       </div>
 
       <!-- Episodes (TV) -->
+      <!-- Актёры -->
+      <div id="cardCastSection" style="display:none;margin-top:1.25rem;border-top:1px solid var(--pico-muted-border-color);padding-top:.75rem">
+        <h3 style="font-size:.95rem;margin-bottom:.6rem;color:var(--pico-muted-color)">В ролях</h3>
+        <div id="cardCastList" class="card-cast-list"></div>
+      </div>
+
+      <!-- Похожее -->
+      <div id="cardRecsSection" style="display:none;margin-top:1.25rem;border-top:1px solid var(--pico-muted-border-color);padding-top:.75rem">
+        <h3 style="font-size:.95rem;margin-bottom:.6rem;color:var(--pico-muted-color)">Похожее</h3>
+        <div id="cardRecsList" class="catalog-grid catalog-grid--recs"></div>
+      </div>
+
       <div id="cardEpisodesSection"></div>
     </div>
 

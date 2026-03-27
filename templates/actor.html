@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "macros.html" import back_button %}
+{% block title %}Актёр — NUMParser{% endblock %}
+
+{% block body %}
+<main class="container" style="padding-top: 1.5rem; max-width: 1000px;">
+  {{ back_button("← Назад", "/") }}
+
+  <div id="actorLoading" class="muted small" style="text-align:center;padding:3rem 0;">Загрузка…</div>
+
+  <div id="actorContent" style="display:none">
+    <div style="display:flex;gap:1.25rem;align-items:flex-start;margin-bottom:1.5rem;flex-wrap:wrap">
+      <img id="actorPhoto" src="" alt="" style="width:100px;height:100px;border-radius:50%;object-fit:cover;flex-shrink:0;display:none">
+      <div id="actorNoPhoto" style="width:100px;height:100px;border-radius:50%;background:var(--pico-card-background-color);display:none;align-items:center;justify-content:center;font-size:2.5rem;flex-shrink:0">👤</div>
+      <div>
+        <h2 id="actorName" style="margin-bottom:.25rem"></h2>
+        <p id="actorBirthday" class="muted small" style="display:none"></p>
+        <p id="actorBio" style="font-size:.88rem;line-height:1.6;margin-top:.5rem;display:none"></p>
+      </div>
+    </div>
+
+    <h3 style="font-size:.95rem;margin-bottom:.75rem;color:var(--pico-muted-color)">Фильмография</h3>
+    <div id="actorGrid" class="catalog-grid"></div>
+    <p id="actorEmpty" class="history-empty" style="display:none">Фильмография не найдена</p>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>window.IMAGE_BASE = {{ image_base | tojson }}; window.PERSON_ID = {{ person_id }};</script>
+<script>
+(async function () {
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  const imgBase = window.IMAGE_BASE || 'https://image.tmdb.org';
+  const backUrl  = new URLSearchParams(location.search).get('back') || '/';
+
+  const res = await fetch(`/api/actor/${window.PERSON_ID}`);
+  document.getElementById('actorLoading').style.display = 'none';
+
+  if (!res.ok) {
+    document.getElementById('actorLoading').textContent = 'Не найдено';
+    document.getElementById('actorLoading').style.display = 'block';
+    return;
+  }
+
+  const actor = await res.json();
+  document.title = (actor.name || 'Актёр') + ' — NUMParser';
+  document.getElementById('actorName').textContent = actor.name || '';
+
+  if (actor.profile_path) {
+    const img = document.getElementById('actorPhoto');
+    img.src = imgBase + '/t/p/w185' + actor.profile_path;
+    img.style.display = 'block';
+  } else {
+    document.getElementById('actorNoPhoto').style.display = 'flex';
+  }
+
+  if (actor.birthday) {
+    const el = document.getElementById('actorBirthday');
+    el.textContent = 'Дата рождения: ' + actor.birthday;
+    el.style.display = 'block';
+  }
+
+  if (actor.biography) {
+    const el = document.getElementById('actorBio');
+    el.textContent = actor.biography;
+    el.style.display = 'block';
+  }
+
+  const works = actor.works || [];
+  const grid  = document.getElementById('actorGrid');
+
+  if (!works.length) {
+    document.getElementById('actorEmpty').style.display = 'block';
+  } else {
+    works.forEach(item => {
+      const cardId = item.id + '_' + item.media_type;
+      const poster = item.poster_path ? `<img src="${esc(imgBase + '/t/p/w300' + item.poster_path)}" alt="" loading="lazy">` : `<div class="card-no-poster">${esc(item.title)}</div>`;
+      const a = document.createElement('a');
+      a.className = 'catalog-poster-card';
+      a.href = `/card/${encodeURIComponent(cardId)}?back=${encodeURIComponent(location.href)}`;
+      a.innerHTML = `${poster}
+        ${item.media_type === 'tv' ? '<span class="card-tv-badge">СЕРИАЛ</span>' : ''}
+        <div class="catalog-poster-info">
+          <div class="catalog-poster-title">${esc(item.title)}</div>
+          ${item.year ? `<div class="catalog-poster-year">${esc(item.year)}</div>` : ''}
+          ${item.character ? `<div class="catalog-poster-cat">${esc(item.character)}</div>` : ''}
+        </div>`;
+      grid.appendChild(a);
+    });
+  }
+
+  document.getElementById('actorContent').style.display = 'block';
+})();
+</script>
+{% endblock %}

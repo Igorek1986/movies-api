@@ -5,8 +5,8 @@
 <main class="container" style="padding-top: 1.5rem; max-width: 1200px;">
   <h2 style="margin-bottom: 1rem;">Каталог</h2>
 
-  {% if devices %}
   <div class="history-controls" style="margin-bottom: 1.25rem;">
+    {% if devices %}
     {% if devices|length > 1 %}
     <select id="catalogDeviceSelect">
       {% for d in devices %}
@@ -17,11 +17,19 @@
     <input type="hidden" id="catalogDeviceSelect" value="{{ devices[0].id }}">
     {% endif %}
     <div id="catalogProfileTabs"></div>
+    {% endif %}
+    <div style="margin-left: auto; width: 200px;">
+      <input type="search" id="globalSearch" placeholder="Поиск…" class="history-search">
+    </div>
   </div>
-  {% endif %}
 
   <div id="catalogLoading" class="muted small" style="padding: 1rem 0;">Загрузка категорий...</div>
   <div id="catalogContainer"></div>
+  <div id="searchResults" style="display:none">
+    <div id="searchLoading" class="muted small" style="text-align:center;padding:1rem 0;display:none">Поиск…</div>
+    <div id="searchEmpty"   class="history-empty" style="display:none">Ничего не найдено</div>
+    <div id="searchGrid"    class="catalog-grid"></div>
+  </div>
 </main>
 {% endblock %}
 

@@ -11,6 +11,8 @@
  *   #historyGrid           — контейнер для карточек
  */
 
+
+
 const _IMG_BASE      = (window.TMDB_IMAGE_BASE || 'https://image.tmdb.org');
 const POSTER_BASE    = _IMG_BASE + '/t/p/w300';
 const BACKDROP_BASE  = _IMG_BASE + '/t/p/w780';
@@ -114,7 +116,7 @@ function _renderCards(cards) {
     }
 
     return `
-      <div class="media-card" role="button" tabindex="0" data-card-id="${card.card_id}" style="cursor:pointer;">
+      <div class="media-card" id="card-${card.card_id}" role="button" tabindex="0" data-card-id="${card.card_id}" style="cursor:pointer;">
         ${poster}
         ${topBadge}
         <div class="card-info">

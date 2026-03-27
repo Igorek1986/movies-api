@@ -782,10 +782,37 @@ figure { overflow-x: auto; }
   font-size: .85rem;
   padding: .3rem .7rem;
   border-radius: 2em;
+  border: 1px solid rgba(255,255,255,.25);
   backdrop-filter: blur(4px);
   transition: background .15s;
 }
 .card-detail-back:hover { background: rgba(0,0,0,.75); color: #fff; }
+
+.card-detail-back-float {
+  position: fixed;
+  top: 70px;
+  left: 1rem;
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  background: rgba(0,0,0,.65);
+  color: #fff;
+  text-decoration: none;
+  font-size: .85rem;
+  padding: .3rem .7rem;
+  border-radius: 2em;
+  border: 1px solid rgba(255,255,255,.25);
+  backdrop-filter: blur(6px);
+  transition: opacity .2s, background .15s;
+  opacity: 0;
+  pointer-events: none;
+}
+.card-detail-back-float.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.card-detail-back-float:hover { background: rgba(0,0,0,.85); color: #fff; opacity: 1; }
 
 .card-detail-body {
   padding: 1.25rem var(--pico-spacing) 2rem;
@@ -830,6 +857,78 @@ figure { overflow-x: auto; }
   line-height: 1.65;
   color: var(--pico-color);
   margin-bottom: 1rem;
+}
+
+.card-cast-list {
+  display: flex;
+  gap: .75rem;
+  overflow-x: auto;
+  padding-bottom: .4rem;
+  scrollbar-width: thin;
+}
+.cast-card {
+  flex-shrink: 0;
+  position: relative;
+  width: 80px;
+  text-align: center;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity .15s;
+}
+a.cast-card:hover { opacity: .75; }
+.card-cast-list a.cast-card:focus,
+.card-cast-list a.cast-card:focus-visible { outline: none; box-shadow: none; opacity: 1; }
+
+/* Анимированная рамка вокруг фото актёра (80×80px, круг) */
+a.cast-card::before,
+a.cast-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.9);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.35);
+  pointer-events: none;
+  z-index: 2;
+  transition: clip-path .4s ease;
+}
+a.cast-card::before { clip-path: inset(0 100% 49% 0); }
+a.cast-card::after  { clip-path: inset(49% 0 0 100%); }
+a.cast-card:focus-visible::before { clip-path: inset(0 0% 49% 0); }
+a.cast-card:focus-visible::after  { clip-path: inset(49% 0 0 0%); }
+.cast-card img, .cast-card .cast-no-photo {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--pico-card-background-color);
+  display: block;
+}
+.cast-card .cast-no-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+}
+.cast-name {
+  font-size: .72rem;
+  margin-top: .3rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.cast-character {
+  font-size: .68rem;
+  color: var(--pico-muted-color);
+  margin-top: .15rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
 }
 
 /* ============================================================
@@ -898,12 +997,29 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   gap: .4rem;
   min-height: 1.8rem;
 }
+.ep-row[data-special="1"] {
+  row-gap: .15rem;
+}
+.ep-row-special-title {
+  grid-column: 1 / -1;
+  font-size: .78rem;
+  font-family: monospace;
+  color: var(--pico-muted-color);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 
 .ep-row-label {
   font-size: .78rem;
   font-family: monospace;
   color: var(--pico-muted-color);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .ep-row-bar {
@@ -942,21 +1058,25 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
 .ep-row-del:hover:not(:disabled) { opacity: 1; }
 
 .ep-row-spec {
-  padding: .1rem .35rem;
-  font-size: .7rem;
-  border-radius: var(--pico-border-radius);
+  background: none;
+  border: none;
   cursor: pointer;
-  border: 1px solid var(--pico-muted-border-color);
-  background: transparent;
+  font-size: .95rem;
+  padding: 0 .1rem;
+  opacity: .35;
+  line-height: 1;
   color: var(--pico-muted-color);
-  white-space: nowrap;
 }
 .ep-row-spec:hover:not(:disabled) {
-  border-color: var(--pico-primary);
+  opacity: 1;
   color: var(--pico-primary);
 }
+.ep-row-spec.unmark {
+  opacity: .7;
+  color: var(--pico-ins-color, #1a7f3c);
+}
 .ep-row-spec.unmark:hover:not(:disabled) {
-  border-color: var(--pico-del-color, #c00);
+  opacity: 1;
   color: var(--pico-del-color, #c00);
 }
 
@@ -1208,6 +1328,45 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
 
 .catalog-poster-card:hover { transform: scale(1.04); }
 
+/* Анимированная рамка при фокусе — два псевдоэлемента, как у кнопки назад */
+.catalog-poster-card:focus-visible {
+  outline: none;
+  z-index: 2;
+}
+.catalog-poster-card::before,
+.catalog-poster-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  border: 3px solid rgba(255,255,255,.95);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.35);
+  pointer-events: none;
+  z-index: 10;
+  transition: clip-path .4s ease;
+}
+.catalog-poster-card::before { clip-path: inset(0 100% 49% 0); }
+.catalog-poster-card::after  { clip-path: inset(49% 0 0 100%); }
+.catalog-poster-card:focus-visible::before { clip-path: inset(0 0% 49% 0); }
+.catalog-poster-card:focus-visible::after  { clip-path: inset(49% 0 0 0%); }
+
+.card-tv-badge {
+  position: absolute;
+  top: .45rem;
+  right: .45rem;
+  z-index: 2;
+  font-size: .55rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: .25rem .5rem;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(59,130,246,.85), rgba(139,92,246,.85));
+  color: #fff;
+  letter-spacing: .08em;
+  pointer-events: none;
+  box-shadow: 0 1px 6px rgba(0,0,0,.4);
+}
+
 .catalog-poster-card img {
   position: absolute;
   inset: 0;
@@ -1236,6 +1395,12 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   overflow: hidden;
 }
 
+.catalog-poster-cat {
+  font-size: .6rem;
+  color: rgba(255,255,255,.5);
+  margin-top: .1rem;
+  font-style: italic;
+}
 .catalog-poster-year {
   font-size: .6rem;
   color: rgba(255,255,255,.6);
@@ -1247,10 +1412,12 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   color: var(--pico-muted-color);
   font-size: .82rem;
   padding: .5rem;
-  height: 210px;
+  height: 300px; /* = 200px card × 3/2 */
   display: flex;
   align-items: center;
 }
+@media (min-width: 480px) { .catalog-row-loading, .catalog-row-empty { height: 345px; } } /* 230px × 3/2 */
+@media (min-width: 768px) { .catalog-row-loading, .catalog-row-empty { height: 270px; } } /* 180px × 3/2 */
 
 /* Catalog category page grid */
 .catalog-grid {
@@ -1266,13 +1433,75 @@ details[open] > .ep-season-summary::before { transform: rotate(90deg); }
   width: 100%;
 }
 
+/* Рекомендации в карточке: горизонтальный скролл */
+.catalog-grid--recs {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: .6rem;
+  padding-bottom: .5rem;
+  grid-template-columns: none;
+  scrollbar-width: thin;
+}
+.catalog-grid--recs .catalog-poster-card {
+  flex: 0 0 130px;
+  width: 130px;
+}
+@media (min-width: 480px) {
+  .catalog-grid--recs .catalog-poster-card { flex: 0 0 150px; width: 150px; }
+}
+
 .catalog-back {
   display: inline-flex;
   align-items: center;
   gap: .3rem;
-  color: var(--pico-muted-color);
+  color: #fff;
   text-decoration: none;
-  font-size: .88rem;
+  font-size: .85rem;
   margin-bottom: 1rem;
+  margin-left: 1em;
+  padding: .3rem .7rem;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 2em;
+  position: relative;
+  transition: opacity .2s, color .15s;
 }
-.catalog-back:hover { color: var(--pico-color); }
+.catalog-back.hidden { opacity: 0; pointer-events: none; }
+
+/* Анимированная обводка — два псевдоэлемента, замыкают овал навстречу */
+.catalog-back::before,
+.catalog-back::after,
+.card-detail-back::before,
+.card-detail-back::after,
+.card-detail-back-float::before,
+.card-detail-back-float::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 2em;
+  border: 1px solid rgba(255,255,255,.85);
+  transition: clip-path .35s ease;
+  pointer-events: none;
+}
+/* Верхняя дуга: слева → направо (overlap 1% чтобы стык не просвечивал) */
+.catalog-back::before,
+.card-detail-back::before,
+.card-detail-back-float::before {
+  clip-path: inset(0 100% 49% 0);
+}
+.catalog-back:hover::before,
+.card-detail-back:hover::before,
+.card-detail-back-float:hover::before {
+  clip-path: inset(0 0% 49% 0);
+}
+/* Нижняя дуга: справа → налево */
+.catalog-back::after,
+.card-detail-back::after,
+.card-detail-back-float::after {
+  clip-path: inset(49% 0 0 100%);
+}
+.catalog-back:hover::after,
+.card-detail-back:hover::after,
+.card-detail-back-float:hover::after {
+  clip-path: inset(49% 0 0 0%);
+}

@@ -712,6 +712,90 @@ async def image_proxy(path: str):
         raise HTTPException(status_code=502, detail="Proxy error")
 
 
+_TMDB_IMAGE_PREFIX_RE = re.compile(r'^https?://[^/]*image\.tmdb\.org/t/p/\w+')
+
+def _normalize_poster_path(path: str) -> str:
+    """Возвращает только путь вида /abc.jpg, убирая базовый URL если есть."""
+    if not path:
+        return ""
+    m = _TMDB_IMAGE_PREFIX_RE.match(path)
+    if m:
+        return path[m.end():]  # оставляем только /abc.jpg
+    return path
+
+
+@app.get("/api/search")
+async def api_search(q: str = Query(..., min_length=3)):
+    """Глобальный поиск по всем категориям."""
+    if not RELEASES_DIR or not RELEASES_DIR.exists():
+        return {"results": [], "total": 0}
+
+    sq = q.strip().lower()
+    PER_CAT = 5
+
+    def _search_file(path):
+        try:
+            with gzip.open(path, "rt") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.debug(f"_search_file {path}: {e}")
+            return []
+        cat_id   = path.stem
+        cat_name = _category_display_name(cat_id)
+
+        if isinstance(data, list):
+            items = data
+        elif "results" in data:
+            items = data["results"]
+        elif "items" in data:
+            items = data["items"]
+        else:
+            return []
+
+        found = []
+        for item in items:
+            tmdb_id    = item.get("id")
+            media_type = item.get("media_type") or ("tv" if item.get("name") else "movie")
+            cached     = tmdb_cache.get((media_type, int(tmdb_id))) if tmdb_id else None
+            src        = cached or item
+            title  = src.get("title") or src.get("name") or ""
+            orig   = src.get("original_title") or src.get("original_name") or ""
+            if not title and not orig:
+                continue
+            if sq in title.lower() or sq in orig.lower():
+                found.append({
+                    "id":             tmdb_id,
+                    "media_type":     media_type,
+                    "title":          title,
+                    "original_title": orig,
+                    "poster_path":    _normalize_poster_path(src.get("poster_path") or ""),
+                    "year":           (src.get("release_date") or src.get("first_air_date") or "")[:4],
+                    "category_id":    cat_id,
+                    "category_name":  cat_name,
+                })
+                if len(found) >= PER_CAT:
+                    break
+        return found
+
+    loop = asyncio.get_event_loop()
+    tasks = [loop.run_in_executor(None, _search_file, p)
+             for p in RELEASES_DIR.glob("*.json")]
+    groups = await asyncio.gather(*tasks)
+
+    # Дедупликация: один фильм может быть в нескольких категориях
+    seen: set[tuple] = set()
+    flat: list[dict] = []
+    for group in groups:
+        for item in group:
+            key = (item["id"], item["media_type"])
+            if key not in seen:
+                seen.add(key)
+                flat.append(item)
+
+    flat.sort(key=lambda x: x["title"].lower())
+    return {"results": flat[:100], "total": len(flat)}
+
+
 @app.get("/api/categories")
 async def api_categories():
     """Список доступных категорий из RELEASES_DIR, отсортированный как в np.js."""
@@ -765,6 +849,23 @@ async def catalog_category_page(
     })
 
 
+@app.get("/actor/{person_id}", response_class=HTMLResponse)
+async def actor_page(
+    person_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+    image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
+    return _templates.TemplateResponse("actor.html", {
+        "request": request,
+        "user": current_user,
+        "person_id": person_id,
+        "image_base": image_base,
+    })
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(
     request: Request,
@@ -811,6 +912,7 @@ async def get_category(
     token: str = Query(None),
     profile_id: str = Query(None),
     min_progress: int = Query(None, ge=1, le=100),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     if not re.match(r"^[\w\-]+$", category):
@@ -1033,6 +1135,11 @@ async def get_category(
                     if not _item_watched(i, timecodes, watched_movies, threshold=min_progress, episodes_by_show=episodes_by_show)
                 ]
 
+            if search:
+                sq = search.lower()
+                items = [i for i in items if sq in (i.get("title") or i.get("name") or "").lower()
+                         or sq in (i.get("original_title") or i.get("original_name") or "").lower()]
+
             total = len(items)
             start = (page - 1) * per_page
             return {
@@ -1074,6 +1181,15 @@ async def get_category(
                 for i in map(_enrich_numparser_item, all_items)
                 if not _item_watched(i, timecodes, watched_movies, episodes_by_show=episodes_by_show)
             ]
+
+        if search:
+            sq = search.lower()
+            def _matches_search(item):
+                cached = tmdb_cache.get((item.get("media_type"), int(item["id"]))) if item.get("id") else None
+                t  = (cached or item).get("title") or (cached or item).get("name") or ""
+                ot = (cached or item).get("original_title") or (cached or item).get("original_name") or ""
+                return sq in t.lower() or sq in ot.lower()
+            all_items = [i for i in all_items if _matches_search(i)]
 
         total = len(all_items)
         start = (page - 1) * per_page

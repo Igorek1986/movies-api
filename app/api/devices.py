@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -937,6 +938,226 @@ async def api_media_card(
         "runtime": values.get("runtime"),
         "episode_run_time": values.get("episode_run_time"),
         "movie_item": movie_item,
+    }
+
+
+# ---------------------------------------------------------------------------
+# API: актёры карточки
+# ---------------------------------------------------------------------------
+
+@router.get("/api/media-card/{card_id}/credits")
+async def api_media_card_credits(
+    card_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    m = _CARD_ID_RE.match(card_id)
+    if not m:
+        raise HTTPException(status_code=400)
+
+    tmdb_id, media_type = int(m.group(1)), m.group(2)
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        return {"cast": []}
+
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/credits",
+                headers=headers,
+                params={"language": "ru-RU"},
+            )
+    except Exception:
+        return {"cast": []}
+
+    if resp.status_code != 200:
+        return {"cast": []}
+
+    data = resp.json()
+    cast = [
+        {
+            "id": p.get("id"),
+            "name": p.get("name") or "",
+            "character": p.get("character") or "",
+            "profile_path": p.get("profile_path") or "",
+        }
+        for p in (data.get("cast") or [])[:15]
+        if p.get("name")
+    ]
+    return {"cast": cast}
+
+
+# ---------------------------------------------------------------------------
+# API: рекомендации похожих фильмов/сериалов
+# ---------------------------------------------------------------------------
+
+@router.get("/api/media-card/{card_id}/recommendations")
+async def api_media_card_recommendations(
+    card_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    m = _CARD_ID_RE.match(card_id)
+    if not m:
+        raise HTTPException(status_code=400)
+
+    tmdb_id, media_type = int(m.group(1)), m.group(2)
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        return {"items": []}
+
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    base = "https://api.themoviedb.org/3"
+
+    def _parse_items(results: list, mtype: str) -> list:
+        out = []
+        for r in results:
+            title = r.get("title") or r.get("name") or ""
+            if not title:
+                continue
+            date = r.get("release_date") or r.get("first_air_date") or ""
+            out.append({
+                "id": r.get("id"),
+                "media_type": mtype,
+                "title": title,
+                "year": date[:4] if date else "",
+                "poster_path": r.get("poster_path") or "",
+            })
+        return out
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Параллельно: детали карточки + рекомендации TMDB
+            detail_resp, rec_resp = await asyncio.gather(
+                client.get(f"{base}/{media_type}/{tmdb_id}", headers=headers, params={"language": "ru-RU"}),
+                client.get(f"{base}/{media_type}/{tmdb_id}/recommendations", headers=headers, params={"language": "ru-RU", "page": 1}),
+            )
+
+            orig_lang = ""
+            genre_ids = []
+            if detail_resp.status_code == 200:
+                detail = detail_resp.json()
+                orig_lang = detail.get("original_language") or ""
+                genre_ids = [g["id"] for g in (detail.get("genres") or [])]
+
+            rec_results = []
+            if rec_resp.status_code == 200:
+                rec_results = rec_resp.json().get("results") or []
+
+            # Если русский контент — дополнительно запрашиваем Discover с теми же жанрами
+            ru_results = []
+            if orig_lang == "ru":
+                discover_params = {
+                    "language": "ru-RU",
+                    "with_original_language": "ru",
+                    "sort_by": "popularity.desc",
+                    "page": 1,
+                    "vote_count.gte": 50,
+                }
+                if genre_ids:
+                    discover_params["with_genres"] = ",".join(str(g) for g in genre_ids[:2])
+                disc_resp = await client.get(
+                    f"{base}/discover/{media_type}",
+                    headers=headers,
+                    params=discover_params,
+                )
+                if disc_resp.status_code == 200:
+                    ru_results = disc_resp.json().get("results") or []
+
+    except Exception:
+        return {"items": []}
+
+    # Собираем итоговый список: сначала русские (если есть), затем рекомендации
+    seen_ids: set = {tmdb_id}  # исключаем саму карточку
+    items: list = []
+
+    for r in ru_results:
+        if len(items) >= 6:
+            break
+        if r.get("id") in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        items.extend(_parse_items([r], media_type))
+
+    for r in rec_results:
+        if len(items) >= 10:
+            break
+        if r.get("id") in seen_ids:
+            continue
+        seen_ids.add(r["id"])
+        items.extend(_parse_items([r], media_type))
+
+    return {"items": items}
+
+
+# ---------------------------------------------------------------------------
+# API: страница актёра — информация + фильмография
+# ---------------------------------------------------------------------------
+
+@router.get("/api/actor/{person_id}")
+async def api_actor(
+    person_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        raise HTTPException(status_code=503)
+
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    params  = {"language": "ru-RU"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            person_resp, credits_resp = await asyncio.gather(
+                client.get(f"https://api.themoviedb.org/3/person/{person_id}", headers=headers, params=params),
+                client.get(f"https://api.themoviedb.org/3/person/{person_id}/combined_credits", headers=headers, params=params),
+            )
+    except Exception:
+        raise HTTPException(status_code=502)
+
+    if person_resp.status_code != 200:
+        raise HTTPException(status_code=404)
+
+    person  = person_resp.json()
+    credits = credits_resp.json() if credits_resp.status_code == 200 else {}
+
+    cast = credits.get("cast") or []
+    # Сортируем по популярности, убираем дубликаты по id
+    seen: set = set()
+    works = []
+    for item in sorted(cast, key=lambda x: x.get("popularity") or 0, reverse=True):
+        iid = item.get("id")
+        if iid in seen:
+            continue
+        seen.add(iid)
+        media_type = item.get("media_type", "movie")
+        title = item.get("title") or item.get("name") or ""
+        works.append({
+            "id":             iid,
+            "media_type":     media_type,
+            "title":          title,
+            "original_title": item.get("original_title") or item.get("original_name") or "",
+            "poster_path":    item.get("poster_path") or "",
+            "year":           (item.get("release_date") or item.get("first_air_date") or "")[:4],
+            "vote_average":   item.get("vote_average") or 0,
+            "character":      item.get("character") or "",
+        })
+
+    return {
+        "id":           person.get("id"),
+        "name":         person.get("name") or "",
+        "biography":    person.get("biography") or "",
+        "birthday":     person.get("birthday") or "",
+        "profile_path": person.get("profile_path") or "",
+        "works":        works[:100],
     }
 
 
