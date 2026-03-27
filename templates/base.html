@@ -115,20 +115,49 @@
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
   <script>
-    // ─── Auto-focus первой карточки при загрузке ─────────────────────────────
-    (function () {
+    // ─── Фокус карточки: автофокус при загрузке, восстановление при возврате ──
+    var _FOCUS_KEY = 'kbd_last_card';
+
+    function _restoreOrFirst(targetId) {
       function tryFocus() {
-        var card = document.querySelector('.catalog-poster-card');
-        if (card) { card.focus({ preventScroll: true }); return true; }
-        return false;
+        var card = targetId
+          ? (document.getElementById(targetId) || document.querySelector('.catalog-poster-card'))
+          : document.querySelector('.catalog-poster-card');
+        if (!card) return false;
+        if (targetId) sessionStorage.removeItem(_FOCUS_KEY);
+        card.focus({ preventScroll: true });
+        card.scrollIntoView({ block: 'nearest', inline: 'center' });
+        return true;
       }
       if (!tryFocus()) {
-        var obs = new MutationObserver(function () {
-          if (tryFocus()) obs.disconnect();
-        });
+        var obs = new MutationObserver(function () { if (tryFocus()) obs.disconnect(); });
         obs.observe(document.body, { childList: true, subtree: true });
       }
-    })();
+    }
+
+    // Начальная загрузка — фокус на первую карточку
+    _restoreOrFirst(null);
+
+    // Сохраняем карточку перед переходом
+    document.addEventListener('click', function (e) {
+      var card = e.target.closest('.catalog-poster-card');
+      if (card && card.id) sessionStorage.setItem(_FOCUS_KEY, card.id);
+    });
+
+    // Восстанавливаем фокус при возврате через bfcache
+    window.addEventListener('pageshow', function (e) {
+      if (!e.persisted) return;
+      _restoreOrFirst(sessionStorage.getItem(_FOCUS_KEY));
+    });
+
+    // ─── Backspace = назад ───────────────────────────────────────────────────
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Backspace') return;
+      var tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      e.preventDefault();
+      history.back();
+    });
 
     // ─── Keyboard navigation for poster cards ────────────────────────────────
     document.addEventListener('keydown', function (e) {
