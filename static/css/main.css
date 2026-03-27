@@ -789,8 +789,8 @@ figure { overflow-x: auto; }
 
 .card-detail-back-float {
   position: fixed;
-  top: 110px;
-  left: .75rem;
+  top: 70px;
+  left: 1rem;
   z-index: 1001;
   display: inline-flex;
   align-items: center;
@@ -801,6 +801,7 @@ figure { overflow-x: auto; }
   font-size: .85rem;
   padding: .3rem .7rem;
   border-radius: 2em;
+  border: 1px solid rgba(255,255,255,.25);
   backdrop-filter: blur(6px);
   transition: opacity .2s, background .15s;
   opacity: 0;

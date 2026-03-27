@@ -200,6 +200,18 @@
       staticBtn.addEventListener('click', goBack);
       if (floatBtn) {
         floatBtn.addEventListener('click', goBack);
+
+        // Синхронизируем позицию плавающей кнопки со статической
+        function syncFloat() {
+          var r      = staticBtn.getBoundingClientRect();
+          var header = document.querySelector('.site-header');
+          var hh     = header ? header.offsetHeight : 0;
+          floatBtn.style.left = r.left + 'px';
+          floatBtn.style.top  = (hh + 12) + 'px';
+        }
+        syncFloat();
+        window.addEventListener('resize', syncFloat);
+
         new IntersectionObserver(function (entries) {
           var visible = entries[0].isIntersecting;
           staticBtn.classList.toggle('hidden', !visible);
