@@ -115,6 +115,29 @@
   {% block body %}{% endblock %}
   {% block scripts %}{% endblock %}
   <script>
+    // ─── Back button: static + floating ──────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+      var staticBtn = document.querySelector('[data-back-btn]');
+      var floatBtn  = document.querySelector('[data-back-float]');
+      if (!staticBtn) return;
+
+      var fallback = staticBtn.dataset.backFallback || '/';
+      function goBack(e) {
+        e.preventDefault();
+        if (history.length > 1) history.back(); else location.href = fallback;
+      }
+      staticBtn.addEventListener('click', goBack);
+      if (floatBtn) {
+        floatBtn.addEventListener('click', goBack);
+        new IntersectionObserver(function (entries) {
+          var visible = entries[0].isIntersecting;
+          staticBtn.classList.toggle('hidden', !visible);
+          floatBtn.classList.toggle('visible', !visible);
+        }, { threshold: 0.5 }).observe(staticBtn);
+      }
+    });
+  </script>
+  <script>
     function toggleTheme() {
       const html = document.documentElement;
       const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
