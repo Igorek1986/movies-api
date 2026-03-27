@@ -857,6 +857,52 @@ figure { overflow-x: auto; }
   margin-bottom: 1rem;
 }
 
+.card-cast-list {
+  display: flex;
+  gap: .75rem;
+  overflow-x: auto;
+  padding-bottom: .4rem;
+  scrollbar-width: thin;
+}
+.cast-card {
+  flex-shrink: 0;
+  width: 80px;
+  text-align: center;
+}
+.cast-card img, .cast-card .cast-no-photo {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--pico-card-background-color);
+  display: block;
+}
+.cast-card .cast-no-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+}
+.cast-name {
+  font-size: .72rem;
+  margin-top: .3rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.cast-character {
+  font-size: .68rem;
+  color: var(--pico-muted-color);
+  margin-top: .15rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
 /* ============================================================
    CARD DETAIL — episode accordion
    ============================================================ */

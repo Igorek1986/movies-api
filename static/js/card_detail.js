@@ -53,6 +53,28 @@ const _WATCHED_THR   = 90;
     const card = await res.json();
     _renderCard(card, cardId);
 
+    // Актёры — загружаем параллельно, не блокируем основной рендер
+    fetch(`/api/media-card/${encodeURIComponent(cardId)}/credits`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.cast || !data.cast.length) return;
+        const section = document.getElementById('cardCastSection');
+        const list    = document.getElementById('cardCastList');
+        const imgBase = window.TMDB_IMAGE_BASE || window.IMAGE_BASE || 'https://image.tmdb.org';
+        list.innerHTML = data.cast.map(p => {
+          const photo = p.profile_path
+            ? `<img src="${imgBase}/t/p/w185${p.profile_path}" alt="" loading="lazy">`
+            : `<div class="cast-no-photo">👤</div>`;
+          return `<div class="cast-card">
+            ${photo}
+            <div class="cast-name">${p.name}</div>
+            ${p.character ? `<div class="cast-character">${p.character}</div>` : ''}
+          </div>`;
+        }).join('');
+        section.style.display = 'block';
+      })
+      .catch(() => {});
+
     if (!deviceId) return;
 
     if (card.media_type === 'movie') {

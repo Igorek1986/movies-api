@@ -941,6 +941,54 @@ async def api_media_card(
 
 
 # ---------------------------------------------------------------------------
+# API: актёры карточки
+# ---------------------------------------------------------------------------
+
+@router.get("/api/media-card/{card_id}/credits")
+async def api_media_card_credits(
+    card_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401)
+
+    m = _CARD_ID_RE.match(card_id)
+    if not m:
+        raise HTTPException(status_code=400)
+
+    tmdb_id, media_type = int(m.group(1)), m.group(2)
+    settings = get_settings()
+    if not settings.TMDB_TOKEN:
+        return {"cast": []}
+
+    headers = {"Authorization": settings.TMDB_TOKEN, "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/credits",
+                headers=headers,
+                params={"language": "ru-RU"},
+            )
+    except Exception:
+        return {"cast": []}
+
+    if resp.status_code != 200:
+        return {"cast": []}
+
+    data = resp.json()
+    cast = [
+        {
+            "name": p.get("name") or "",
+            "character": p.get("character") or "",
+            "profile_path": p.get("profile_path") or "",
+        }
+        for p in (data.get("cast") or [])[:15]
+        if p.get("name")
+    ]
+    return {"cast": cast}
+
+
+# ---------------------------------------------------------------------------
 # API: отметить эпизод просмотренным (percent=100)
 # ---------------------------------------------------------------------------
 
