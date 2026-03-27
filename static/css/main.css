@@ -782,6 +782,7 @@ figure { overflow-x: auto; }
   font-size: .85rem;
   padding: .3rem .7rem;
   border-radius: 2em;
+  border: 1px solid rgba(255,255,255,.25);
   backdrop-filter: blur(4px);
   transition: background .15s;
 }

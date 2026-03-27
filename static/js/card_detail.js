@@ -44,6 +44,9 @@ const _WATCHED_THR   = 90;
     floatBack.addEventListener('click', goBack);
     const onScroll = () => floatBack.classList.toggle('visible', window.scrollY > 120);
     window.addEventListener('scroll', onScroll, { passive: true });
+
+    const header = document.querySelector('.site-header');
+    if (header) floatBack.style.top = (header.offsetHeight + 12) + 'px';
   }
 
   try {
