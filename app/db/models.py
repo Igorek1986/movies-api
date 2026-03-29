@@ -362,6 +362,20 @@ class Totp2faPending(Base):
         return f"<Totp2faPending(user_id={self.user_id})>"
 
 
+class PluginSettings(Base):
+    """Настройки плагинов Lampa — синхронизируются между устройствами одного пользователя."""
+
+    __tablename__ = "plugin_settings"
+
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, primary_key=True)
+    plugin     = Column(String(100), nullable=False, primary_key=True)
+    settings   = Column(Text, nullable=False, default="{}", server_default="'{}'")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<PluginSettings(user_id={self.user_id}, plugin={self.plugin})>"
+
+
 class SupportMessage(Base):
     """Сообщение в чате поддержки между пользователем и администратором."""
 

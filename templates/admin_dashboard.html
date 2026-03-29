@@ -24,21 +24,21 @@
     <h2 style="margin:0">Пользователи <small class="muted" style="font-size:1rem;font-weight:400">({{ users|length }})</small></h2>
     <div style="display:flex;gap:.4rem">
       <form method="POST" action="/admin/run-expiry-check" style="margin:0">
-        <button type="submit" class="btn-sm outline secondary" title="Запустить проверку истечения Premium вручную">▶ Проверка Premium</button>
+        <button type="submit" class="btn-sm outline secondary" title="Запустить проверку истечения Premium вручную">▶&nbspПроверка Premium</button>
       </form>
       <form method="POST" action="/admin/extend-all-premium" style="margin:0"
             onsubmit="return confirm('Продлить Premium всем активным пользователям?')">
-        <button type="submit" class="btn-sm outline secondary">➕ Продлить всем</button>
+        <button type="submit" class="btn-sm outline secondary">➕&nbspПродлить всем</button>
       </form>
       <form method="POST" action="/admin/episodes/force-refresh" style="margin:0" id="refreshForm"
             onsubmit="return startRefresh(event)">
-        <button type="submit" class="btn-sm outline secondary" id="refreshBtn" title="Принудительно синхронизировать эпизоды всех сериалов из MyShows">♻ Обновить эпизоды</button>
+        <button type="submit" class="btn-sm outline secondary" id="refreshBtn" title="Принудительно синхронизировать эпизоды всех сериалов из MyShows">♻&nbspОбновить эпизоды</button>
       </form>
       <form method="POST" action="/admin/episodes/find-myshows-ids" style="margin:0" id="findForm"
             onsubmit="return startFind(event)">
-        <button type="submit" class="btn-sm outline secondary" id="findBtn" title="Найти MyShows ID для сериалов без него">🔍 Найти MyShows ID</button>
+        <button type="submit" class="btn-sm outline secondary" id="findBtn" title="Найти MyShows ID для сериалов без него">🔍&nbspНайти MyShows ID</button>
       </form>
-      <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙ Настройки</a>
+      <a href="/admin/settings" role="button" class="outline secondary btn-sm">⚙&nbspНастройки</a>
     </div>
   </div>
 

@@ -553,9 +553,11 @@ function clone_or_update_repo {
             warn "Switching branch: ${current_branch} → ${BRANCH}"
             git checkout "$BRANCH" || error_exit "Failed to checkout branch ${BRANCH}"
         fi
+        _PREV_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
         git pull origin "$BRANCH" || error_exit "git pull failed"
     fi
 }
+_PREV_HEAD=""
 
 # ---------------------------------------------------------------------------
 # PostgreSQL setup
@@ -868,6 +870,48 @@ function do_install {
 }
 
 # ---------------------------------------------------------------------------
+# Migration helpers
+# ---------------------------------------------------------------------------
+function _run_migrations {
+    local install_type="$1"
+
+    # No previous HEAD means fresh clone — create_all handles schema, skip migrations
+    if [ -z "$_PREV_HEAD" ]; then
+        return
+    fi
+
+    local new_files=()
+    mapfile -t new_files < <(
+        cd "$PROJECT_DIR"
+        git diff --name-only --diff-filter=A "$_PREV_HEAD" HEAD -- 'migrations/migrate_*.py' 2>/dev/null \
+            | sort
+    )
+
+    if [ ${#new_files[@]} -eq 0 ]; then
+        return
+    fi
+
+    info "New migration(s): ${new_files[*]}"
+
+    for path in "${new_files[@]}"; do
+        local name
+        name=$(basename "$path")
+        info "Running migration: $name"
+        case "$install_type" in
+            service)
+                (cd "$PROJECT_DIR" && poetry run python "migrations/$name") \
+                    || error_exit "Migration failed: $name"
+                ;;
+            docker)
+                (cd "$PROJECT_DIR" && docker compose exec -T app poetry run python "migrations/$name") \
+                    || error_exit "Migration failed: $name"
+                ;;
+        esac
+    done
+    info "Migrations done."
+}
+
+# ---------------------------------------------------------------------------
 # Update flow
 # ---------------------------------------------------------------------------
 function do_update {
@@ -889,6 +933,7 @@ function do_update {
     case "$install_type" in
         service)
             install_python_deps
+            _run_migrations "service"
             _sudo systemctl restart "$SERVICE_NAME"
             local svc_port
             svc_port=$(_get_env_val "PORT" || true)
@@ -913,6 +958,7 @@ function do_update {
             docker_port=$(_get_env_val "PORT" || true)
             docker_port="${docker_port:-$DEFAULT_PORT}"
             wait_for_app "$docker_port" "docker compose -f ${PROJECT_DIR}/docker-compose.yml logs"
+            _run_migrations "docker"
             ;;
         none)
             warn "No running installation detected — run install first."
