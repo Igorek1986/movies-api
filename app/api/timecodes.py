@@ -37,7 +37,7 @@ from fastapi import (
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import select, delete, func, update
+from sqlalchemy import select, delete, func, update, case
 
 from app.config import get_settings
 from app.db.database import get_db, async_session_maker
@@ -298,37 +298,62 @@ async def _cleanup_orphan_timecodes(
     db: AsyncSession,
     device_id: int,
     profile_id: str,
-    tv_card_ids: list[str],
+    card_ids: list[str],
 ) -> None:
     """
-    Удаляет таймкоды для TV-карточек у которых item не совпадает ни с одним хешем в episodes.
+    Удаляет таймкоды с невалидными хэшами (артефакты старых версий Lampac).
+    Фильмы: item должен == lampa_hash(original_title).
+    Сериалы: item должен быть в episodes.hash; фолбэк — вычисляем из seasons_json.
     Если после удаления у карточки не осталось таймкодов — убирает её из истории профиля.
     """
     from sqlalchemy import delete as sa_delete
 
     removed_card_ids = []
 
-    # Batch-запрос названий для логирования
-    mc_titles: dict[str, str] = {}
-    if tv_card_ids:
-        mc_rows = await db.execute(select(MediaCard).where(MediaCard.card_id.in_(tv_card_ids)))
+    # Batch-запрос MediaCard для всех карточек
+    mc_map: dict[str, MediaCard] = {}
+    if card_ids:
+        mc_rows = await db.execute(select(MediaCard).where(MediaCard.card_id.in_(card_ids)))
         for mc in mc_rows.scalars().all():
-            mc_titles[mc.card_id] = mc.title or mc.original_title or mc.card_id
+            mc_map[mc.card_id] = mc
 
-    for card_id in tv_card_ids:
-        try:
-            tmdb_id = int(card_id.split("_")[0])
-        except (ValueError, IndexError):
+    for card_id in card_ids:
+        mc = mc_map.get(card_id)
+        if not mc or not mc.original_title:
             continue
 
-        valid_hashes = set((await db.execute(
-            select(Episode.hash).where(
-                Episode.tmdb_show_id == tmdb_id,
-                Episode.hash.isnot(None),
-            )
-        )).scalars().all())
+        # Строим множество валидных хэшей для этой карточки
+        if card_id.endswith("_movie"):
+            valid_hashes = {lampa_hash(mc.original_title)}
 
-        if not valid_hashes:
+        elif card_id.endswith("_tv"):
+            # Источник 1: episodes таблица
+            valid_hashes = set((await db.execute(
+                select(Episode.hash).where(
+                    Episode.tmdb_show_id == mc.tmdb_id,
+                    Episode.hash.isnot(None),
+                )
+            )).scalars().all())
+
+            # Источник 2: вычисляем из seasons_json
+            if not valid_hashes and mc.seasons_json:
+                try:
+                    seasons = json.loads(mc.seasons_json)
+                    for season in seasons:
+                        s_num = season.get("season_number")
+                        ep_count = season.get("episode_count", 0)
+                        if not s_num or not ep_count:
+                            continue
+                        for ep_num in range(1, ep_count + 1):
+                            valid_hashes.add(lampa_hash(
+                                build_episode_hash_string(s_num, ep_num, mc.original_title)
+                            ))
+                except Exception:
+                    pass
+
+            if not valid_hashes:
+                continue  # нет данных — не можем валидировать
+        else:
             continue
 
         tcs = (await db.execute(
@@ -344,7 +369,7 @@ async def _cleanup_orphan_timecodes(
             continue
 
         await db.execute(sa_delete(Timecode).where(Timecode.id.in_(orphan_ids)))
-        title = mc_titles.get(card_id, card_id)
+        title = mc.title or mc.original_title or card_id
         logger.info(f"cleanup_orphans: «{title}» ({card_id}) — удалено {len(orphan_ids)} мусорных таймкодов из {len(tcs)}")
 
         if len(orphan_ids) == len(tcs):
@@ -378,6 +403,62 @@ async def _cleanup_orphan_timecodes(
             logger.warning(f"cleanup_orphans: failed to update favorite: {e}")
 
 
+async def _update_card_views(
+    db: AsyncSession,
+    device_id: int,
+    lampa_profile_id: str,
+    card_id: str,
+    item: str,
+    percent: float,
+    today: date,
+) -> bool:
+    """
+    Засчитывает просмотр — инкрементирует Timecode.view_count.
+    Возвращает True если просмотр засчитан (counted_at надо проставить на Timecode).
+    Правила:
+      - Засчитываем только если percent >= 90
+      - Лимит: один раз в сутки на item для данного профиля (Timecode.counted_at)
+      - Для фильмов: один раз в сутки на карточку (любой item)
+    """
+    if percent < 90:
+        return False
+
+    is_movie = card_id.endswith("_movie")
+    is_tv = card_id.endswith("_tv")
+    if not is_movie and not is_tv:
+        return False  # lampa_import или неизвестный формат
+
+    # Ищем текущий Timecode
+    tc = (await db.execute(
+        select(Timecode).where(
+            Timecode.device_id == device_id,
+            Timecode.lampa_profile_id == lampa_profile_id,
+            Timecode.card_id == card_id,
+            Timecode.item == item,
+        )
+    )).scalar_one_or_none()
+
+    if tc is not None and tc.counted_at == today:
+        return False  # уже засчитано сегодня
+
+    # Для фильмов: один просмотр на карточку в сутки (не на item)
+    if is_movie:
+        already_today = (await db.execute(
+            select(func.count()).where(
+                Timecode.device_id == device_id,
+                Timecode.lampa_profile_id == lampa_profile_id,
+                Timecode.card_id == card_id,
+                Timecode.counted_at == today,
+            )
+        )).scalar() or 0
+        if already_today > 0:
+            if tc is not None:
+                tc.counted_at = today
+            return False
+
+    return True
+
+
 async def _upsert_timecodes(
     db: AsyncSession,
     device_id: int,
@@ -393,16 +474,38 @@ async def _upsert_timecodes(
     for r in rows:
         unique[(r["card_id"], r["item"])] = r
 
-    values = [
-        {
+    today = date.today()
+    # counted_today: (card_id, item) → True если просмотр засчитан сегодня
+    counted_today: dict[tuple, bool] = {}
+    for r in unique.values():
+        try:
+            data = json.loads(r["data"]) if isinstance(r["data"], str) else r["data"]
+            percent = float(data.get("percent", 0))
+        except Exception:
+            percent = 0.0
+        counted = await _update_card_views(
+            db, device_id, lampa_profile_id,
+            r["card_id"], r["item"], percent, today,
+        )
+        if percent >= 90:
+            counted_today[(r["card_id"], r["item"])] = counted
+
+    values = []
+    for r in unique.values():
+        row: dict = {
             "device_id": device_id,
             "lampa_profile_id": lampa_profile_id,
             "card_id": r["card_id"],
             "item": r["item"],
             "data": r["data"],
         }
-        for r in unique.values()
-    ]
+        # view_count=1 если засчитан, 0 если нет — ON CONFLICT просто суммирует
+        if counted_today.get((r["card_id"], r["item"])):
+            row["counted_at"] = today
+            row["view_count"] = 1
+        else:
+            row["view_count"] = 0
+        values.append(row)
 
     stmt = pg_insert(Timecode).values(values)
     stmt = stmt.on_conflict_do_update(
@@ -412,7 +515,12 @@ async def _upsert_timecodes(
             Timecode.card_id,
             Timecode.item,
         ],
-        set_={"data": stmt.excluded.data, "updated_at": stmt.excluded.updated_at},
+        set_={
+            "data": stmt.excluded.data,
+            "updated_at": stmt.excluded.updated_at,
+            "counted_at": func.coalesce(stmt.excluded.counted_at, Timecode.counted_at),
+            "view_count": Timecode.view_count + stmt.excluded.view_count,
+        },
     )
     await db.execute(stmt)
     await db.commit()
@@ -825,9 +933,11 @@ async def import_from_lampac(
             except Exception:
                 pass
 
-    # Удаляем мусорные таймкоды для TV-карточек (хеши не совпадают с episodes)
-    if tv_card_ids:
-        await _cleanup_orphan_timecodes(db, device.id, lp, tv_card_ids)
+    # Удаляем мусорные таймкоды (невалидные хэши — артефакты старых версий Lampac)
+    movie_card_ids = [cid for cid in valid_card_ids if cid.endswith("_movie")]
+    cleanup_ids = tv_card_ids + movie_card_ids
+    if cleanup_ids:
+        await _cleanup_orphan_timecodes(db, device.id, lp, cleanup_ids)
         await db.commit()
 
     return {"success": True, "saved": saved, "trimmed": trimmed}
@@ -1509,6 +1619,69 @@ async def put_favorite(
     )
 
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Популярное — глобальный рейтинг просмотров
+# ---------------------------------------------------------------------------
+
+
+@router.get("/popular")
+async def get_popular(
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
+    device: Device = Depends(get_device_by_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Глобально популярные карточки за период из настроек приложения (popular_period_days).
+    Вес = completed_count + current_progress / 100 — суммируется по всем профилям всех пользователей.
+    Возвращает {results, page, total_pages, total_results} — стандартный Lampa-формат.
+    """
+    from math import ceil
+    from datetime import timedelta
+
+    _require_device(device)
+
+    period = settings_cache.get_int("popular_period_days") or 30
+    cutoff = date.today() - timedelta(days=period)
+
+    base_q = (
+        select(CardView.card_id, CardView.completed_count)
+        .join(MediaCard, MediaCard.card_id == CardView.card_id)
+        .where(CardView.updated_at >= cutoff)
+        .order_by(CardView.completed_count.desc())
+    )
+    total = (
+        await db.execute(select(func.count()).select_from(base_q.subquery()))
+    ).scalar() or 0
+
+    rows = (
+        await db.execute(base_q.offset((page - 1) * per_page).limit(per_page))
+    ).fetchall()
+
+    card_ids = [r.card_id for r in rows]
+    mc_map = {
+        mc.card_id: mc
+        for mc in (
+            await db.execute(select(MediaCard).where(MediaCard.card_id.in_(card_ids)))
+        ).scalars().all()
+    } if card_ids else {}
+
+    results = []
+    for r in rows:
+        mc = mc_map.get(r.card_id)
+        if mc:
+            entry = _media_card_to_entry(mc)
+            entry["_np_views"] = round(r.completed_count, 2)
+            results.append(entry)
+
+    return {
+        "results": results,
+        "page": page,
+        "total_pages": ceil(total / per_page) if total else 1,
+        "total_results": total,
+    }
 
 
 # ---------------------------------------------------------------------------

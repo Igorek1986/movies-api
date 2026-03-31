@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse, Res
 from app.templates import get_templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, func, case, Float
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -557,6 +557,7 @@ _CATEGORY_TITLES: dict[str, str] = {
     "lampac_all_cartoon_series": "Мультсериалы",
     "lampac_all_anime":        "Аниме",
     "anime_id":                "Аниме",
+    "np_popular":              "Популярно в NP",
 }
 
 _CATEGORY_ORDER: list[str] = list(_CATEGORY_TITLES.keys())
@@ -808,6 +809,14 @@ async def api_categories():
     result: list[dict] = []
     seen: set[str] = set()
 
+    # 0. Виртуальные категории (без файла) — показываем только если есть данные
+    async with async_session_maker() as _db:
+        has_popular = (await _db.execute(
+            select(func.count()).select_from(Timecode).where(Timecode.view_count > 0)
+        )).scalar() or 0
+    if has_popular:
+        result.append({"id": "np_popular", "name": "Популярно в NP"})
+
     # 1. Порядок из np.js
     for cat_id in _CATEGORY_ORDER:
         if cat_id in available:
@@ -834,9 +843,11 @@ async def catalog_category_page(
     if not re.match(r"^[\w\-]+$", category):
         raise HTTPException(status_code=404, detail="Not found")
     image_base = "/imgproxy" if settings.IMAGE_PROXY_URL else "https://image.tmdb.org"
-    cat_path = RELEASES_DIR / f"{category}.json" if RELEASES_DIR else None
-    if not cat_path or not cat_path.exists():
-        raise HTTPException(status_code=404, detail="Category not found")
+    _virtual_categories = {"np_popular"}
+    if category not in _virtual_categories:
+        cat_path = RELEASES_DIR / f"{category}.json" if RELEASES_DIR else None
+        if not cat_path or not cat_path.exists():
+            raise HTTPException(status_code=404, detail="Category not found")
     devices = []
     if current_user:
         from app.api.devices import _devices_with_stats
@@ -1089,6 +1100,87 @@ async def get_category(
                 "page": page,
                 "total_pages": ceil(total / per_page) or 1,
                 "total_results": total,
+            }
+
+        # ── "Популярно в NP" — глобальный рейтинг просмотров ───────────────────
+        if category == "np_popular":
+            from datetime import timedelta
+            from app.api.timecodes import _media_card_to_entry
+            period = _sc.get_int("popular_period_days") or 30
+            cutoff = _date.today() - timedelta(days=period)
+
+            # Реальное кол-во серий: episodes (без спецвыпусков) → media_cards → COUNT(DISTINCT item)
+            ep_count_sq = (
+                select(Episode.tmdb_show_id, func.count().label("n_ep"))
+                .where(Episode.is_special == False)
+                .group_by(Episode.tmdb_show_id)
+            ).subquery()
+            # Фолбэк 3: COUNT(DISTINCT item) — уникальные серии из самих timecodes
+            actual_n_ep = func.count(func.distinct(Timecode.item))
+            effective_n_ep = func.coalesce(
+                ep_count_sq.c.n_ep,
+                MediaCard.number_of_episodes,
+                actual_n_ep,
+            )
+
+            # Вес карточки: для фильмов = SUM(view_count),
+            # для сериалов = SUM(view_count) / effective_n_ep
+            _weight = case(
+                (MediaCard.media_type == "movie",
+                 func.sum(Timecode.view_count).cast(Float)),
+                else_=(func.sum(Timecode.view_count).cast(Float)
+                       / func.nullif(effective_n_ep, 0)),
+            )
+            weight_expr = _weight.label("weight")
+
+            pop_filter = [
+                Timecode.view_count > 0,
+                Timecode.counted_at >= cutoff,
+            ]
+            if search:
+                like = f"%{search}%"
+                pop_filter.append(
+                    MediaCard.title.ilike(like) | MediaCard.original_title.ilike(like)
+                )
+            base_q = (
+                select(Timecode.card_id, weight_expr)
+                .join(MediaCard, MediaCard.card_id == Timecode.card_id)
+                .outerjoin(ep_count_sq, ep_count_sq.c.tmdb_show_id == MediaCard.tmdb_id)
+                .where(*pop_filter)
+                .group_by(
+                    Timecode.card_id, MediaCard.media_type,
+                    ep_count_sq.c.n_ep, MediaCard.number_of_episodes,
+                )
+                .having(_weight > 0)
+                .order_by(_weight.desc(), func.max(Timecode.counted_at).desc())
+            )
+            total_pop = (
+                await db.execute(select(func.count()).select_from(base_q.subquery()))
+            ).scalar() or 0
+            pop_rows = (
+                await db.execute(
+                    base_q.offset((page - 1) * per_page).limit(per_page)
+                )
+            ).fetchall()
+            pop_ids = [r.card_id for r in pop_rows]
+            mc_map_pop = {
+                mc.card_id: mc
+                for mc in (
+                    await db.execute(select(MediaCard).where(MediaCard.card_id.in_(pop_ids)))
+                ).scalars().all()
+            } if pop_ids else {}
+            pop_results = []
+            for r in pop_rows:
+                mc = mc_map_pop.get(r.card_id)
+                if mc:
+                    entry = _media_card_to_entry(mc)
+                    entry["_np_views"] = round(r.weight, 2)
+                    pop_results.append(entry)
+            return {
+                "results": pop_results,
+                "page": page,
+                "total_pages": ceil(total_pop / per_page) if total_pop else 1,
+                "total_results": total_pop,
             }
 
         # Загрузка данных из файла
