@@ -402,17 +402,22 @@ class Totp2faPending(Base):
 
 
 class PluginSettings(Base):
-    """Настройки плагинов Lampa — синхронизируются между устройствами одного пользователя."""
+    """Настройки плагинов Lampa — синхронизируются между устройствами одного пользователя.
+
+    Изоляция по профилю: каждая комбинация (user_id, lampa_profile_id, plugin) — отдельная строка.
+    lampa_profile_id = '' означает «без профиля».
+    """
 
     __tablename__ = "plugin_settings"
 
-    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, primary_key=True)
-    plugin     = Column(String(100), nullable=False, primary_key=True)
-    settings   = Column(Text, nullable=False, default="{}", server_default="'{}'")
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    user_id          = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, primary_key=True)
+    lampa_profile_id = Column(String(100), nullable=False, default="", server_default="''", primary_key=True)
+    plugin           = Column(String(100), nullable=False, primary_key=True)
+    settings         = Column(Text, nullable=False, default="{}", server_default="'{}'")
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
-        return f"<PluginSettings(user_id={self.user_id}, plugin={self.plugin})>"
+        return f"<PluginSettings(user_id={self.user_id}, lampa_profile_id={self.lampa_profile_id!r}, plugin={self.plugin})>"
 
 
 
