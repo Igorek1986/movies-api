@@ -202,6 +202,43 @@ class Episode(Base):
         return f"<Episode(show={self.tmdb_show_id}, s{self.season:02d}e{self.episode:02d}, special={self.is_special})>"
 
 
+class MyShowsItem(Base):
+    """Глобальный маппинг myshows_id → tmdb_id/media_type. Общий для всех пользователей."""
+
+    __tablename__ = "myshows_items"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    myshows_id = Column(Integer, unique=True, nullable=False, index=True)
+    tmdb_id    = Column(Integer, nullable=False, index=True)
+    media_type = Column(String(10), nullable=False)  # tv / movie
+
+
+class MyShowsWatching(Base):
+    """Сериалы с непросмотренными эпизодами. Пишет только fetchFromMyShowsAPI (POST /watching)."""
+
+    __tablename__ = "myshows_watching"
+
+    device_id        = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True)
+    lampa_profile_id = Column(String(100), primary_key=True, server_default="")
+    item_id          = Column(Integer, ForeignKey("myshows_items.id", ondelete="CASCADE"), primary_key=True)
+    unwatched_count  = Column(Integer, nullable=True)
+    next_episode     = Column(String(20), nullable=True)    # "S01E03"
+    progress_marker  = Column(String(100), nullable=True)   # "3 из 12"
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class MyShowsUserStatus(Base):
+    """Статус сериала/фильма для конкретного пользователя и профиля Lampa."""
+
+    __tablename__ = "myshows_user_status"
+
+    device_id        = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True)
+    lampa_profile_id = Column(String(100), primary_key=True, server_default="")
+    item_id          = Column(Integer, ForeignKey("myshows_items.id", ondelete="CASCADE"), primary_key=True)
+    cache_type       = Column(String(20), nullable=False)   # watchlist / watched / cancelled
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class LampaProfile(Base):
     """Человеческое название для lampa_profile_id внутри устройства."""
 
