@@ -11,14 +11,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.templates import get_templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func, distinct
+from sqlalchemy import select, delete, func, distinct, case
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import Device, DeviceCode, Timecode, MediaCard, LampaProfile, User, TelegramUser, Episode
 from app import rate_limit, settings_cache
-from app.api.timecodes import _trim_to_limit
+from app.api.timecodes import _trim_to_limit, _update_card_views
 
 
 def _import_ctx(user: User) -> dict:
@@ -1231,6 +1231,78 @@ async def api_get_card_timecodes(
     return rows
 
 
+@router.get("/api/card-views")
+async def api_get_card_views(
+    card_id: str = Query(...),
+    device_id: int = Query(...),
+    profile_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает персональную статистику просмотров карточки для device+profile."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(device_id, current_user, db)
+
+    lampa_profile = profile_id if profile_id is not None else ""
+
+    # Для фильма: SUM(view_count) = сколько раз просмотрен этим профилем
+    # Для сериала: COUNT(item WHERE counted_at IS NOT NULL) = кол-во просмотренных серий
+    if card_id.endswith("_movie"):
+        total_views = (await db.execute(
+            select(func.sum(Timecode.view_count)).where(
+                Timecode.device_id == device_id,
+                Timecode.lampa_profile_id == lampa_profile,
+                Timecode.card_id == card_id,
+            )
+        )).scalar() or 0
+        if total_views == 0:
+            return {"completed_count": 0}
+        return {"completed_count": int(total_views), "media_type": "movie"}
+
+    ep_count = (await db.execute(
+        select(func.count()).where(
+            Timecode.device_id == device_id,
+            Timecode.lampa_profile_id == lampa_profile,
+            Timecode.card_id == card_id,
+            Timecode.counted_at.isnot(None),
+        )
+    )).scalar() or 0
+
+    if ep_count == 0:
+        return {"completed_count": 0}
+
+    # TV — число серий: episodes (без спецвыпусков) → media_cards → COUNT(items в timecodes)
+    mc = (await db.execute(select(MediaCard).where(MediaCard.card_id == card_id))).scalar_one_or_none()
+    tmdb_id = mc.tmdb_id if mc else None
+    n_ep = 0
+    if tmdb_id:
+        n_ep = (await db.execute(
+            select(func.count()).where(
+                Episode.tmdb_show_id == tmdb_id,
+                Episode.is_special == False,
+            )
+        )).scalar() or 0
+    if n_ep == 0 and mc:
+        n_ep = mc.number_of_episodes or 0
+    if n_ep == 0:
+        # Фолбэк: реальное кол-во уникальных items в timecodes для этой карточки
+        n_ep = (await db.execute(
+            select(func.count(func.distinct(Timecode.item))).where(
+                Timecode.card_id == card_id,
+                Timecode.view_count > 0,
+            )
+        )).scalar() or 0
+
+    completed_count = round(ep_count / n_ep, 4) if n_ep else None
+    return {
+        "completed_count": completed_count,
+        "media_type": "tv",
+        "watched_episodes": ep_count,
+        "total_episodes": n_ep or None,
+    }
+
+
 class _SetTimecodeBody(BaseModel):
     device_id: int
     card_id: str
@@ -1270,15 +1342,25 @@ async def api_set_timecode(
     time_sec = round(duration * pct / 100) if duration else 0
     new_data = json.dumps({"time": time_sec, "duration": duration, "percent": pct})
 
+    today = _date.today()
+    counted = await _update_card_views(db, body.device_id, body.profile_id, body.card_id, body.item, pct, today)
+
     stmt = pg_insert(Timecode).values(
         device_id=body.device_id,
         lampa_profile_id=body.profile_id,
         card_id=body.card_id,
         item=body.item,
         data=new_data,
-    ).on_conflict_do_update(
+        counted_at=today if counted else None,
+        view_count=1 if counted else 0,
+    )
+    stmt = stmt.on_conflict_do_update(
         constraint="uq_timecode_unique",
-        set_={"data": new_data},
+        set_={
+            "data": new_data,
+            "counted_at": func.coalesce(stmt.excluded.counted_at, Timecode.counted_at),
+            "view_count": Timecode.view_count + stmt.excluded.view_count,
+        },
     )
     await db.execute(stmt)
     await db.commit()

@@ -66,6 +66,7 @@ DEFAULTS: dict[str, str] = {
     "rate_2fa_max": "5",
     "rate_2fa_window_sec": "900",
     "sync_cooldown_sec": "86400",
+    "popular_period_days": "30",
     # ── Analytics ──────────────────────────────────────────────────────────────
     "yandex_metrika_enabled": "0",
     "yandex_metrika_id": "",
@@ -127,6 +128,7 @@ LABELS: dict[str, str] = {
     "rate_2fa_max": "Rate: 2FA — попыток",
     "rate_2fa_window_sec": "Rate: 2FA — окно (сек)",
     "sync_cooldown_sec": "MyShows cooldown (сек)",
+    "popular_period_days": "Популярное — период (дней)",
     "yandex_metrika_enabled": "Яндекс.Метрика — включена",
     "yandex_metrika_id": "Яндекс.Метрика ID",
     "google_analytics_enabled": "Google Analytics — включена",
@@ -191,6 +193,7 @@ GROUPS: list[tuple[str, list[str]]] = [
             "premium_warn_days",
             "premium_extend_all_days",
             "watched_threshold",
+            "popular_period_days",
             "daily_task_hour",
             "session_ttl_days",
             "session_renew_days",

@@ -13,25 +13,22 @@ const _WATCHED_THR   = 90;
   const params   = new URLSearchParams(location.search);
   const backUrl  = params.get('back') || '/history';
 
-  let deviceId  = params.get('device_id') ? parseInt(params.get('device_id')) : null;
-  let profileId = params.has('profile_id') ? params.get('profile_id') : null;
+  // Всегда берём device/profile из localStorage — там актуальный выбор пользователя.
+  // URL-параметры используем только как fallback (когда localStorage пуст).
+  let deviceId = null, profileId = null;
+  try {
+    const prefs = JSON.parse(localStorage.getItem('history_prefs') || '{}');
+    if (prefs.device_id) deviceId = parseInt(prefs.device_id);
+    if (prefs.hasOwnProperty('profile_id')) profileId = prefs.profile_id;
+  } catch { /* ignore */ }
   if (!deviceId) {
-    try {
-      const prefs = JSON.parse(localStorage.getItem('history_prefs') || '{}');
-      if (prefs.device_id) {
-        deviceId  = parseInt(prefs.device_id);
-        if (profileId === null && prefs.hasOwnProperty('profile_id')) profileId = prefs.profile_id;
-      }
-    } catch { /* ignore */ }
+    deviceId  = params.get('device_id') ? parseInt(params.get('device_id')) : null;
+    if (profileId === null) profileId = params.has('profile_id') ? params.get('profile_id') : null;
   }
 
   function goBack(e) {
     e.preventDefault();
-    if (history.length > 1) {
-      history.back();
-    } else {
-      location.href = backUrl;
-    }
+    location.href = backUrl;
   }
 
   const backBtn = document.getElementById('cardBack');
@@ -108,6 +105,25 @@ const _WATCHED_THR   = 90;
 
     if (!deviceId) return;
 
+    // Счётчик просмотров
+    function refreshViewCount() {
+      const qp = profileId != null ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+      fetch(`/api/card-views?card_id=${encodeURIComponent(cardId)}&device_id=${deviceId}${qp}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data || !data.completed_count) return;
+          const el = document.getElementById('cardViewCount');
+          if (!el) return;
+          if (data.media_type === 'tv') return; // для сериалов не показываем
+          const times = Math.round(data.completed_count);
+          el.textContent = times === 1 ? '👁 1 просмотр' : `👁 ${times} ${_pluralView(times)}`;
+          el.style.display = 'block';
+        })
+        .catch(() => {});
+    }
+    refreshViewCount();
+    window._refreshViewCount = refreshViewCount;
+
     if (card.media_type === 'movie') {
       await _loadMovieProgress(card, cardId, deviceId, profileId);
     } else {
@@ -128,6 +144,20 @@ const _WATCHED_THR   = 90;
 
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function _pluralView(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'просмотр';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'просмотра';
+  return 'просмотров';
+}
+
+function _pluralEp(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'серия';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'серии';
+  return 'серий';
+}
 
 function _fmtTime(sec) {
   if (!sec && sec !== 0) return '';
@@ -769,6 +799,8 @@ async function _loadMovieProgress(card, cardId, deviceId, profileId) {
       });
       syncDeleteBtn(newPct);
       if (!inHistory) syncWatchBtn(true); // первое сохранение = добавление в историю
+      // Небольшая задержка чтобы сервер успел закоммитить транзакцию
+      setTimeout(() => { if (window._refreshViewCount) window._refreshViewCount(); }, 300);
     }
 
     deleteBtn.addEventListener('click', async () => {
