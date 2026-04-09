@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     Text,
+    JSON,
 )
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -250,6 +251,8 @@ class LampaProfile(Base):
     name             = Column(String(100), nullable=False, default="")
     icon             = Column(String(20), nullable=True)   # e.g. "id1", "id3"
     favorite         = Column(Text, nullable=True)         # JSON: Lampa favorite object
+    child            = Column(Boolean, nullable=False, server_default="false")
+    params           = Column(JSON, nullable=False, server_default="{}")
 
     __table_args__ = (
         UniqueConstraint("device_id", "lampa_profile_id", name="uq_lampa_profile"),
