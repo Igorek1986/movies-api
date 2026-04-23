@@ -511,6 +511,22 @@
   </details>
 
 </main>
+<!-- Модальное окно редактирования params профиля -->
+<dialog id="lpParamsDialog">
+  <article>
+    <header>
+      <strong>Параметры профиля</strong>
+    </header>
+    <p class="muted small">JSON без фигурных скобок, например: <code>"surs": true, "forKids": true</code></p>
+    <textarea id="lpParamsTextarea" rows="4" style="font-family:monospace;font-size:.88rem" placeholder='"surs": true, "forKids": true'></textarea>
+    <small id="lpParamsError" style="color:var(--pico-del-color);display:none"></small>
+    <footer>
+      <button id="lpParamsSaveBtn">Сохранить</button>
+      <button class="outline" id="lpParamsCancelBtn">Отмена</button>
+    </footer>
+  </article>
+</dialog>
+
 {% endblock %}
 
 {% block scripts %}

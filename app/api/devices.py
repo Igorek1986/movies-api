@@ -586,7 +586,8 @@ async def api_profile_ids(
     lp_result = await db.execute(
         select(LampaProfile).where(LampaProfile.device_id == device_id)
     )
-    lp_map = {lp.lampa_profile_id: lp.name for lp in lp_result.scalars().all()}
+    lp_rows = lp_result.scalars().all()
+    lp_map = {lp.lampa_profile_id: lp for lp in lp_rows}
 
     # Профили из таймкодов (могут быть не в LampaProfile)
     tc_result = await db.execute(
@@ -615,9 +616,19 @@ async def api_profile_ids(
     основной_has_tc = "" in tc_ids
     основной_available = основной_has_tc or (limit is None or lp_count < limit)
 
-    profiles = [{"profile_id": pid, "name": lp_map.get(pid, ""), "timecodes_count": tc_counts.get(pid, 0)} for pid in all_ids]
+    def _lp_dict(pid):
+        lp = lp_map.get(pid)
+        return {
+            "profile_id": pid,
+            "name": lp.name if lp else "",
+            "timecodes_count": tc_counts.get(pid, 0),
+            "child": lp.child if lp else False,
+            "params": lp.params if lp else {},
+        }
+
+    profiles = [_lp_dict(pid) for pid in all_ids]
     if основной_has_tc:
-        profiles.insert(0, {"profile_id": "", "name": "Основной", "timecodes_count": tc_counts.get("", 0)})
+        profiles.insert(0, {"profile_id": "", "name": "Основной", "timecodes_count": tc_counts.get("", 0), "child": False, "params": {}})
 
     return {"profiles": profiles, "основной_available": основной_available}
 
@@ -776,6 +787,42 @@ async def api_delete_lampa_profile(
     await db.delete(lp)
     await db.commit()
     return {"ok": True}
+
+
+class _ProfileUpdateBody(BaseModel):
+    device_id: int
+    profile_id: str
+    child: bool | None = None
+    params: dict | None = None
+
+
+@router.patch("/api/lampa-profile")
+async def api_update_lampa_profile(
+    body: _ProfileUpdateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обновляет child и/или params LampaProfile (веб-интерфейс)."""
+    if not current_user:
+        raise HTTPException(status_code=401)
+    await _get_device_or_404(body.device_id, current_user, db)
+
+    lp = (await db.execute(
+        select(LampaProfile).where(
+            LampaProfile.device_id == body.device_id,
+            LampaProfile.lampa_profile_id == body.profile_id,
+        )
+    )).scalar_one_or_none()
+    if not lp:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    if body.child is not None:
+        lp.child = body.child
+    if body.params is not None:
+        lp.params = body.params
+
+    await db.commit()
+    return {"ok": True, "child": lp.child, "params": lp.params}
 
 
 @router.get("/api/lampa-profile/quota")
@@ -1191,7 +1238,7 @@ async def api_mark_watched(
         data=data,
     ).on_conflict_do_update(
         constraint="uq_timecode_unique",
-        set_={"data": data},
+        set_={"data": data, "updated_at": func.now()},
     )
     await db.execute(stmt)
     await db.commit()
@@ -1358,6 +1405,7 @@ async def api_set_timecode(
         constraint="uq_timecode_unique",
         set_={
             "data": new_data,
+            "updated_at": func.now(),
             "counted_at": func.coalesce(stmt.excluded.counted_at, Timecode.counted_at),
             "view_count": Timecode.view_count + stmt.excluded.view_count,
         },
@@ -1435,7 +1483,7 @@ async def api_unmark_special(
         data=data,
     ).on_conflict_do_update(
         constraint="uq_timecode_unique",
-        set_={"data": data},
+        set_={"data": data, "updated_at": func.now()},
     )
     await db.execute(stmt)
     await db.commit()

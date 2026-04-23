@@ -490,6 +490,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div style="font-size:.8rem;color:var(--pico-muted-color)">
                   ${p.profile_id ? `ID: <code>${p.profile_id}</code> · ` : ''}таймкодов: <strong>${p.timecodes_count}</strong>
                 </div>
+                ${p.profile_id ? `<div style="margin-top:.35rem;display:flex;gap:.35rem;flex-wrap:wrap">
+                  <button class="btn-sm lp-child-btn ${p.child ? '' : 'outline'}" data-pid="${p.profile_id}" data-child="${p.child}" style="${p.child ? 'background:var(--pico-primary);color:#fff;border-color:var(--pico-primary)' : ''}">Детский</button>
+                  ${(function(){ const hasParams = p.params && Object.keys(p.params).length > 0; return `<button class="btn-sm lp-params-btn ${hasParams ? '' : 'outline'}" data-pid="${p.profile_id}" data-params='${JSON.stringify(p.params || {})}' style="${hasParams ? 'background:var(--pico-primary);color:#fff;border-color:var(--pico-primary)' : ''}">Параметры</button>`; })()}
+                </div>` : ''}
               </div>
               <div style="display:flex;gap:.35rem;flex-shrink:0">
                 ${p.profile_id ? `<button class="btn-sm outline lp-rename-btn" data-pid="${p.profile_id}" data-name="${p.name || ''}" title="Переименовать">✎</button>` : ''}
@@ -499,6 +503,59 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`
           ).join('')
         }</div>`;
+
+        lpList.querySelectorAll('.lp-child-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const newChild = btn.dataset.child !== 'true';
+            await fetch('/api/lampa-profile', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ device_id: parseInt(deviceId), profile_id: btn.dataset.pid, child: newChild }),
+            });
+            _lpLoad();
+          });
+        });
+
+        const dialog     = document.getElementById('lpParamsDialog');
+        const textarea   = document.getElementById('lpParamsTextarea');
+        const errorEl    = document.getElementById('lpParamsError');
+        const saveBtn    = document.getElementById('lpParamsSaveBtn');
+        const cancelBtn  = document.getElementById('lpParamsCancelBtn');
+
+        lpList.querySelectorAll('.lp-params-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const params = JSON.parse(btn.dataset.params || '{}');
+            const inner = JSON.stringify(params).replace(/^\{|\}$/g, '').trim();
+            textarea.value = inner;
+            errorEl.style.display = 'none';
+            errorEl.textContent = '';
+            dialog._pid = btn.dataset.pid;
+            dialog.showModal();
+          });
+        });
+
+        cancelBtn.onclick = () => dialog.close();
+
+        saveBtn.onclick = async () => {
+          const raw = textarea.value.trim();
+          let parsed;
+          try {
+            parsed = raw ? JSON.parse('{' + raw + '}') : {};
+          } catch(e) {
+            errorEl.textContent = 'Ошибка JSON: ' + e.message;
+            errorEl.style.display = 'block';
+            return;
+          }
+          saveBtn.disabled = true;
+          await fetch('/api/lampa-profile', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: parseInt(deviceId), profile_id: dialog._pid, params: parsed }),
+          });
+          saveBtn.disabled = false;
+          dialog.close();
+          _lpLoad();
+        };
 
         lpList.querySelectorAll('.lp-rename-btn').forEach(btn => {
           btn.addEventListener('click', async () => {

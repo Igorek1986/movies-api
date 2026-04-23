@@ -1274,6 +1274,8 @@ async def list_profiles(
                 "name": lp.name,
                 "icon": lp.icon,
                 "timecodes_count": cnt,
+                "child": lp.child,
+                "params": lp.params or {},
             }
         )
 
@@ -1378,6 +1380,8 @@ async def create_profile(
 class _RenameProfileBody(BaseModel):
     name: str | None = None
     icon: str | None = None
+    child: bool | None = None
+    params: dict | None = None
 
 
 @router.patch("/profiles/{profile_id}")
@@ -1387,11 +1391,11 @@ async def rename_profile(
     device: Device = Depends(get_device_by_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Обновляет имя и/или иконку LampaProfile. Аутентификация: ?token=KEY"""
+    """Обновляет поля LampaProfile. Аутентификация: ?token=KEY"""
     _require_device(device)
 
-    if body.name is None and body.icon is None:
-        raise HTTPException(status_code=400, detail="Нужно передать name или icon")
+    if body.name is None and body.icon is None and body.child is None and body.params is None:
+        raise HTTPException(status_code=400, detail="Нужно передать хотя бы одно поле")
 
     lp = (
         await db.execute(
@@ -1412,6 +1416,12 @@ async def rename_profile(
 
     if body.icon is not None:
         lp.icon = body.icon.strip()[:20] or None
+
+    if body.child is not None:
+        lp.child = body.child
+
+    if body.params is not None:
+        lp.params = body.params
 
     await db.commit()
 
