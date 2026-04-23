@@ -1238,7 +1238,7 @@ async def api_mark_watched(
         data=data,
     ).on_conflict_do_update(
         constraint="uq_timecode_unique",
-        set_={"data": data},
+        set_={"data": data, "updated_at": func.now()},
     )
     await db.execute(stmt)
     await db.commit()
@@ -1405,6 +1405,7 @@ async def api_set_timecode(
         constraint="uq_timecode_unique",
         set_={
             "data": new_data,
+            "updated_at": func.now(),
             "counted_at": func.coalesce(stmt.excluded.counted_at, Timecode.counted_at),
             "view_count": Timecode.view_count + stmt.excluded.view_count,
         },
@@ -1482,7 +1483,7 @@ async def api_unmark_special(
         data=data,
     ).on_conflict_do_update(
         constraint="uq_timecode_unique",
-        set_={"data": data},
+        set_={"data": data, "updated_at": func.now()},
     )
     await db.execute(stmt)
     await db.commit()
