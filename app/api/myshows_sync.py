@@ -359,13 +359,32 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
 
                     if needs_ep_sync:
                         ep_rows = []
+                        special_counter: dict[int, int] = {}  # season → следующий отрицательный индекс
+                        seen_ep_ids: set[int] = set()
                         for ep in show_details.get("episodes", []):
+                            ep_id = ep.get("id")
+                            if ep_id and ep_id in seen_ep_ids:
+                                continue
                             snum = ep.get("seasonNumber")
                             enum = ep.get("episodeNumber")
-                            if snum is None or enum is None:
-                                continue
-                            if not ep.get("airDate") and not ep.get("airDateUTC"):
-                                continue  # эпизод без даты — анонс, пропускаем
+                            is_special = bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0
+                            if is_special:
+                                if snum is None:
+                                    snum = 0
+                                # Несколько спецов с episodeNumber=0 в одном сезоне —
+                                # назначаем уникальные отрицательные номера (-1, -2, -3…)
+                                if enum is None or enum == 0:
+                                    cnt = special_counter.get(snum, 0) - 1
+                                    special_counter[snum] = cnt
+                                    enum = cnt
+                                # Спецэпизоды сохраняем всегда, даже без airDate
+                            else:
+                                if snum is None or enum is None:
+                                    continue
+                                if not ep.get("airDate") and not ep.get("airDateUTC"):
+                                    continue  # анонс, пропускаем
+                            if ep_id:
+                                seen_ep_ids.add(ep_id)
                             runtime_min = ep.get("runtime") or 0
                             ep_rows.append({
                                 "tmdb_show_id": tmdb_id,
@@ -373,8 +392,8 @@ async def _sync_generator(device: Device, ms_login: str, ms_password: str, db: A
                                 "episode":       enum,
                                 "title":         ep.get("title") or None,
                                 "duration_sec":  runtime_min * 60 if runtime_min else None,
-                                "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
-                                "myshows_ep_id": ep.get("id"),
+                                "is_special":    is_special,
+                                "myshows_ep_id": ep_id,
                                 "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
                                 "air_date":      _parse_air_date(ep),
                             })
