@@ -261,40 +261,48 @@ async def sync_episodes(mc: MediaCard, db: AsyncSession, client: httpx.AsyncClie
         return False
 
     rows = []
+    orig = mc.original_title or ""
+    special_counter: dict[int, int] = {}  # season → следующий отрицательный индекс
+    seen_ep_ids: set[int] = set()
     for ep in raw_episodes:
+        ep_id = ep.get("id")
+        if ep_id and ep_id in seen_ep_ids:
+            continue
         snum = ep.get("seasonNumber")
         enum = ep.get("episodeNumber")
-        if snum is None or enum is None:
-            continue
-        if not ep.get("airDate") and not ep.get("airDateUTC"):
-            continue  # эпизод без даты — анонс, пропускаем
+        is_special = bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0
+        if is_special:
+            if snum is None:
+                snum = 0
+            # Несколько спецов с episodeNumber=0 в одном сезоне —
+            # назначаем уникальные отрицательные номера (-1, -2, -3…)
+            if enum is None or enum == 0:
+                cnt = special_counter.get(snum, 0) - 1
+                special_counter[snum] = cnt
+                enum = cnt
+            # Спецэпизоды сохраняем всегда, даже без airDate
+        else:
+            if snum is None or enum is None:
+                continue
+            if not ep.get("airDate") and not ep.get("airDateUTC"):
+                continue  # анонс, пропускаем
+        if ep_id:
+            seen_ep_ids.add(ep_id)
         runtime_min = ep.get("runtime") or 0
-        duration_sec = runtime_min * 60 if runtime_min else None
-        orig = mc.original_title or ""
         rows.append({
             "tmdb_show_id":  mc.tmdb_id,
             "season":        snum,
             "episode":       enum,
             "title":         ep.get("title") or None,
-            "duration_sec":  duration_sec,
-            "is_special":    bool(ep.get("isSpecial", False)) or enum == 0 or snum == 0,
-            "myshows_ep_id": ep.get("id"),
+            "duration_sec":  runtime_min * 60 if runtime_min else None,
+            "is_special":    is_special,
+            "myshows_ep_id": ep_id,
             "hash":          lampa_hash(build_episode_hash_string(snum, enum, orig)),
             "air_date":      _parse_air_date(ep),
         })
 
     if not rows:
         return False
-
-    # Дедупликация: MyShows иногда возвращает один эпизод дважды
-    seen: set[tuple] = set()
-    deduped = []
-    for r in rows:
-        key = (r["season"], r["episode"])
-        if key not in seen:
-            seen.add(key)
-            deduped.append(r)
-    rows = deduped
 
     # Удаляем старые эпизоды шоу и вставляем заново
     await db.execute(delete(Episode).where(Episode.tmdb_show_id == mc.tmdb_id))
