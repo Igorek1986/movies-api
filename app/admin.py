@@ -11,7 +11,7 @@ from sqlalchemy import select, func
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import User, Device, Timecode, Session, TelegramUser, USER_ROLES
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, text
 from app.api.dependencies import get_current_user
 from app import rate_limit, settings_cache
 
@@ -129,12 +129,24 @@ async def admin_dashboard(
             "block_reason": u.block_reason,
         })
 
+    result_date = await db.execute(
+        text("SELECT value FROM app_settings WHERE key = 'rutor_last_parsed_at'")
+    )
+    row = result_date.fetchone()
+    parser_date = ""
+    if row:
+        try:
+            parser_date = datetime.fromisoformat(row[0]).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
     return templates.TemplateResponse("admin_dashboard.html", {
         "request": request,
         "user": current_user,
         "users": users_data,
         "roles": USER_ROLES,
         "success": request.query_params.get("success"),
+        "parser_date": parser_date,
     })
 
 
@@ -466,6 +478,34 @@ async def run_expiry_check(
     await run_premium_expiry_check()
     from urllib.parse import quote
     msg = quote("Проверка истечения Premium выполнена")
+    return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Сброс даты парсера rutor
+# ---------------------------------------------------------------------------
+
+@router.post("/parser-reset-date")
+async def parser_reset_date(
+    request: Request,
+    response: Response,
+    date: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if not await _check_admin(request, response, db):
+        raise HTTPException(status_code=403)
+    from urllib.parse import quote
+    try:
+        t = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return RedirectResponse(url="/admin?error=" + quote("Неверная дата"), status_code=302)
+    await db.execute(
+        text("INSERT INTO app_settings (key, value) VALUES ('rutor_last_parsed_at', :v) "
+             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"),
+        {"v": t.isoformat()}
+    )
+    await db.commit()
+    msg = quote(f"Дата парсера сброшена на {t.strftime('%d.%m.%Y')}")
     return RedirectResponse(url=f"/admin?success={msg}", status_code=302)
 
 
