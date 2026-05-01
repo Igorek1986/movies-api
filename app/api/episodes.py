@@ -94,6 +94,7 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: 
     orig = _normalize(mc.original_title)
     year = mc.year  # строка "2020" или None
     orig_en = _normalize(title_en) if title_en else None
+    orig_ru = _normalize(mc.title) if mc.title else None
 
     # 1. Поиск по IMDB ID
     if mc.imdb_id:
@@ -104,14 +105,16 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: 
         })
         if result and isinstance(result, dict):
             found_title = _normalize(result.get("titleOriginal") or result.get("title") or "")
-            # Верифицируем по оригинальному или английскому названию
+            found_title_ru = _normalize(result.get("title") or "")
+            # Верифицируем по оригинальному, английскому или русскому названию
             title_match = (found_title == orig or found_title in orig or orig in found_title or
-                           (orig_en and (found_title == orig_en or found_title in orig_en or orig_en in found_title)))
+                           (orig_en and (found_title == orig_en or found_title in orig_en or orig_en in found_title)) or
+                           (orig_ru and (found_title_ru == orig_ru or found_title_ru in orig_ru or orig_ru in found_title_ru)))
             if found_title and title_match:
                 logger.info(f"MyShows link: {mc.card_id} → show_id={result['id']} (imdb)")
                 return result["id"]
             else:
-                logger.info(f"MyShows link: IMDB match rejected '{found_title}' != '{orig}' / '{orig_en}'")
+                logger.info(f"MyShows link: IMDB match rejected '{found_title}' != '{orig}' / '{orig_en}' / '{orig_ru}'")
 
     # 2. Поиск по оригинальному названию + году
     params: dict = {"search": {"query": mc.original_title}}
@@ -129,9 +132,10 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: 
             shows.append(show)
 
     def _title_match(show, query: str, year: str | None) -> bool:
-        t = _normalize(show.get("titleOriginal") or show.get("title") or "")
+        t_orig = _normalize(show.get("titleOriginal") or "")
+        t_title = _normalize(show.get("title") or "")
         y = str(show.get("year") or "")
-        return t == query and (not year or y == year)
+        return (t_orig == query or t_title == query) and (not year or y == year)
 
     # Точное совпадение по оригинальному названию + году
     for show in shows:
@@ -159,8 +163,9 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: 
                 return show["id"]
         if with_year:
             for show in shows_list:
-                t = _normalize(show.get("titleOriginal") or show.get("title") or "")
-                if t == query:
+                t_orig = _normalize(show.get("titleOriginal") or "")
+                t_title = _normalize(show.get("title") or "")
+                if t_orig == query or t_title == query:
                     return show["id"]
         return None
 
@@ -202,16 +207,33 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: 
                         logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_en_short, year±1={adj_year})")
                         return sid
 
+    # Поиск по русскому названию (для аниме и нелатинских шоу)
+    if orig_ru and orig_ru != orig:
+        ru_result = await _search_catalog(mc.title, year)
+        ru_shows = _extract_shows(ru_result)
+        sid = _find_in(ru_shows, orig_ru, year)
+        if sid:
+            logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_ru+year)")
+            return sid
+        if year:
+            ru_result_ny = await _search_catalog(mc.title, None)
+            ru_shows_ny = _extract_shows(ru_result_ny)
+            sid = _find_in(ru_shows_ny, orig_ru, None)
+            if sid:
+                logger.info(f"MyShows link: {mc.card_id} → show_id={sid} (catalog_ru)")
+                return sid
+
     # Fallback: оригинальное название без года
     if year:
         for show in shows:
-            t = _normalize(show.get("titleOriginal") or show.get("title") or "")
-            if t == orig:
+            t_orig = _normalize(show.get("titleOriginal") or "")
+            t_title = _normalize(show.get("title") or "")
+            if t_orig == orig or t_title == orig:
                 logger.info(f"MyShows link: {mc.card_id} → show_id={show['id']} (catalog, no year)")
                 return show["id"]
 
     top = [(s.get("titleOriginal") or s.get("title"), s.get("year")) for s in shows[:3]]
-    logger.info(f"MyShows link: {mc.card_id} not found for '{mc.original_title}' / '{title_en}' ({year}), catalog top-3: {top}")
+    logger.info(f"MyShows link: {mc.card_id} not found for '{mc.original_title}' / '{title_en}' / '{mc.title}' ({year}), catalog top-3: {top}")
     return None
 
 
