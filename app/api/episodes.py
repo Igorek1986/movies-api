@@ -122,11 +122,8 @@ async def find_myshows_show(mc: MediaCard, client: httpx.AsyncClient, title_en: 
         params["search"]["year"] = int(year)
 
     result = await _ms_rpc(client, "shows.GetCatalog", params)
-    if not result:
-        return None
-
     shows = []
-    for item in result:
+    for item in (result or []):
         show = item.get("show") if isinstance(item, dict) and "show" in item else item
         if show and isinstance(show, dict):
             shows.append(show)
