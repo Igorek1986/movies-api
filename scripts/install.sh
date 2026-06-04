@@ -1317,18 +1317,36 @@ function do_status {
 # ---------------------------------------------------------------------------
 
 # arrow_menu TITLE item1 item2 ... — returns selected index in MENU_RESULT
+#
+# Управление:
+#   ↑↓ или j/k      — перемещение (с заворачиванием по кругу)
+#   1-9             — мгновенный выбор пункта по номеру
+#   Home/End, g/G   — первый / последний пункт
+#   Enter           — подтвердить
 function arrow_menu {
     local title="$1"; shift
     local items=("$@")
     local count=${#items[@]}
     local selected=0
+    # Кол-во строк кадра: 5 шапка (пустая+рамка+title+рамка+пустая) + пункты + 2 (пустая+подсказка)
+    local total_lines=$(( count + 7 ))
+    local first_draw=true
 
-    # Hide cursor
+    # Hide cursor; гарантированно возвращаем его при любом выходе
     tput civis 2>/dev/null || true
     trap 'tput cnorm 2>/dev/null || true' EXIT INT TERM
 
     while true; do
-        clear
+        if $first_draw; then
+            clear
+            first_draw=false
+        else
+            # Перерисовка «на месте»: вверх на высоту кадра и очистка до конца экрана.
+            # Убирает мерцание, которое даёт полный clear на каждый кадр.
+            printf '\033[%dA' "$total_lines"
+        fi
+        printf '\033[J'
+
         echo ""
         echo -e "${BLUE}================================================${NC}"
         printf "${BLUE}  %-44s${NC}\n" "$title"
@@ -1336,29 +1354,51 @@ function arrow_menu {
         echo ""
 
         for i in "${!items[@]}"; do
+            local num=$(( i + 1 ))
             if [ "$i" -eq "$selected" ]; then
-                echo -e "  ${GREEN}▶ ${items[$i]}${NC}"
+                echo -e "  ${GREEN}▶ ${num}) ${items[$i]}${NC}"
             else
-                echo -e "    ${items[$i]}"
+                echo -e "    ${num}) ${items[$i]}"
             fi
         done
         echo ""
-        echo -e "  ${YELLOW}↑↓ — navigate   Enter — select${NC}"
+        echo -e "  ${YELLOW}↑↓/jk — move   1-${count} — jump   Enter — select${NC}"
 
         # Read key
         local key
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
-            IFS= read -rsn2 key
-            case "$key" in
+            # Управляющая последовательность; целочисленный таймаут (bash 3.2+),
+            # чтобы одиночный Esc не подвисал в ожидании остатка последовательности
+            local seq
+            IFS= read -rsn2 -t 1 seq || seq=""
+            case "$seq" in
                 '[A') selected=$(( (selected - 1 + count) % count )) ;;  # Up
                 '[B') selected=$(( (selected + 1) % count ))          ;;  # Down
+                '[H'|'OH') selected=0              ;;  # Home
+                '[F'|'OF') selected=$(( count - 1 )) ;;  # End
             esac
-        elif [[ "$key" == "" ]]; then
-            # Enter
-            tput cnorm 2>/dev/null || true
-            MENU_RESULT=$selected
-            return 0
+        else
+            case "$key" in
+                k|K) selected=$(( (selected - 1 + count) % count )) ;;  # vim up
+                j|J) selected=$(( (selected + 1) % count ))          ;;  # vim down
+                g)   selected=0              ;;
+                G)   selected=$(( count - 1 )) ;;
+                [1-9])
+                    # Мгновенный выбор по номеру (если такой пункт существует)
+                    if [ "$key" -le "$count" ]; then
+                        tput cnorm 2>/dev/null || true
+                        MENU_RESULT=$(( key - 1 ))
+                        return 0
+                    fi
+                    ;;
+                "")
+                    # Enter
+                    tput cnorm 2>/dev/null || true
+                    MENU_RESULT=$selected
+                    return 0
+                    ;;
+            esac
         fi
     done
 }
