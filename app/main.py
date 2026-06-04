@@ -35,6 +35,7 @@ from app.api import telegram as telegram_router
 from app.api import tg_miniapp as tg_miniapp_router
 from app.api import episodes as episodes_router
 from app.api import plugin_settings as plugin_settings_router
+from app.api import backup as backup_router
 from app.admin import router as admin_router
 from app.api.dependencies import get_device_by_token
 from app.api.timecodes import load_device_timecodes, get_watched_movie_ids
@@ -181,6 +182,7 @@ app.include_router(admin_router)
 app.include_router(telegram_router.router)
 app.include_router(tg_miniapp_router.router)
 app.include_router(plugin_settings_router.router)
+app.include_router(backup_router.router)
 
 
 @app.middleware("http")
@@ -921,7 +923,6 @@ async def get_category(
     request: Request,
     page: int = 1,
     per_page: int = 20,
-    language: str = "ru",
     token: str = Query(None),
     profile_id: str = Query(None),
     min_progress: int = Query(None, ge=1, le=100),
