@@ -81,6 +81,9 @@ async def export_backup(
                 "card_id": t.card_id,
                 "item": t.item,
                 "data": t.data,
+                # Момент последнего просмотра — по нему строится история на новом
+                # сервисе; без него вся история съедет на дату импорта.
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
             }
             if t.view_count:
                 tc["view_count"] = t.view_count
